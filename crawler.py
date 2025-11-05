@@ -18,13 +18,15 @@ import traceback
 import asyncio
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
+import config
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- 2. 상수 및 기본 설정 ---
-DATABASE = 'webtoons.db'
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
-}
-WEEKDAYS = {'mon': 'mon', 'tue': 'tue', 'wed': 'wed', 'thu': 'thu', 'fri': 'fri', 'sat': 'sat', 'sun': 'sun', 'daily': 'daily', 'dailyPlus': 'daily'}
+DATABASE = config.DATABASE_PATH
+HEADERS = config.CRAWLER_HEADERS
+WEEKDAYS = config.WEEKDAYS
 
 
 # --- 3. 데이터베이스 초기 설정 함수 (변경 없음) ---
@@ -32,7 +34,7 @@ def setup_database():
     """데이터베이스와 테이블이 없는 경우 초기 설정"""
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-    
+
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS webtoons (
         title_id INTEGER PRIMARY KEY,
@@ -41,7 +43,7 @@ def setup_database():
         weekday TEXT,
         status TEXT NOT NULL
     )""")
-    
+
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS subscriptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +51,7 @@ def setup_database():
         title_id INTEGER NOT NULL,
         UNIQUE(email, title_id)
     )""")
-    
+
     conn.commit()
     conn.close()
 
@@ -74,7 +76,7 @@ async def _fetch_paginated_finished_candidates(session):
     print("\n'완결/장기 휴재 후보' 목록 확보를 위해 페이지네이션 수집 시작...")
     while page <= MAX_PAGES:
         try:
-            api_url = f"https://comic.naver.com/api/webtoon/titlelist/finished?order=UPDATE&page={page}&pageSize=100"
+            api_url = f"{config.NAVER_API_URL}/finished?order=UPDATE&page={page}&pageSize=100"
             webtoons_on_page = await _fetch_from_api(session, api_url)
 
             if not webtoons_on_page:
@@ -84,7 +86,7 @@ async def _fetch_paginated_finished_candidates(session):
             for webtoon in webtoons_on_page:
                 if webtoon['titleId'] not in all_candidates:
                     all_candidates[webtoon['titleId']] = webtoon
-            
+
             print(f"  -> {page} 페이지 수집 완료. (현재 후보군: {len(all_candidates)}개)")
             page += 1
             await asyncio.sleep(0.1)
@@ -92,7 +94,7 @@ async def _fetch_paginated_finished_candidates(session):
         except Exception as e:
             print(f"  -> {page} 페이지 수집 중 오류 발생: {e}")
             break
-            
+
     if page > MAX_PAGES:
         print(f"  -> 최대 {MAX_PAGES} 페이지까지 수집하여 종료합니다.")
 
@@ -106,9 +108,9 @@ async def _fetch_all_naver_data():
         # 1. 연재/휴재 웹툰 API 병렬 호출 (1순위 데이터 소스)
         ongoing_tasks = []
         for api_day in WEEKDAYS.keys():
-            api_url = f"https://comic.naver.com/api/webtoon/titlelist/weekday?week={api_day}"
+            api_url = f"{config.NAVER_API_URL}/weekday?week={api_day}"
             ongoing_tasks.append(_fetch_from_api(session, api_url))
-        
+
         ongoing_results = await asyncio.gather(*ongoing_tasks, return_exceptions=True)
 
         # 2. 완결/장기 휴재 후보군 목록을 페이지네이션으로 수집 (2순위 데이터 소스)
@@ -119,7 +121,7 @@ async def _fetch_all_naver_data():
     naver_ongoing_today = {}
     naver_hiatus_today = {}
     naver_finished_today = {}
-    
+
     # 3-1. (1순위) 요일별 목록 처리
     api_days = list(WEEKDAYS.keys())
     for i, result in enumerate(ongoing_results):
@@ -127,7 +129,7 @@ async def _fetch_all_naver_data():
         if isinstance(result, Exception):
             print(f"❌ '{day_key}'요일 데이터 수집 실패: {result}")
             continue
-        
+
         ongoing_count = sum(1 for w in result if not w.get('rest', False))
         rest_count = sum(1 for w in result if w.get('rest', False))
         print(f"✅ '{day_key}'요일: 연재 {ongoing_count}개 / 휴재 {rest_count}개")
@@ -145,22 +147,22 @@ async def _fetch_all_naver_data():
         # 이미 1순위에서 분류되었다면 건너뜀
         if tid in naver_ongoing_today or tid in naver_hiatus_today:
             continue
-        
+
         # 1순위 목록에 없는 웹툰만 휴재 또는 완결로 분류
         if data.get('rest', False):
             naver_hiatus_today[tid] = data # 장기 휴재
         else:
             naver_finished_today[tid] = data # 진짜 완결
-    
+
     print(f"  -> 최종 연재: {len(naver_ongoing_today)}개")
     print(f"  -> 최종 휴재 (단기+장기): {len(naver_hiatus_today)}개")
     print(f"  -> 최종 완결: {len(naver_finished_today)}개")
-    
+
     # 모든 데이터를 병합
     all_naver_webtoons_today = {**naver_finished_today, **naver_hiatus_today, **naver_ongoing_today}
     print("------------------------")
     print(f"오늘자 데이터 수집 완료: 총 {len(all_naver_webtoons_today)}개 고유 웹툰 확인")
-    
+
     return naver_ongoing_today, naver_hiatus_today, naver_finished_today, all_naver_webtoons_today
 
 
@@ -181,15 +183,15 @@ def _synchronize_database(conn, all_naver_webtoons_today, naver_ongoing_today, n
             status = '휴재'
         elif title_id in naver_finished_today:
             status = '완결'
-        else: 
+        else:
             continue
 
         weekday_to_save = webtoon_data.get('normalized_weekday', webtoon_data.get('weekday'))
         record = (webtoon_data['titleName'], webtoon_data['author'], weekday_to_save, status, title_id)
-        
-        if title_id in db_existing_ids: 
+
+        if title_id in db_existing_ids:
             updates.append(record)
-        else: 
+        else:
             inserts.append((title_id, webtoon_data['titleName'], webtoon_data['author'], weekday_to_save, status))
 
     if updates:
@@ -283,16 +285,16 @@ async def run_daily_check(conn):
     cursor.execute("SELECT title_id, status FROM webtoons")
     db_state_before_sync = {row[0]: row[1] for row in cursor.fetchall()}
     print(f"어제자 DB 상태 기준: 총 {len(db_state_before_sync)}개 웹툰")
-    
+
     naver_ongoing_today, naver_hiatus_today, naver_finished_today, all_naver_webtoons_today = await _fetch_all_naver_data()
-    
+
     # [핵심 로직] 완결 감지 로직 수정
     newly_completed_ids = {
         title_id for title_id, status in db_state_before_sync.items()
-        if status in ('연재중', '휴재') 
+        if status in ('연재중', '휴재')
         and title_id in naver_finished_today
     }
-    
+
     completed_details, total_notified_users = send_completion_notifications(cursor, newly_completed_ids, all_naver_webtoons_today)
     newly_added_to_db = _synchronize_database(conn, all_naver_webtoons_today, naver_ongoing_today, naver_hiatus_today, naver_finished_today)
     print("\n=== 일일 점검 완료 ===")
