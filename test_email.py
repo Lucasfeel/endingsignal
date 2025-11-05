@@ -26,7 +26,7 @@ def run_test():
     TEST_TITLE_ID = 747269
 
     # 테스트 결과를 수신할 본인의 이메일 주소를 입력하세요.
-    TEST_RECIPIENT_EMAIL = "lucasj8359@gmail.com"
+    TEST_RECIPIENT_EMAIL = "jules.testing.bot@gmail.com"
     # --------------------
 
     # [수정됨] 초기값("당신의 개인 이메일 주소")과 일치하는지 확인합니다.
@@ -35,7 +35,7 @@ def run_test():
         return
 
     print("=== 이메일 발송 기능 테스트 시작 ===")
-    
+
     # DB에서 테스트용 웹툰 제목 가져오기
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
@@ -47,7 +47,7 @@ def run_test():
         print(f"❌ 오류: DB에서 웹툰 ID {TEST_TITLE_ID}를 찾을 수 없습니다.")
         print("   'python3 crawler.py'를 실행하여 DB에 데이터가 올바르게 수집되었는지 확인해주세요.")
         return
-        
+
     webtoon_title = result[0]
     print(f"테스트 대상 웹툰: '{webtoon_title}' (ID: {TEST_TITLE_ID})")
     print(f"테스트 메일 수신 주소: {TEST_RECIPIENT_EMAIL}")
@@ -65,7 +65,7 @@ def run_test():
     # crawler.py에 있는 send_email 함수를 직접 호출하여 이메일 발송
     print("\n이메일 발송을 시도합니다...")
     send_email(TEST_RECIPIENT_EMAIL, subject, body)
-    
+
     print("=== 테스트 종료 ===")
 
 

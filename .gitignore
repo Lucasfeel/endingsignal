@@ -1,1 +1,3 @@
 webtoons.db
+.env
+__pycache__/
