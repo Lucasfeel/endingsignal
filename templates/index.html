@@ -126,14 +126,14 @@
                 renderPagination();
 
                 try {
-                    const url = isPaginated ? `/api/webtoons/${tabKey}?page=${page}` : `/api/webtoons/ongoing`;
+                    const url = isPaginated ? `/api/contents/${tabKey}?page=${page}` : `/api/contents/ongoing`;
                     const response = await fetch(url);
                     if (!response.ok) throw new Error(`서버 응답 오류 (${response.status})`);
 
                     const data = await response.json();
 
                     if (isPaginated) {
-                        state.cache[tabKey].push(...data.webtoons);
+                        state.cache[tabKey].push(...data.contents);
                         state.pagination[tabKey].currentPage = data.pagination.page;
                         state.pagination[tabKey].totalPages = data.pagination.total_pages;
                     } else {
@@ -192,11 +192,11 @@
                 row.className = 'webtoon-row flex items-center justify-between p-4 cursor-pointer';
                 row.innerHTML = `
                     <div class="flex-grow min-w-0">
-                        <p class="font-bold text-white truncate">${webtoon.title_text}</p>
-                        <p class="text-sm text-gray-400 truncate">${webtoon.author}</p>
+                        <p class="font-bold text-white truncate">${webtoon.title}</p>
+                        <p class="text-sm text-gray-400 truncate">${webtoon.meta.author}</p>
                     </div>
                     <div class="flex items-center space-x-4 ml-4 flex-shrink-0">${getStatusBadge(webtoon.status)}</div>`;
-                row.addEventListener('click', () => openModal(webtoon.title_id, webtoon.title_text));
+                row.addEventListener('click', () => openModal(webtoon.content_id, webtoon.title));
                 return row;
             }
 
@@ -275,7 +275,7 @@
                 showStatus('loading');
 
                 try {
-                    const response = await fetch(`/api/search?q=${encodeURIComponent(searchTerm)}`);
+                    const response = await fetch(`/api/contents/search?q=${encodeURIComponent(searchTerm)}`);
                     if (!response.ok) throw new Error('Search API Error');
                     state.searchResults = await response.json();
                     renderWebtoonList();
@@ -285,10 +285,10 @@
                 }
             }
 
-            function openModal(titleId, titleText) {
-                state.currentTitleId = titleId;
+            function openModal(contentId, titleText) {
+                state.currentTitleId = contentId;
                 UI.modalWebtoonTitle.textContent = `'${titleText}'`;
-                const webtoonLink = `https://comic.naver.com/webtoon/list?titleId=${titleId}`;
+                const webtoonLink = `https://comic.naver.com/webtoon/list?titleId=${contentId}`;
                 UI.modalWebtoonLinkContainer.innerHTML = `<a href="${webtoonLink}" target="_blank" class="inline-flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors"><span>웹툰 바로가기</span><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
                 UI.modal.classList.remove('hidden');
                 setTimeout(() => UI.modalContent.classList.remove('scale-95', 'opacity-0'), 10);
@@ -313,9 +313,9 @@
                 }
                 UI.emailError.textContent = '';
                 try {
-                    const response = await fetch('/api/subscribe', {
+                    const response = await fetch('/api/subscriptions', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: email, titleId: state.currentTitleId }),
+                        body: JSON.stringify({ email: email, contentId: state.currentTitleId }),
                     });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.message || '구독 처리 중 오류가 발생했습니다.');
