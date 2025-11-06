@@ -1,6 +1,5 @@
 # crawlers/naver_webtoon_crawler.py
 
-import sqlite3
 import os
 import time
 import traceback
@@ -13,10 +12,10 @@ from dotenv import load_dotenv
 import config
 from services.notification_service import send_completion_notifications, send_admin_report
 from .base_crawler import ContentCrawler
+from database import get_db, get_cursor, close_db
 
 load_dotenv()
 
-DATABASE = config.DATABASE_PATH
 HEADERS = config.CRAWLER_HEADERS
 WEEKDAYS = config.WEEKDAYS
 
@@ -93,9 +92,9 @@ class NaverWebtoonCrawler(ContentCrawler):
 
     def synchronize_database(self, conn, all_naver_webtoons_today, naver_ongoing_today, naver_hiatus_today, naver_finished_today):
         print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...")
-        cursor = conn.cursor()
-        cursor.execute("SELECT content_id FROM contents WHERE source = ?", (self.source_name,))
-        db_existing_ids = {row[0] for row in cursor.fetchall()}
+        cursor = get_cursor(conn)
+        cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
+        db_existing_ids = {row['content_id'] for row in cursor.fetchall()}
         updates, inserts = [], []
 
         for content_id, webtoon_data in all_naver_webtoons_today.items():
@@ -117,26 +116,28 @@ class NaverWebtoonCrawler(ContentCrawler):
                 inserts.append((content_id, self.source_name) + record)
 
         if updates:
-            cursor.executemany("UPDATE contents SET content_type=?, title=?, status=?, meta=? WHERE content_id=? AND source=?", updates)
+            cursor.executemany("UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s", updates)
             print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
         if inserts:
-            cursor.executemany("INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (?, ?, ?, ?, ?, ?)", inserts)
+            cursor.executemany("INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s)", inserts)
             print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
         conn.commit()
+        cursor.close()
         print("DB 동기화 완료.")
         return len(inserts)
 
     async def run_daily_check(self, conn):
-        cursor = conn.cursor()
+        cursor = get_cursor(conn)
         print(f"=== {self.source_name} 일일 점검 시작 ===")
-        cursor.execute("SELECT content_id, status FROM contents WHERE source = ?", (self.source_name,))
-        db_state_before_sync = {row[0]: row[1] for row in cursor.fetchall()}
+        cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
+        db_state_before_sync = {row['content_id']: row['status'] for row in cursor.fetchall()}
+        cursor.close()
 
         ongoing, hiatus, finished, all_content = await self.fetch_all_data()
 
         newly_completed_ids = {cid for cid, s in db_state_before_sync.items() if s in ('연재중', '휴재') and cid in finished}
 
-        details, notified = send_completion_notifications(cursor, newly_completed_ids, all_content, self.source_name)
+        details, notified = send_completion_notifications(get_cursor(conn), newly_completed_ids, all_content, self.source_name)
         added = self.synchronize_database(conn, all_content, ongoing, hiatus, finished)
 
         print("\n=== 일일 점검 완료 ===")
@@ -144,37 +145,46 @@ class NaverWebtoonCrawler(ContentCrawler):
 
 def setup_database():
     """데이터베이스와 테이블이 없는 경우 초기 설정"""
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    conn = get_db()
+    cursor = get_cursor(conn)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS contents (
-        content_id TEXT NOT NULL, source TEXT NOT NULL, content_type TEXT NOT NULL,
-        title TEXT NOT NULL, status TEXT NOT NULL, meta TEXT,
+        content_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        meta JSONB,
         PRIMARY KEY (content_id, source)
     )""")
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL,
-        content_id TEXT NOT NULL, source TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        email TEXT NOT NULL,
+        content_id TEXT NOT NULL,
+        source TEXT NOT NULL,
         UNIQUE(email, content_id, source)
     )""")
     conn.commit()
-    conn.close()
+    cursor.close()
+    close_db()
 
 if __name__ == '__main__':
     start_time = time.time()
     report = {'status': '성공'}
+    db_conn = None
     try:
         setup_database()
-        conn = sqlite3.connect(DATABASE)
+        db_conn = get_db()
         crawler = NaverWebtoonCrawler()
-        new_contents, completed_details, total_notified = asyncio.run(crawler.run_daily_check(conn))
+        new_contents, completed_details, total_notified = asyncio.run(crawler.run_daily_check(db_conn))
         report.update({'new_webtoons': new_contents, 'completed_details': completed_details, 'total_notified': total_notified})
-        conn.close()
     except Exception as e:
         print(f"치명적 오류 발생: {e}")
         report['status'] = '실패'
         report['error_message'] = traceback.format_exc()
     finally:
+        if db_conn:
+            close_db()
         report['duration'] = time.time() - start_time
         send_admin_report(report)

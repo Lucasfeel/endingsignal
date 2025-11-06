@@ -1,9 +1,9 @@
 # views/subscriptions.py
 
-import sqlite3
 import re
+import psycopg2
 from flask import Blueprint, jsonify, request
-from database import get_db
+from database import get_db, get_cursor
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
 
@@ -17,7 +17,7 @@ def subscribe():
     data = request.json
     email = data.get('email')
     content_id = data.get('contentId')
-    source = data.get('source', 'naver_webtoon') # 기본값 설정
+    source = data.get('source', 'naver_webtoon')
 
     if not all([email, content_id, source]):
         return jsonify({'status': 'error', 'message': '이메일, 콘텐츠 ID, 소스가 필요합니다.'}), 400
@@ -26,12 +26,13 @@ def subscribe():
 
     try:
         conn = get_db()
-        cursor = conn.cursor()
+        cursor = get_cursor(conn)
         cursor.execute(
-            "INSERT OR IGNORE INTO subscriptions (email, content_id, source) VALUES (?, ?, ?)",
+            "INSERT INTO subscriptions (email, content_id, source) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (email, str(content_id), source)
         )
         conn.commit()
+        cursor.close()
         return jsonify({'status': 'success', 'message': f'ID {content_id} ({source}) 구독 완료!'})
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         return jsonify({'status': 'error', 'message': f'데이터베이스 오류: {e}'}), 500

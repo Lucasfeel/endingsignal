@@ -1,7 +1,7 @@
 # views/contents.py
 
 from flask import Blueprint, jsonify, request
-from database import get_db
+from database import get_db, get_cursor
 import math
 import json
 
@@ -19,26 +19,22 @@ def search_contents():
     query_no_spaces = query.replace(' ', '')
 
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = get_cursor(conn)
 
     search_pattern = f'%{query_no_spaces}%'
     cursor.execute(
         """
         SELECT content_id, title, status, meta
         FROM contents
-        WHERE REPLACE(title, ' ', '') LIKE ? AND content_type = ?
-        ORDER BY rowid DESC
+        WHERE REPLACE(title, ' ', '') LIKE %s AND content_type = %s
+        ORDER BY title
         LIMIT 100
         """,
         (search_pattern, content_type)
     )
 
-    results = []
-    for row in cursor.fetchall():
-        row_dict = dict(row)
-        row_dict['meta'] = json.loads(row_dict['meta'])
-        results.append(row_dict)
-
+    results = [dict(row) for row in cursor.fetchall()]
+    cursor.close()
     return jsonify(results)
 
 
@@ -48,18 +44,15 @@ def get_ongoing_contents():
     content_type = request.args.get('type', 'webtoon')
 
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = get_cursor(conn)
 
     cursor.execute(
-        "SELECT content_id, title, status, meta FROM contents WHERE content_type = ? AND status = '연재중'",
+        "SELECT content_id, title, status, meta FROM contents WHERE content_type = %s AND status = '연재중'",
         (content_type,)
     )
 
-    all_contents = []
-    for row in cursor.fetchall():
-        row_dict = dict(row)
-        row_dict['meta'] = json.loads(row_dict['meta'])
-        all_contents.append(row_dict)
+    all_contents = [dict(row) for row in cursor.fetchall()]
+    cursor.close()
 
     grouped_by_day = { 'mon': [], 'tue': [], 'wed': [], 'thu': [], 'fri': [], 'sat': [], 'sun': [], 'daily': [] }
     for content in all_contents:
@@ -78,22 +71,19 @@ def get_hiatus_contents():
     content_type = request.args.get('type', 'webtoon')
 
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = get_cursor(conn)
 
-    cursor.execute("SELECT COUNT(*) FROM contents WHERE status = '휴재' AND content_type = ?", (content_type,))
+    cursor.execute("SELECT COUNT(*) FROM contents WHERE status = '휴재' AND content_type = %s", (content_type,))
     total_items = cursor.fetchone()[0]
     total_pages = math.ceil(total_items / per_page)
 
     cursor.execute(
-        "SELECT content_id, title, status, meta FROM contents WHERE status = '휴재' AND content_type = ? ORDER BY rowid DESC LIMIT ? OFFSET ?",
+        "SELECT content_id, title, status, meta FROM contents WHERE status = '휴재' AND content_type = %s ORDER BY title LIMIT %s OFFSET %s",
         (content_type, per_page, offset)
     )
 
-    results = []
-    for row in cursor.fetchall():
-        row_dict = dict(row)
-        row_dict['meta'] = json.loads(row_dict['meta'])
-        results.append(row_dict)
+    results = [dict(row) for row in cursor.fetchall()]
+    cursor.close()
 
     return jsonify({
         'contents': results,
@@ -114,22 +104,19 @@ def get_completed_contents():
     content_type = request.args.get('type', 'webtoon')
 
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = get_cursor(conn)
 
-    cursor.execute("SELECT COUNT(*) FROM contents WHERE status = '완결' AND content_type = ?", (content_type,))
+    cursor.execute("SELECT COUNT(*) FROM contents WHERE status = '완결' AND content_type = %s", (content_type,))
     total_items = cursor.fetchone()[0]
     total_pages = math.ceil(total_items / per_page)
 
     cursor.execute(
-        "SELECT content_id, title, status, meta FROM contents WHERE status = '완결' AND content_type = ? ORDER BY rowid DESC LIMIT ? OFFSET ?",
+        "SELECT content_id, title, status, meta FROM contents WHERE status = '완결' AND content_type = %s ORDER BY title LIMIT %s OFFSET %s",
         (content_type, per_page, offset)
     )
 
-    results = []
-    for row in cursor.fetchall():
-        row_dict = dict(row)
-        row_dict['meta'] = json.loads(row_dict['meta'])
-        results.append(row_dict)
+    results = [dict(row) for row in cursor.fetchall()]
+    cursor.close()
 
     return jsonify({
         'contents': results,
