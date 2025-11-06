@@ -47,7 +47,7 @@ def send_completion_notifications(cursor, newly_completed_ids, all_content_today
                 content_data = all_content_today.get(content_id, {})
                 title = content_data.get('titleName', f'ID {content_id}')
 
-                cursor.execute("SELECT email FROM subscriptions WHERE content_id = ? AND source = ?", (content_id, source))
+                cursor.execute("SELECT email FROM subscriptions WHERE content_id = %s AND source = %s", (content_id, source))
                 subscribers = [row[0] for row in cursor.fetchall()]
 
                 print(f"--- '{title}'(ID:{content_id}) 완결 알림 발송 대상: {len(subscribers)}명 ---")
