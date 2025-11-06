@@ -30,3 +30,29 @@ def close_db(exception=None):
     db = g.pop('db', None)
     if db is not None:
         db.close()
+
+def setup_database():
+    """데이터베이스와 테이블이 없는 경우 초기 설정"""
+    conn = get_db()
+    cursor = get_cursor(conn)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS contents (
+        content_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        meta JSONB,
+        PRIMARY KEY (content_id, source)
+    )""")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS subscriptions (
+        id SERIAL PRIMARY KEY,
+        email TEXT NOT NULL,
+        content_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        UNIQUE(email, content_id, source)
+    )""")
+    conn.commit()
+    cursor.close()
+    close_db()

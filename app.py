@@ -15,7 +15,6 @@ load_dotenv()
 from views.contents import contents_bp
 from views.subscriptions import subscriptions_bp
 from database import close_db
-from crawlers.naver_webtoon_crawler import setup_database
 
 # --- 2. Flask 앱 생성 및 설정 ---
 app = Flask(__name__)
@@ -38,9 +37,4 @@ def index():
 
 # --- 4. 실행 ---
 if __name__ == '__main__':
-    with app.app_context():
-        setup_database()
     app.run(host='0.0.0.0', port=5000, debug=True)
-else:
-    with app.app_context():
-        setup_database()

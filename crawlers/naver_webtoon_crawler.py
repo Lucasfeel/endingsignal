@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 import config
 from services.notification_service import send_completion_notifications, send_admin_report
 from .base_crawler import ContentCrawler
-from database import get_db, get_cursor, close_db
+from database import get_db, get_cursor, close_db, setup_database
 
 load_dotenv()
 
@@ -142,32 +142,6 @@ class NaverWebtoonCrawler(ContentCrawler):
 
         print("\n=== 일일 점검 완료 ===")
         return added, details, notified
-
-def setup_database():
-    """데이터베이스와 테이블이 없는 경우 초기 설정"""
-    conn = get_db()
-    cursor = get_cursor(conn)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS contents (
-        content_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        content_type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        status TEXT NOT NULL,
-        meta JSONB,
-        PRIMARY KEY (content_id, source)
-    )""")
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS subscriptions (
-        id SERIAL PRIMARY KEY,
-        email TEXT NOT NULL,
-        content_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        UNIQUE(email, content_id, source)
-    )""")
-    conn.commit()
-    cursor.close()
-    close_db()
 
 if __name__ == '__main__':
     start_time = time.time()
