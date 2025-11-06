@@ -110,10 +110,10 @@ class NaverWebtoonCrawler(ContentCrawler):
             }
 
             if content_id in db_existing_ids:
-                record = ('webtoon', webtoon_data['titleName'], status, meta_data, content_id, self.source_name)
+                record = ('webtoon', webtoon_data['titleName'], status, json.dumps(meta_data), content_id, self.source_name)
                 updates.append(record)
             else:
-                record = (content_id, self.source_name, 'webtoon', webtoon_data['titleName'], status, meta_data)
+                record = (content_id, self.source_name, 'webtoon', webtoon_data['titleName'], status, json.dumps(meta_data))
                 inserts.append(record)
 
         if updates:
