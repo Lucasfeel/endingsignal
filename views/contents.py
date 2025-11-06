@@ -89,8 +89,8 @@ def get_hiatus_contents():
     conn = get_db()
     cursor = get_cursor(conn)
 
-    cursor.execute("SELECT COUNT(*) FROM contents WHERE status = '휴재' AND content_type = %s", (content_type,))
-    total_items = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) as count FROM contents WHERE status = '휴재' AND content_type = %s", (content_type,))
+    total_items = cursor.fetchone()['count']
     total_pages = math.ceil(total_items / per_page)
 
     cursor.execute(
@@ -122,8 +122,8 @@ def get_completed_contents():
     conn = get_db()
     cursor = get_cursor(conn)
 
-    cursor.execute("SELECT COUNT(*) FROM contents WHERE status = '완결' AND content_type = %s", (content_type,))
-    total_items = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) as count FROM contents WHERE status = '완결' AND content_type = %s", (content_type,))
+    total_items = cursor.fetchone()['count']
     total_pages = math.ceil(total_items / per_page)
 
     cursor.execute(

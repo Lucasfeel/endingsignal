@@ -127,31 +127,52 @@ class NaverWebtoonCrawler(ContentCrawler):
         return len(inserts)
 
     async def run_daily_check(self, conn):
+        print("LOG: run_daily_check started.")
         cursor = get_cursor(conn)
         print(f"=== {self.source_name} 일일 점검 시작 ===")
         cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
         db_state_before_sync = {row['content_id']: row['status'] for row in cursor.fetchall()}
         cursor.close()
+        print("LOG: Initial database state loaded.")
 
         ongoing, hiatus, finished, all_content = await self.fetch_all_data()
+        print("LOG: Data fetched from API.")
 
         newly_completed_ids = {cid for cid, s in db_state_before_sync.items() if s in ('연재중', '휴재') and cid in finished}
+        print(f"LOG: Found {len(newly_completed_ids)} newly completed items.")
 
         details, notified = send_completion_notifications(get_cursor(conn), newly_completed_ids, all_content, self.source_name)
+        print("LOG: Notification service executed.")
+
         added = self.synchronize_database(conn, all_content, ongoing, hiatus, finished)
+        print("LOG: Database synchronization executed.")
 
         print("\n=== 일일 점검 완료 ===")
         return added, details, notified
 
 if __name__ == '__main__':
+    print("==========================================")
+    print("  CRAWLER SCRIPT STARTED (STANDALONE)")
+    print("==========================================")
     start_time = time.time()
     report = {'status': '성공'}
     db_conn = None
     try:
+        print("LOG: Calling setup_database_standalone()...")
         setup_database_standalone()
+        print("LOG: setup_database_standalone() finished.")
+
+        print("LOG: Calling create_standalone_connection()...")
         db_conn = create_standalone_connection()
+        print("LOG: create_standalone_connection() finished.")
+
         crawler = NaverWebtoonCrawler()
+        print("LOG: NaverWebtoonCrawler instance created.")
+
+        print("LOG: Calling asyncio.run(crawler.run_daily_check())...")
         new_contents, completed_details, total_notified = asyncio.run(crawler.run_daily_check(db_conn))
+        print("LOG: asyncio.run(crawler.run_daily_check()) finished.")
+
         report.update({'new_webtoons': new_contents, 'completed_details': completed_details, 'total_notified': total_notified})
     except Exception as e:
         print(f"치명적 오류 발생: {e}")
@@ -159,6 +180,11 @@ if __name__ == '__main__':
         report['error_message'] = traceback.format_exc()
     finally:
         if db_conn:
+            print("LOG: Closing database connection.")
             db_conn.close()
         report['duration'] = time.time() - start_time
+        print("LOG: Sending admin report.")
         send_admin_report(report)
+        print("==========================================")
+        print("  CRAWLER SCRIPT FINISHED")
+        print("==========================================")
