@@ -8,10 +8,15 @@ import os
 def get_db():
     """Application Context 내에서 유일한 DB 연결을 가져옵니다."""
     if 'db' not in g:
+        # For production environments like Render, DATABASE_URL is the primary connection string.
+        # For local development, the fallback to individual variables is used.
         database_url = os.environ.get('DATABASE_URL')
         if database_url:
             g.db = psycopg2.connect(database_url)
         else:
+            # Ensure all required variables are present for local connection
+            if not all(os.environ.get(var) for var in ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']):
+                raise ValueError("For local development, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, and DB_PORT must be set.")
             g.db = psycopg2.connect(
                 dbname=os.environ.get('DB_NAME'),
                 user=os.environ.get('DB_USER'),
@@ -37,6 +42,8 @@ def create_standalone_connection():
     if database_url:
         return psycopg2.connect(database_url)
     else:
+        if not all(os.environ.get(var) for var in ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']):
+            raise ValueError("For local development, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, and DB_PORT must be set.")
         return psycopg2.connect(
             dbname=os.environ.get('DB_NAME'),
             user=os.environ.get('DB_USER'),
