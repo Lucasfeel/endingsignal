@@ -15,7 +15,10 @@ load_dotenv()
 from views.contents import contents_bp
 from views.subscriptions import subscriptions_bp
 from views.status import status_bp
-from database import close_db
+from database import close_db, setup_database_standalone
+
+# DB 테이블 자동 생성 (앱 시작 시)
+setup_database_standalone()
 
 # --- 2. Flask 앱 생성 및 설정 ---
 app = Flask(__name__)
