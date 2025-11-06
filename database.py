@@ -4,6 +4,7 @@ import psycopg2
 import psycopg2.extras
 from flask import g
 import os
+import sys
 
 def get_db():
     """Application Context 내에서 유일한 DB 연결을 가져옵니다."""
@@ -54,26 +55,50 @@ def create_standalone_connection():
 
 def setup_database_standalone():
     """독립 실행형 스크립트에서 테이블을 생성합니다."""
-    conn = create_standalone_connection()
-    cursor = get_cursor(conn)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS contents (
-        content_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        content_type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        status TEXT NOT NULL,
-        meta JSONB,
-        PRIMARY KEY (content_id, source)
-    )""")
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS subscriptions (
-        id SERIAL PRIMARY KEY,
-        email TEXT NOT NULL,
-        content_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        UNIQUE(email, content_id, source)
-    )""")
-    conn.commit()
-    cursor.close()
-    conn.close()
+    conn = None
+    try:
+        print("LOG: [DB Setup] Attempting to connect to the database...")
+        conn = create_standalone_connection()
+        cursor = get_cursor(conn)
+        print("LOG: [DB Setup] Connection successful.")
+
+        print("LOG: [DB Setup] Creating 'contents' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS contents (
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            meta JSONB,
+            PRIMARY KEY (content_id, source)
+        )""")
+        print("LOG: [DB Setup] 'contents' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'subscriptions' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id SERIAL PRIMARY KEY,
+            email TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            UNIQUE(email, content_id, source)
+        )""")
+        print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
+
+        print("LOG: [DB Setup] Committing changes...")
+        conn.commit()
+        print("LOG: [DB Setup] Changes committed.")
+
+        cursor.close()
+    except psycopg2.Error as e:
+        print(f"FATAL: [DB Setup] A database error occurred: {e}", file=sys.stderr)
+        # Re-raise the exception to ensure the script exits with a non-zero status code
+        raise
+    except Exception as e:
+        print(f"FATAL: [DB Setup] An unexpected error occurred: {e}", file=sys.stderr)
+        raise
+    finally:
+        if conn:
+            conn.close()
+            print("LOG: [DB Setup] Connection closed.")
