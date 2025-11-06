@@ -104,12 +104,12 @@ class NaverWebtoonCrawler(ContentCrawler):
             elif content_id in naver_finished_today: status = '완결'
             else: continue
 
-            meta_data = json.dumps({
+            meta_data = {
                 'author': webtoon_data.get('author'),
                 'weekday': webtoon_data.get('normalized_weekday', webtoon_data.get('weekday'))
-            })
+            }
 
-            record = ('webtoon', webtoon_data['titleName'], status, meta_data, content_id, self.source_name)
+            record = ('webtoon', webtoon_data['titleName'], status, json.dumps(meta_data), content_id, self.source_name)
             if content_id in db_existing_ids:
                 updates.append(record)
             else:

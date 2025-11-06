@@ -13,8 +13,8 @@ def get_status():
     try:
         conn = get_db()
         cursor = get_cursor(conn)
-        cursor.execute("SELECT COUNT(*) FROM contents")
-        content_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) as count FROM contents")
+        content_count = cursor.fetchone()['count']
         cursor.close()
 
         return jsonify({
