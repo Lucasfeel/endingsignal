@@ -31,9 +31,23 @@ def close_db(exception=None):
     if db is not None:
         db.close()
 
-def setup_database():
-    """데이터베이스와 테이블이 없는 경우 초기 설정"""
-    conn = get_db()
+def create_standalone_connection():
+    """Flask 컨텍스트 없이 독립적인 DB 연결을 생성합니다."""
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        return psycopg2.connect(database_url)
+    else:
+        return psycopg2.connect(
+            dbname=os.environ.get('DB_NAME'),
+            user=os.environ.get('DB_USER'),
+            password=os.environ.get('DB_PASSWORD'),
+            host=os.environ.get('DB_HOST'),
+            port=os.environ.get('DB_PORT')
+        )
+
+def setup_database_standalone():
+    """독립 실행형 스크립트에서 테이블을 생성합니다."""
+    conn = create_standalone_connection()
     cursor = get_cursor(conn)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS contents (
@@ -55,4 +69,4 @@ def setup_database():
     )""")
     conn.commit()
     cursor.close()
-    close_db()
+    conn.close()

@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 import config
 from services.notification_service import send_completion_notifications, send_admin_report
 from .base_crawler import ContentCrawler
-from database import get_db, get_cursor, close_db, setup_database
+from database import get_cursor, create_standalone_connection, setup_database_standalone
 
 load_dotenv()
 
@@ -148,8 +148,8 @@ if __name__ == '__main__':
     report = {'status': '성공'}
     db_conn = None
     try:
-        setup_database()
-        db_conn = get_db()
+        setup_database_standalone()
+        db_conn = create_standalone_connection()
         crawler = NaverWebtoonCrawler()
         new_contents, completed_details, total_notified = asyncio.run(crawler.run_daily_check(db_conn))
         report.update({'new_webtoons': new_contents, 'completed_details': completed_details, 'total_notified': total_notified})
@@ -159,6 +159,6 @@ if __name__ == '__main__':
         report['error_message'] = traceback.format_exc()
     finally:
         if db_conn:
-            close_db()
+            db_conn.close()
         report['duration'] = time.time() - start_time
         send_admin_report(report)

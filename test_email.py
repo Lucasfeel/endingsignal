@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 from services.notification_service import send_email
-from database import get_db, get_cursor, close_db
+from database import create_standalone_connection, get_cursor
 
 load_dotenv()
 
@@ -31,13 +31,13 @@ def run_test():
 
     conn = None
     try:
-        conn = get_db()
+        conn = create_standalone_connection()
         cursor = get_cursor(conn)
         cursor.execute("SELECT title FROM contents WHERE content_id = %s AND source = %s", (TEST_CONTENT_ID, TEST_SOURCE))
         result = cursor.fetchone()
     finally:
         if conn:
-            close_db()
+            conn.close()
 
     if not result:
         print(f"❌ 오류: DB에서 콘텐츠 ID {TEST_CONTENT_ID} ({TEST_SOURCE})를 찾을 수 없습니다.")
@@ -65,7 +65,7 @@ def run_test():
 
 if __name__ == '__main__':
     required_env_vars = ['EMAIL_ADDRESS', 'EMAIL_PASSWORD', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    missing_vars = [var for var in required_env_vars if not os.getenv(var) and not os.getenv('DATABASE_URL')]
 
     if missing_vars:
         print("="*60)
@@ -73,6 +73,7 @@ if __name__ == '__main__':
         print("   테스트를 진행하려면 .env 파일을 설정하거나 다음 환경 변수를 지정해주세요:")
         for var in missing_vars:
             print(f"   - {var}")
+        print("\n   또는 DATABASE_URL 환경 변수를 설정해주세요.")
         print("\n   예: export EMAIL_ADDRESS='당신의G메일주소'")
         print("="*60)
     else:
