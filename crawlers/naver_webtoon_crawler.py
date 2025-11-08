@@ -226,7 +226,12 @@ if __name__ == '__main__':
         print(f"치명적 오류 발생: {e}")
         report['status'] = '실패'
         report['error_message'] = traceback.format_exc()
-        send_admin_report(report)
+        try:
+            print("LOG: [실패] 관리자 보고서 발송 시도...")
+            send_admin_report(report)
+        except Exception as report_e:
+            print(f"LOG: [실패] 관리자 보고서 발송조차 실패함: {report_e}")
+
         sys.exit(1)
     finally:
         if db_conn:
