@@ -190,10 +190,20 @@
             function createWebtoonRow(webtoon) {
                 const row = document.createElement('div');
                 row.className = 'webtoon-row flex items-center justify-between p-4 cursor-pointer';
+
+                // === 🚨 [스키마 표준화] ===
+                // 'authors' 리스트를 안전하게 읽어와 쉼표(,)로 연결합니다.
+                const authorsText = (webtoon.meta.authors && webtoon.meta.authors.length > 0)
+                                    ? webtoon.meta.authors.join(', ')
+                                    : '작가 정보 없음';
+                // =========================
+
                 row.innerHTML = `
                     <div class="flex-grow min-w-0">
                         <p class="font-bold text-white truncate">${webtoon.title}</p>
-                        <p class="text-sm text-gray-400 truncate">${webtoon.meta.author}</p>
+
+                        <p class="text-sm text-gray-400 truncate">${authorsText}</p>
+
                     </div>
                     <div class="flex items-center space-x-4 ml-4 flex-shrink-0">${getStatusBadge(webtoon.status)}</div>`;
                 row.addEventListener('click', () => openModal(webtoon.content_id, webtoon.title));

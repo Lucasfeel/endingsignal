@@ -140,9 +140,11 @@ class NaverWebtoonCrawler(ContentCrawler):
             elif content_id in naver_ongoing_today: status = '연재중'
             else: continue
 
+            author = webtoon_data.get('author')
             meta_data = {
-                'author': webtoon_data.get('author'),
-                'weekdays': webtoon_data.get('normalized_weekdays', [])
+                'authors': [author] if author else [],
+                'weekdays': webtoon_data.get('normalized_weekdays', []),
+                'thumbnail_url': None
             }
 
             if content_id in db_existing_ids:
