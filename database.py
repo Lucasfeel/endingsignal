@@ -63,7 +63,7 @@ def setup_database_standalone():
         print("LOG: [DB Setup] Connection successful.")
 
         print("LOG: [DB Setup] Dropping existing tables (if any)...")
-        cursor.execute("DROP TABLE IF EXISTS subscriptions;")
+        # cursor.execute("DROP TABLE IF EXISTS subscriptions;")
         cursor.execute("DROP TABLE IF EXISTS contents;")
         print("LOG: [DB Setup] Tables dropped.")
 
