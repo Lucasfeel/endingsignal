@@ -57,10 +57,35 @@ class NaverWebtoonCrawler(ContentCrawler):
             print(f"  -> 최대 {MAX_PAGES} 페이지까지 수집하여 종료합니다.")
         return all_candidates
 
+    async def _fetch_paginated_weekday_data(self, session, api_day):
+        all_candidates = {}
+        page = 1
+        MAX_PAGES = 20  # You can adjust this if needed
+        # print(f"\n'{api_day}' 요일 웹툰 목록 확보를 위해 페이지네이션 수집 시작...")
+        while page <= MAX_PAGES:
+            try:
+                api_url = f"{config.NAVER_API_URL}/weekday?week={api_day}&page={page}&pageSize=100"
+                webtoons_on_page = await self._fetch_from_api(session, api_url)
+                if not webtoons_on_page:
+                    # print(f"  -> {api_day}: {page-1} 페이지에서 수집 종료 (데이터 없음).")
+                    break
+                for webtoon in webtoons_on_page:
+                    if webtoon['titleId'] not in all_candidates:
+                        all_candidates[webtoon['titleId']] = webtoon
+                # print(f"  -> {api_day}: {page} 페이지 수집 완료. (현재 후보군: {len(all_candidates)}개)")
+                page += 1
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                # print(f"  -> {api_day}: {page} 페이지 수집 중 오류 발생: {e}")
+                break
+        # if page > MAX_PAGES:
+        #     print(f"  -> {api_day}: 최대 {MAX_PAGES} 페이지까지 수집하여 종료합니다.")
+        return all_candidates
+
     async def fetch_all_data(self):
         print("네이버 웹툰 서버에서 오늘의 최신 데이터를 가져옵니다...")
         async with aiohttp.ClientSession() as session:
-            ongoing_tasks = [self._fetch_from_api(session, f"{config.NAVER_API_URL}/weekday?week={api_day}") for api_day in WEEKDAYS.keys()]
+            ongoing_tasks = [self._fetch_paginated_weekday_data(session, api_day) for api_day in WEEKDAYS.keys()]
             ongoing_results = await asyncio.gather(*ongoing_tasks, return_exceptions=True)
             finished_candidates = await self._fetch_paginated_finished_candidates(session)
 
@@ -72,12 +97,14 @@ class NaverWebtoonCrawler(ContentCrawler):
             if isinstance(result, Exception):
                 print(f"❌ '{day_key}'요일 데이터 수집 실패: {result}")
                 continue
-            for webtoon in result:
+
+            for webtoon in result.values():
                 webtoon['normalized_weekday'] = WEEKDAYS[day_key]
+
+                naver_ongoing_today[webtoon['titleId']] = webtoon
+
                 if webtoon.get('rest', False):
                     naver_hiatus_today[webtoon['titleId']] = webtoon
-                else:
-                    naver_ongoing_today[webtoon['titleId']] = webtoon
 
         for tid, data in finished_candidates.items():
             if tid not in naver_ongoing_today and tid not in naver_hiatus_today:
@@ -99,9 +126,9 @@ class NaverWebtoonCrawler(ContentCrawler):
 
         for content_id, webtoon_data in all_naver_webtoons_today.items():
             status = ''
-            if content_id in naver_ongoing_today: status = '연재중'
+            if content_id in naver_finished_today: status = '완결'
             elif content_id in naver_hiatus_today: status = '휴재'
-            elif content_id in naver_finished_today: status = '완결'
+            elif content_id in naver_ongoing_today: status = '연재중'
             else: continue
 
             meta_data = {

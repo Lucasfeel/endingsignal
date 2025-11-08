@@ -61,7 +61,7 @@ def get_ongoing_contents():
     cursor = get_cursor(conn)
 
     cursor.execute(
-        "SELECT content_id, title, status, meta FROM contents WHERE content_type = %s AND status = '연재중'",
+        "SELECT content_id, title, status, meta FROM contents WHERE content_type = %s AND (status = '연재중' OR status = '휴재')",
         (content_type,)
     )
 
