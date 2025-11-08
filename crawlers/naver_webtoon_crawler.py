@@ -169,10 +169,11 @@ class NaverWebtoonCrawler(ContentCrawler):
 
             cursor.executemany("INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s)", unique_inserts) # 👈 unique_inserts 사용
             print(f"{len(unique_inserts)}개 신규 웹툰 DB 추가 완료. (중복 {len(inserts) - len(unique_inserts)}개 제거)")
+
         conn.commit()
         cursor.close()
         print("DB 동기화 완료.")
-        return len(inserts)
+        return len(unique_inserts)
 
     async def run_daily_check(self, conn):
         print("LOG: run_daily_check started.")
@@ -232,7 +233,7 @@ if __name__ == '__main__':
         except Exception as report_e:
             print(f"LOG: [실패] 관리자 보고서 발송조차 실패함: {report_e}")
 
-        sys.exit(1)
+        sys.exit(1) # 👈 DB 오류가 발생했으므로 무조건 빌드 실패 처리
     finally:
         if db_conn:
             print("LOG: Closing database connection.")
