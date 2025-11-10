@@ -76,10 +76,20 @@ class KakaopageCrawler(ContentCrawler):
                 raw_response = await response.read()
                 text_response = raw_response.decode('utf-8-sig')
                 data = json.loads(text_response)
+                data_root = data.get('data', {})
                 if is_complete:
-                    return data.get('data', {}).get('staticLandingGenreSection', {}).get('items', [{}])[0].get('items', [])
+                    # 완결 탭: data.staticLandingGenreSection.items[0].items
+                    section = data_root.get('staticLandingGenreSection', {})
+                    groups = section.get('items', [])
                 else:
-                    return data.get('data', {}).get('staticLandingDayOfWeekLayout', {}).get('sections', [{}])[0].get('items', [{}])[0].get('items', [])
+                    # 요일별 탭: data.staticLandingDayOfWeekLayout.sections[0].items[0].items
+                    layout = data_root.get('staticLandingDayOfWeekLayout', {})
+                    sections = layout.get('sections', [])
+                    groups = sections[0].get('items', []) if sections else [] # 👈 1. sections[0] 안전하게 접근
+
+                # 👈 2. groups[0] 안전하게 접근
+                items = groups[0].get('items', []) if groups else []
+                return items
         except Exception as e:
             print(f"[{self.source_name}] Page {page} (day: {day_tab_uid}, complete: {is_complete}) 로드 실패: {e}")
             raise
@@ -112,20 +122,31 @@ class KakaopageCrawler(ContentCrawler):
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[self._fetch_ongoing_category(session, day, uid, data_maps) for day, uid in DAY_TAB_UIDS.items()])
             print(f"[{self.source_name}] '완결' 목록 수집 시작...")
-            finished_count = 0
-            for page in range(1, 250): # 20000개 이상 보장
+            total_finished_found = 0 # 👈 1. 수집한 완결작 총 개수
+            for page in range(1, 250): # 최대 25000개 (100 * 250)
                 try:
                     items = await self._fetch_page_data(session, page=page, size=100, is_complete=True)
-                    if not items: break
-                    new_items_added = 0
+                    if not items:
+                        print(f"[{self.source_name}] '완결' 목록 {page-1} 페이지에서 수집 종료.")
+                        break # 👈 2. 데이터 없으면 루프 탈출
+
                     for item in items:
                         content_id = str(item.get('seriesId'))
+                        total_finished_found += 1 # 👈 3. DB 저장 여부와 관계없이 무조건 카운트
+
+                        # (1) 전체 목록에 추가 (신규인 경우)
                         if content_id not in data_maps['all_content_today']:
                             data_maps['all_content_today'][content_id] = item
-                            data_maps['finished_today'][content_id] = item
-                            new_items_added += 1
-                    finished_count += new_items_added
-                    if finished_count >= 2000: break
+
+                        # (2) 'finished_today' 맵에 무조건 추가 (가장 중요)
+                        # 👈 4. '연재중'이었다가 완결된 작품도 여기에 포함되어야 함
+                        data_maps['finished_today'][content_id] = item
+
+                    print(f"[{self.source_name}] '완결' {page} 페이지 수집 완료 (누적 {total_finished_found}개)")
+
+                    if total_finished_found >= 2000: # 👈 5. 총 수집 개수로 2000개 돌파 확인
+                        print(f"[{self.source_name}] 목표 수량({total_finished_found}개) 달성. 수집 종료.")
+                        break
                 except Exception:
                     print(f"[{self.source_name}] '완결' 페이지 {page}에서 최종 실패.")
                     break
