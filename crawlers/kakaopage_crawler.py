@@ -47,7 +47,10 @@ query staticLandingGenreSection($sectionId: ID!, $param: StaticLandingGenreParam
 }
 """
 
-DAY_TAB_UIDS = { 'mon': '1', 'tue': '2', 'wed': '3', 'thu': '4', 'fri': '5', 'sat': '6', 'sun': '7' }
+DAY_TAB_UIDS = {
+    'mon': '1', 'tue': '2', 'wed': '3', 'thu': '4', 'fri': '5', 'sat': '6', 'sun': '7',
+    'hiatus': '8' # 👈 '휴재' 탭에서 찾은 UID 값으로 '8'을 대체하세요.
+}
 
 class KakaopageCrawler(ContentCrawler):
     def __init__(self):
@@ -73,9 +76,11 @@ class KakaopageCrawler(ContentCrawler):
         try:
             async with session.post(self.GRAPHQL_URL, headers=self.HEADERS, json=payload, timeout=30) as response:
                 response.raise_for_status()
-                raw_response = await response.read()
-                text_response = raw_response.decode('utf-8-sig')
-                data = json.loads(text_response)
+
+                # 👈 2. aiohttp 내장 json 파서 사용
+                # content_type=None : 'application/graphql+json'을 json으로 인식시킴
+                data = await response.json(content_type=None)
+
                 data_root = data.get('data', {})
                 if is_complete:
                     # 완결 탭: data.staticLandingGenreSection.items[0].items

@@ -31,12 +31,14 @@ async def main():
 
     load_dotenv()
 
+    # 🚨 [수정] 이 7줄을 반드시 주석 처리하거나 삭제하세요.
+    #
     # 데이터베이스 초기화
-    try:
-        setup_database_standalone()
-    except Exception as e:
-        print(f"FATAL: 데이터베이스 초기화 중 오류 발생: {e}", file=sys.stderr)
-        sys.exit(1)
+    # try:
+    #     setup_database_standalone()
+    # except Exception as e:
+    #     print(f"FATAL: 데이터베이스 초기화 중 오류 발생: {e}", file=sys.stderr)
+    #     sys.exit(1)
 
     db_conn = None
     try:
