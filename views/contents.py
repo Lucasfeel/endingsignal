@@ -35,7 +35,7 @@ def search_contents():
 
     cursor.execute(
         """
-        SELECT content_id, title, status, meta
+        SELECT content_id, title, status, meta, source
         FROM contents
         WHERE title %% %s AND content_type = %s
         ORDER BY similarity(title, %s) DESC
@@ -58,7 +58,7 @@ def get_ongoing_contents():
     cursor = get_cursor(conn)
 
     cursor.execute(
-        "SELECT content_id, title, status, meta FROM contents WHERE content_type = %s AND (status = '연재중' OR status = '휴재')",
+        "SELECT content_id, title, status, meta, source FROM contents WHERE content_type = %s AND (status = '연재중' OR status = '휴재')",
         (content_type,)
     )
 
@@ -92,7 +92,7 @@ def get_hiatus_contents():
         query_params.append(last_title)
 
     cursor.execute(
-        f"SELECT content_id, title, status, meta FROM contents {where_clause} ORDER BY title ASC LIMIT %s",
+        f"SELECT content_id, title, status, meta, source FROM contents {where_clause} ORDER BY title ASC LIMIT %s",
         (*query_params, per_page)
     )
 
@@ -126,7 +126,7 @@ def get_completed_contents():
         query_params.append(last_title)
 
     cursor.execute(
-        f"SELECT content_id, title, status, meta FROM contents {where_clause} ORDER BY title ASC LIMIT %s",
+        f"SELECT content_id, title, status, meta, source FROM contents {where_clause} ORDER BY title ASC LIMIT %s",
         (*query_params, per_page)
     )
 

@@ -1,12 +1,12 @@
-name: Run Crawler Daily
+name: Run All Crawlers Daily
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs every day at midnight UTC
-  workflow_dispatch: # Allows manual triggering
+    - cron: '0 0 * * *' # 매일 자정(UTC)에 실행
+  workflow_dispatch: # 수동 실행 기능
 
 jobs:
-  run-crawler:
+  run-all-crawlers:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -22,19 +22,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run crawler
+      - name: Run all crawlers
         env:
+          # 모든 크롤러 및 DB 스크립트에 필요한 환경 변수
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_PORT: ${{ secrets.DB_PORT }}
+          # 이메일 발송에 필요한 환경 변수 (알림 서비스용)
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
-        run: python -m crawlers.naver_webtoon_crawler
+          # SendGrid 사용 시 필요한 API 키 (선택 사항)
+          # SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        run: python run_all_crawlers.py
 
       - name: Run report sender
+        # report_sender.py는 자체적으로 load_dotenv()를 호출하므로
+        # 환경 변수를 다시 설정해주는 것이 가장 안전합니다.
         env:
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -44,4 +50,5 @@ jobs:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          # SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
         run: python report_sender.py

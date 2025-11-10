@@ -17,7 +17,7 @@ def subscribe():
     data = request.json
     email = data.get('email')
     content_id = data.get('contentId')
-    source = data.get('source', 'naver_webtoon')
+    source = data.get('source')
 
     if not all([email, content_id, source]):
         return jsonify({'status': 'error', 'message': '이메일, 콘텐츠 ID, 소스가 필요합니다.'}), 400

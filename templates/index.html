@@ -94,6 +94,7 @@
             const state = {
                 activeTab: 'mon',
                 currentTitleId: null,
+                currentSource: null, // 🚨 [추가]
                 searchTimeout: null,
                 isSearching: false,
                 searchResults: [],
@@ -214,7 +215,8 @@
 
                     </div>
                     <div class="flex items-center space-x-4 ml-4 flex-shrink-0">${getStatusBadge(webtoon.status)}</div>`;
-                row.addEventListener('click', () => openModal(webtoon.content_id, webtoon.title));
+                // 🚨 [수정] openModal에 webtoon.source를 세 번째 인자로 전달
+                row.addEventListener('click', () => openModal(webtoon.content_id, webtoon.title, webtoon.source));
                 return row;
             }
 
@@ -301,10 +303,22 @@
                 }
             }
 
-            function openModal(contentId, titleText) {
+            // 🚨 [수정] source 매개변수 추가
+            function openModal(contentId, titleText, source) {
                 state.currentTitleId = contentId;
+                state.currentSource = source; // 🚨 [추가] state에 source 저장
                 UI.modalWebtoonTitle.textContent = `'${titleText}'`;
-                const webtoonLink = `https://comic.naver.com/webtoon/list?titleId=${contentId}`;
+
+                let webtoonLink = '#'; // 기본 링크
+
+                // 🚨 [추가] source에 따라 링크 분기
+                if (source === 'naver_webtoon') {
+                    webtoonLink = `https://comic.naver.com/webtoon/list?titleId=${contentId}`;
+                } else if (source === 'kakaopage') { // 카카오웹툰의 소스 문자열 (예: 'kakaopage')
+                    webtoonLink = `https://page.kakao.com/content/${contentId}`; // 카카오페이지의 URL 형식 (예시)
+                }
+                // (추후 다른 플랫폼 링크도 이곳에 추가)
+
                 UI.modalWebtoonLinkContainer.innerHTML = `<a href="${webtoonLink}" target="_blank" class="inline-flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors"><span>웹툰 바로가기</span><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
                 UI.modal.classList.remove('hidden');
                 setTimeout(() => UI.modalContent.classList.remove('scale-95', 'opacity-0'), 10);
@@ -331,7 +345,11 @@
                 try {
                     const response = await fetch('/api/subscriptions', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: email, contentId: state.currentTitleId }),
+                        body: JSON.stringify({
+                            email: email,
+                            contentId: state.currentTitleId,
+                            source: state.currentSource // 🚨 [추가] source 필드 전송
+                        }),
                     });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.message || '구독 처리 중 오류가 발생했습니다.');

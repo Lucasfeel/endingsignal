@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 from database import create_standalone_connection, get_cursor
-from services.notification_service import send_email
+from services.email import get_email_service
 
 def send_consolidated_report():
     load_dotenv()
@@ -13,6 +13,12 @@ def send_consolidated_report():
     if not admin_email:
         print("경고: 보고서를 수신할 ADMIN_EMAIL이 없습니다.", file=sys.stderr)
         return
+
+    try:
+        email_service = get_email_service()
+    except ValueError as e:
+        print(f"FATAL: 이메일 서비스 초기화 실패: {e}", file=sys.stderr)
+        sys.exit(1)
 
     conn = None
     try:
@@ -37,7 +43,6 @@ def send_consolidated_report():
         for report in reports:
             name = report['crawler_name']
             status = report['status']
-            # report_data가 이미 dict/jsonb이면 json.loads 필요 없음, 텍스트면 필요
             data = report['report_data']
 
             if status == '실패':
@@ -60,7 +65,7 @@ def send_consolidated_report():
 
         # --- 2. 이메일 발송 ---
         print(f"LOG: 관리자({admin_email})에게 통합 보고서를 발송합니다...")
-        send_email(admin_email, subject, body)
+        email_service.send_mail(admin_email, subject, body)
         print("LOG: 통합 보고서 발송 완료.")
 
         # --- 3. (중요) 발송 완료 후 테이블 비우기 ---

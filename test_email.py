@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
-from services.notification_service import send_email
+from services.email import get_email_service
 from database import create_standalone_connection, get_cursor
 
 load_dotenv()
@@ -19,6 +19,16 @@ def run_test():
     """
     이메일 발송 기능 자체를 직접 테스트합니다.
     """
+    try:
+        email_service = get_email_service()
+    except ValueError as e:
+        print("="*60)
+        print("❌ [오류] 이메일 서비스 초기화에 실패했습니다.")
+        print(f"   원인: {e}")
+        print("   .env 파일에 EMAIL_ADDRESS, EMAIL_PASSWORD 등 필요한 환경 변수가 모두 설정되었는지 확인해주세요.")
+        print("="*60)
+        return
+
     TEST_CONTENT_ID = '747269' # '전지적 독자 시점'
     TEST_SOURCE = 'naver_webtoon'
     TEST_RECIPIENT_EMAIL = "jules.testing.bot@gmail.com"
@@ -35,6 +45,10 @@ def run_test():
         cursor = get_cursor(conn)
         cursor.execute("SELECT title FROM contents WHERE content_id = %s AND source = %s", (TEST_CONTENT_ID, TEST_SOURCE))
         result = cursor.fetchone()
+    except Exception as e:
+        print(f"❌ [오류] 데이터베이스 연결 또는 조회에 실패했습니다: {e}")
+        print("   .env 파일의 데이터베이스 관련 환경 변수가 올바르게 설정되었는지 확인해주세요.")
+        return
     finally:
         if conn:
             conn.close()
@@ -58,23 +72,15 @@ def run_test():
 """
 
     print("\n이메일 발송을 시도합니다...")
-    send_email(TEST_RECIPIENT_EMAIL, subject, body)
+    success = email_service.send_mail(TEST_RECIPIENT_EMAIL, subject, body)
+
+    if success:
+        print("✅ 이메일 발송 요청이 성공적으로 전송되었습니다.")
+    else:
+        print("❌ 이메일 발송 요청이 실패했습니다. 로그를 확인해주세요.")
 
     print("=== 테스트 종료 ===")
 
 
 if __name__ == '__main__':
-    required_env_vars = ['EMAIL_ADDRESS', 'EMAIL_PASSWORD', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']
-    missing_vars = [var for var in required_env_vars if not os.getenv(var) and not os.getenv('DATABASE_URL')]
-
-    if missing_vars:
-        print("="*60)
-        print("❌ [오류] 필수 환경 변수가 설정되지 않았습니다.")
-        print("   테스트를 진행하려면 .env 파일을 설정하거나 다음 환경 변수를 지정해주세요:")
-        for var in missing_vars:
-            print(f"   - {var}")
-        print("\n   또는 DATABASE_URL 환경 변수를 설정해주세요.")
-        print("\n   예: export EMAIL_ADDRESS='당신의G메일주소'")
-        print("="*60)
-    else:
-        run_test()
+    run_test()
