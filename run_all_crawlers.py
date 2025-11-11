@@ -15,7 +15,7 @@ from crawlers.kakaopage_crawler import KakaopageCrawler
 # ----------------------------------------------------------------------
 ALL_CRAWLERS = [
     NaverWebtoonCrawler,
-    KakaopageCrawler,
+    # KakaopageCrawler, # 👈 봇 감지 문제로 임시 비활성화
     # (향후 새로운 크롤러 클래스를 여기에 추가)
 ]
 # ----------------------------------------------------------------------
