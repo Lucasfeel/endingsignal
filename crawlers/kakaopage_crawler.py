@@ -172,7 +172,17 @@ class KakaopageCrawler(ContentCrawler):
         for cid, cdata in all_content_today.items():
             status = '완결' if cid in finished_today else '휴재' if cid in hiatus_today else '연재중'
             title = cdata.get('title', '제목 없음')
-            meta = {'authors': [a.get('name') for a in cdata.get('authors', []) if a.get('name')], 'weekdays': cdata.get('normalized_weekdays', []), 'thumbnail_url': cdata.get('thumbnail')}
+
+            # [수정] naver_webtoon_crawler.py와 동일한 표준 meta 구조로 변경
+            meta = {
+                "common": {
+                    "authors": [a.get('name') for a in cdata.get('authors', []) if a.get('name')],
+                    "thumbnail_url": cdata.get('thumbnail')
+                },
+                "attributes": {
+                    "weekdays": cdata.get('normalized_weekdays', [])
+                }
+            }
 
             if cid in db_data:
                 # [BUG FIX] 제목, 상태, 메타데이터 중 하나라도 변경되면 업데이트

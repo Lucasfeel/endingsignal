@@ -215,9 +215,10 @@ if __name__ == '__main__':
     CRAWLER_DISPLAY_NAME = "네이버 웹툰"
 
     try:
-        print("LOG: Calling setup_database_standalone()...")
-        setup_database_standalone()
-        print("LOG: setup_database_standalone() finished.")
+        # [삭제] 크롤러가 DB 셋업을 직접 호출하는 위험한 코드 제거
+        # print("LOG: Calling setup_database_standalone()...")
+        # setup_database_standalone()
+        # print("LOG: setup_database_standalone() finished.")
 
         print("LOG: Calling create_standalone_connection()...")
         db_conn = create_standalone_connection()
