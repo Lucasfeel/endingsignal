@@ -65,10 +65,15 @@ def send_consolidated_report():
 
         # --- 2. 이메일 발송 ---
         print(f"LOG: 관리자({admin_email})에게 통합 보고서를 발송합니다...")
-        email_service.send_mail(admin_email, subject, body)
+        success = email_service.send_mail(admin_email, subject, body)
+
+        # [수정] 이메일 발송 실패 시, 즉시 예외를 발생시켜 TRUNCATE를 막음
+        if not success:
+            raise Exception("이메일 발송에 실패했습니다 (send_mail이 False 반환). 보고서 DB를 TRUNCATE하지 않습니다.")
+
         print("LOG: 통합 보고서 발송 완료.")
 
-        # --- 3. (중요) 발송 완료 후 테이블 비우기 ---
+        # --- 3. (중요) 발송 '성공' 시에만 테이블 비우기 ---
         print("LOG: 'daily_crawler_reports' 테이블을 비웁니다 (TRUNCATE)...")
         cursor.execute("TRUNCATE TABLE daily_crawler_reports;")
         conn.commit()
