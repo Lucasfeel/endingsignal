@@ -12,6 +12,7 @@ def search_contents():
     """전체 DB에서 콘텐츠 제목을 검색하여 결과를 반환합니다."""
     query = request.args.get('q', '').strip()
     content_type = request.args.get('type', 'webtoon')
+    source = request.args.get('source', 'all')
 
     if not query:
         return jsonify([])
@@ -19,16 +20,20 @@ def search_contents():
     conn = get_db()
     cursor = get_cursor(conn)
 
-    cursor.execute(
-        """
+    base_query = """
         SELECT content_id, title, status, meta, source
         FROM contents
         WHERE title %% %s AND content_type = %s
-        ORDER BY similarity(title, %s) DESC
-        LIMIT 100
-        """,
-        (query, content_type, query)
-    )
+    """
+    params = [query, content_type, query]
+
+    if source != 'all':
+        base_query += " AND source = %s"
+        params.insert(2, source) # similarity 앞에 source 파라미터 추가
+
+    base_query += " ORDER BY similarity(title, %s) DESC LIMIT 100"
+
+    cursor.execute(base_query, tuple(params))
 
     results = [
         {**row, 'meta': row['meta'] or {}}
@@ -42,14 +47,19 @@ def search_contents():
 def get_ongoing_contents():
     """요일별 연재중인 콘텐츠 목록을 그룹화하여 반환합니다."""
     content_type = request.args.get('type', 'webtoon')
+    source = request.args.get('source', 'all')
 
     conn = get_db()
     cursor = get_cursor(conn)
 
-    cursor.execute(
-        "SELECT content_id, title, status, meta, source FROM contents WHERE content_type = %s AND (status = '연재중' OR status = '휴재')",
-        (content_type,)
-    )
+    base_query = "SELECT content_id, title, status, meta, source FROM contents WHERE content_type = %s AND (status = '연재중' OR status = '휴재')"
+    params = [content_type]
+
+    if source != 'all':
+        base_query += " AND source = %s"
+        params.append(source)
+
+    cursor.execute(base_query, tuple(params))
 
     all_contents = [
         {**row, 'meta': row['meta'] or {}}
@@ -78,12 +88,17 @@ def get_hiatus_contents():
     last_title = request.args.get('last_title')
     per_page = 100
     content_type = request.args.get('type', 'webtoon')
+    source = request.args.get('source', 'all')
 
     conn = get_db()
     cursor = get_cursor(conn)
 
     query_params = [content_type]
     where_clause = "WHERE status = '휴재' AND content_type = %s"
+
+    if source != 'all':
+        where_clause += " AND source = %s"
+        query_params.append(source)
 
     if last_title:
         where_clause += " AND title > %s"
@@ -115,12 +130,17 @@ def get_completed_contents():
     last_title = request.args.get('last_title')
     per_page = 100
     content_type = request.args.get('type', 'webtoon')
+    source = request.args.get('source', 'all')
 
     conn = get_db()
     cursor = get_cursor(conn)
 
     query_params = [content_type]
     where_clause = "WHERE status = '완결' AND content_type = %s"
+
+    if source != 'all':
+        where_clause += " AND source = %s"
+        query_params.append(source)
 
     if last_title:
         where_clause += " AND title > %s"

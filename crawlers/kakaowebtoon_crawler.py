@@ -49,6 +49,7 @@ class KakaowebtoonCrawler(ContentCrawler):
             response.raise_for_status()
             return await response.json()
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _fetch_paginated_completed(self, session):
         """'completed' 엔드포인트의 모든 페이지를 순회하며 데이터를 수집합니다."""
         all_completed_content = []
@@ -94,6 +95,7 @@ class KakaowebtoonCrawler(ContentCrawler):
 
             weekday_data, completed_data = results
 
+
         if isinstance(weekday_data, Exception):
             print(f"❌ 요일별 데이터 수집 실패: {weekday_data}")
             weekday_data = {}
@@ -104,14 +106,23 @@ class KakaowebtoonCrawler(ContentCrawler):
         print("\n--- 데이터 정규화 시작 ---")
         ongoing_today, hiatus_today, finished_today = {}, {}, {}
 
+        # 요일 한글 -> 영문 변환 맵
+        DAY_MAP = {"월": "mon", "화": "tue", "수": "wed", "목": "thu", "금": "fri", "토": "sat", "일": "sun"}
+
         if weekday_data.get('data', {}).get('sections'):
             for section in weekday_data['data']['sections']:
+                weekday_kor = section.get('title', '').replace('요일', '') # "월요일" -> "월"
+                weekday_eng = DAY_MAP.get(weekday_kor)
+                if not weekday_eng: continue
+
                 for card_group in section.get('cardGroups', []):
+
                     for webtoon in card_group.get('cards', []):
                         content_id = str(webtoon['id'])
-                        status_text = webtoon.get('status', '연재')
+                        webtoon['weekdayDisplayGroups'] = [weekday_eng]
 
-                        if status_text == '휴재':
+                        status_text = webtoon.get('content', {}).get('onGoingStatus') # 'onGoingStatus' 사용
+                        if status_text == 'PAUSE': # 휴재 상태 키 확인
                             if content_id not in hiatus_today:
                                 hiatus_today[content_id] = webtoon
                         else:
@@ -121,6 +132,8 @@ class KakaowebtoonCrawler(ContentCrawler):
         for webtoon in completed_data:
             content_id = str(webtoon['id'])
             if content_id not in ongoing_today and content_id not in hiatus_today:
+                # 완결 데이터는 'status'가 최상위에 있을 수 있음
+                webtoon['status'] = '완결'
                 finished_today[content_id] = webtoon
 
         all_content_today = {**ongoing_today, **hiatus_today, **finished_today}
@@ -145,19 +158,24 @@ class KakaowebtoonCrawler(ContentCrawler):
             elif content_id in ongoing_today: status = '연재중'
             else: continue
 
-            author_names = [author['name'] for author in webtoon_data.get('authors', [])]
+            content_data = webtoon_data.get('content', {})
+            author_names = [author['name'] for author in content_data.get('authors', [])]
+
+            thumbnail_url = None
+            if content_data.get('lookThroughImages'):
+                thumbnail_url = content_data['lookThroughImages'][0]
 
             meta_data = {
                 "common": {
                     "authors": author_names,
-                    "thumbnail_url": webtoon_data.get('thumbnailUrl')
+                    "thumbnail_url": thumbnail_url
                 },
                 "attributes": {
-                    "weekdays": ongoing_today.get(content_id, {}).get('weekdayDisplayGroups', [])
+                    "weekdays": webtoon_data.get('weekdayDisplayGroups', [])
                 }
             }
 
-            title = webtoon_data.get('title')
+            title = content_data.get('title')
             if not title:
                 continue
 

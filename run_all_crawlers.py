@@ -76,9 +76,6 @@ async def main():
     """
     등록된 모든 크롤러를 병렬로 실행하고, 각 크롤러의 실행 결과를 DB에 저장합니다.
     """
-    # .env 파일의 절대 경로를 명시적으로 지정하여 로드합니다.
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-    load_dotenv(dotenv_path=dotenv_path)
     start_time = time.time()
     print("==========================================")
     print("   통합 크롤러 실행 스크립트 시작")

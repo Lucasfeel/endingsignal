@@ -35,11 +35,12 @@
 
     <main class="container mx-auto p-4 md:p-8">
         <div id="mainTabContainer" class="mb-4">
-            <div class="flex space-x-4">
-                <button data-content-type="webtoon" class="main-tab-button active">웹툰</button>
-                <button data-content-type="novel" class="main-tab-button">웹소설</button>
+            <div class="flex space-x-4 border-b border-gray-700 pb-2">
+                <button data-content-type="webtoon" class="main-tab-button text-lg font-bold px-3 py-1 rounded-md">웹툰</button>
+                <button data-content-type="novel" class="main-tab-button text-lg font-bold px-3 py-1 rounded-md text-gray-500">웹소설</button>
             </div>
         </div>
+        <div id="sourceSelectorContainer" class="mb-6"></div>
         <div id="tabContainer" class="mb-6 overflow-x-auto"><div class="flex space-x-2 border-b border-gray-700"></div></div>
         <div id="webtoonListContainer"></div>
         <div id="paginationContainer" class="text-center py-8"></div>
@@ -103,16 +104,13 @@
             const state = {
                 activeContentType: 'webtoon',
                 activeTab: 'mon',
+                activeSource: 'all', // 'all', 'naver_webtoon', 'kakaowebtoon'
                 currentTitleId: null,
                 currentSource: null,
                 searchTimeout: null,
                 isSearching: false,
                 searchResults: [],
-                cache: {
-                    ongoing: null,
-                    hiatus: [],
-                    completed: []
-                },
+                cache: {}, // Dynamic cache based on source and tab
                 pagination: {
                     hiatus: { nextCursor: null, hasMore: true, isLoading: false },
                     completed: { nextCursor: null, hasMore: true, isLoading: false }
@@ -129,8 +127,27 @@
                 }
             }
 
+            function getCacheKey() {
+                return `${state.activeSource}_${state.activeContentType}`;
+            }
+
+            function resetCache() {
+                const key = getCacheKey();
+                state.cache[key] = {
+                    ongoing: null,
+                    hiatus: [],
+                    completed: []
+                };
+                state.pagination = {
+                    hiatus: { nextCursor: null, hasMore: true, isLoading: false },
+                    completed: { nextCursor: null, hasMore: true, isLoading: false }
+                };
+            }
+
             async function fetchDataForTab(tabKey) {
+                const cacheKey = getCacheKey();
                 const isPaginated = tabKey === 'hiatus' || tabKey === 'completed';
+
                 if (isPaginated) {
                     if (state.pagination[tabKey].isLoading || !state.pagination[tabKey].hasMore) return;
                     state.pagination[tabKey].isLoading = true;
@@ -140,12 +157,13 @@
                 try {
                     let url;
                     const typeParam = `type=${state.activeContentType}`;
+                    const sourceParam = state.activeSource !== 'all' ? `&source=${state.activeSource}` : '';
 
                     if (isPaginated) {
                         const cursor = state.pagination[tabKey].nextCursor;
-                        url = cursor ? `/api/contents/${tabKey}?${typeParam}&last_title=${encodeURIComponent(cursor)}` : `/api/contents/${tabKey}?${typeParam}`;
+                        url = cursor ? `/api/contents/${tabKey}?${typeParam}${sourceParam}&last_title=${encodeURIComponent(cursor)}` : `/api/contents/${tabKey}?${typeParam}${sourceParam}`;
                     } else {
-                        url = `/api/contents/ongoing?${typeParam}`;
+                        url = `/api/contents/ongoing?${typeParam}${sourceParam}`;
                     }
 
                     const response = await fetch(url);
@@ -153,12 +171,14 @@
 
                     const data = await response.json();
 
+                    if (!state.cache[cacheKey]) resetCache();
+
                     if (isPaginated) {
-                        state.cache[tabKey].push(...data.contents);
+                        state.cache[cacheKey][tabKey].push(...data.contents);
                         state.pagination[tabKey].nextCursor = data.next_cursor;
                         state.pagination[tabKey].hasMore = !!data.next_cursor;
                     } else {
-                        state.cache.ongoing = data;
+                        state.cache[cacheKey].ongoing = data;
                     }
                 } catch (error) {
                     showStatus('웹툰 목록 로딩 실패. 잠시 후 다시 시도해주세요.', true);
@@ -170,6 +190,31 @@
                     renderWebtoonList();
                     renderPagination();
                 }
+            }
+
+            function renderSourceSelector() {
+                const container = document.getElementById('sourceSelectorContainer');
+                container.innerHTML = '';
+                if (state.activeContentType !== 'webtoon') return;
+
+                const sources = {
+                    'all': '전체',
+                    'naver_webtoon': '네이버웹툰',
+                    'kakaowebtoon': '카카오웹툰'
+                };
+
+                const buttonGroup = document.createElement('div');
+                buttonGroup.className = 'flex items-center gap-2 bg-gray-800 p-1 rounded-lg';
+
+                Object.entries(sources).forEach(([key, value]) => {
+                    const button = document.createElement('button');
+                    button.dataset.source = key;
+                    button.textContent = value;
+                    button.className = `px-4 py-2 text-sm font-bold rounded-md transition-colors duration-200 ${state.activeSource === key ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`;
+                    button.onclick = () => handleSourceClick(key);
+                    buttonGroup.appendChild(button);
+                });
+                container.appendChild(buttonGroup);
             }
 
             function renderTabs() {
@@ -191,16 +236,34 @@
                 }
             }
 
+            async function handleSourceClick(sourceKey) {
+                state.activeSource = sourceKey;
+                renderSourceSelector();
+
+                // Reset search state when changing source
+                state.isSearching = false;
+                UI.searchInput.value = '';
+
+                // Re-fetch data for the currently active tab with the new source
+                await handleTabClick(state.activeTab);
+            }
+
             async function handleTabClick(tabKey) {
                 state.activeTab = tabKey;
-                state.isSearching = false; // 탭 클릭 시 검색 상태 해제
+                state.isSearching = false;
                 UI.searchInput.value = '';
                 renderTabs();
 
+                const cacheKey = getCacheKey();
                 const isPaginated = tabKey === 'hiatus' || tabKey === 'completed';
-                const cacheKey = isPaginated ? tabKey : 'ongoing';
+                const cacheData = state.cache[cacheKey];
 
-                if (!state.cache[cacheKey] || (isPaginated && state.cache[cacheKey].length === 0)) {
+                let isCacheEmpty = true;
+                if (cacheData) {
+                    isCacheEmpty = isPaginated ? cacheData[tabKey].length === 0 : !cacheData.ongoing;
+                }
+
+                if (!cacheData || isCacheEmpty) {
                     showStatus('loading');
                     await fetchDataForTab(tabKey);
                 } else {
@@ -243,6 +306,7 @@
             function renderWebtoonList() {
                 UI.webtoonListContainer.innerHTML = '';
                 UI.statusIndicator.innerHTML = '';
+                const cacheKey = getCacheKey();
 
                 let listToRender;
 
@@ -251,14 +315,22 @@
                     UI.tabContainer.parentElement.style.display = 'none';
                     UI.paginationContainer.style.display = 'none';
                 } else {
+                    renderSourceSelector();
+                    renderTabs();
+                    UI.paginationContainer.style.display = 'block';
+
+                    const cacheData = state.cache[cacheKey];
+                    if (!cacheData) {
+                        showStatus('loading');
+                        return;
+                    }
+
                     const isPaginated = state.activeTab === 'hiatus' || state.activeTab === 'completed';
                     if (isPaginated) {
-                        listToRender = state.cache[state.activeTab];
+                        listToRender = cacheData[state.activeTab];
                     } else {
-                        listToRender = state.cache.ongoing?.[state.activeTab] || [];
+                        listToRender = cacheData.ongoing?.[state.activeTab] || [];
                     }
-                    renderTabs(); // Re-render tabs to ensure visibility is correct
-                    UI.paginationContainer.style.display = 'block';
                 }
 
                 if (!listToRender || listToRender.length === 0) {
@@ -281,7 +353,9 @@
                     return;
                 }
 
+                const cacheKey = getCacheKey();
                 const pageState = state.pagination[tabKey];
+
                 if (pageState.isLoading) {
                     UI.paginationContainer.innerHTML = `<div class="loader"></div>`;
                 } else if (pageState.hasMore) {
@@ -291,7 +365,7 @@
                     loadMoreButton.onclick = () => fetchDataForTab(tabKey);
                     UI.paginationContainer.innerHTML = '';
                     UI.paginationContainer.appendChild(loadMoreButton);
-                } else if (state.cache[tabKey].length > 0) {
+                } else if (state.cache[cacheKey] && state.cache[cacheKey][tabKey] && state.cache[cacheKey][tabKey].length > 0) {
                      UI.paginationContainer.innerHTML = `<p class="text-gray-500">마지막 페이지입니다.</p>`;
                 } else {
                     UI.paginationContainer.innerHTML = '';
@@ -313,7 +387,9 @@
                 showStatus('loading');
 
                 try {
-                    const response = await fetch(`/api/contents/search?q=${encodeURIComponent(searchTerm)}&type=${state.activeContentType}`);
+                    const typeParam = `type=${state.activeContentType}`;
+                    const sourceParam = state.activeSource !== 'all' ? `&source=${state.activeSource}` : '';
+                    const response = await fetch(`/api/contents/search?q=${encodeURIComponent(searchTerm)}&${typeParam}${sourceParam}`);
                     if (!response.ok) throw new Error('Search API Error');
                     state.searchResults = await response.json();
                     renderWebtoonList();
@@ -392,13 +468,15 @@
                 document.querySelectorAll('.main-tab-button').forEach(button => {
                     button.addEventListener('click', () => {
                         state.activeContentType = button.dataset.contentType;
-                        document.querySelectorAll('.main-tab-button').forEach(btn => btn.classList.remove('active'));
-                        button.classList.add('active');
+                        document.querySelectorAll('.main-tab-button').forEach(btn => {
+                            btn.classList.toggle('text-gray-500', btn.dataset.contentType !== state.activeContentType);
+                        });
 
-                        // 콘텐츠 타입에 맞는 첫 번째 탭으로 초기화
                         const currentTabs = TABS[state.activeContentType] || {};
                         state.activeTab = Object.keys(currentTabs)[0];
 
+                        resetCache();
+                        renderSourceSelector();
                         renderTabs();
                         handleTabClick(state.activeTab);
                     });
