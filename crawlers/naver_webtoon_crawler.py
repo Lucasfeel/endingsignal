@@ -153,23 +153,16 @@ class NaverWebtoonCrawler(ContentCrawler):
             print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
 
         if inserts:
-            # === 🚨 [버그 수정] INSERT 리스트의 잠재적 중복 제거 ===
-            seen_keys = set()
-            unique_inserts = []
-            for record in inserts:
-                key = (record[0], record[1]) # (content_id, source)
-                if key not in seen_keys:
-                    unique_inserts.append(record)
-                    seen_keys.add(key)
-            # =======================================================
-
-            cursor.executemany("INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s)", unique_inserts) # 👈 unique_inserts 사용
-            print(f"{len(unique_inserts)}개 신규 웹툰 DB 추가 완료. (중복 {len(inserts) - len(unique_inserts)}개 제거)")
+            cursor.executemany(
+                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (content_id, source) DO NOTHING",
+                inserts
+            )
+            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
 
         conn.commit()
         cursor.close()
         print("DB 동기화 완료.")
-        return len(unique_inserts)
+        return len(inserts)
 
     async def run_daily_check(self, conn):
         print("LOG: run_daily_check started.")
