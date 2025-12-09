@@ -134,7 +134,7 @@ class NaverWebtoonCrawler(ContentCrawler):
             meta_data = {
                 "common": {
                     "authors": [author] if author else [],
-                    "thumbnail_url": None
+                    "thumbnail_url": webtoon_data.get('thumbnailUrl')
                 },
                 "attributes": {
                     "weekdays": webtoon_data.get('normalized_weekdays', [])

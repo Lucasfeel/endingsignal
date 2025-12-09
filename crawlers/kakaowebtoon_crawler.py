@@ -161,8 +161,11 @@ class KakaowebtoonCrawler(ContentCrawler):
             content_data = webtoon_data.get('content', {})
             author_names = [author['name'] for author in content_data.get('authors', [])]
 
-            thumbnail_url = None
-            if content_data.get('lookThroughImages'):
+            # 우선순위: lookThroughImage (단일) -> featuredCharacterImageA (캐릭터) -> lookThroughImages[0] (슬라이스)
+            thumbnail_url = content_data.get('lookThroughImage')
+            if not thumbnail_url and content_data.get('featuredCharacterImageA'):
+                thumbnail_url = content_data.get('featuredCharacterImageA')
+            if not thumbnail_url and content_data.get('lookThroughImages'):
                 thumbnail_url = content_data['lookThroughImages'][0]
 
             meta_data = {
