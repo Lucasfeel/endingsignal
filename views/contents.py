@@ -7,20 +7,6 @@ import json
 
 contents_bp = Blueprint('contents', __name__)
 
-def process_row(row):
-    """
-    DB에서 읽어온 row를 처리합니다.
-    meta 필드가 None이면 빈 dict로 보장합니다.
-    """
-    row_dict = dict(row)
-    if row_dict.get('meta') is None:
-        row_dict['meta'] = {}
-
-    # psycopg2가 JSONB를 dict로 자동 변환하므로,
-    # isinstance(..., str) 및 json.loads()가 더 이상 필요하지 않습니다.
-
-    return row_dict
-
 @contents_bp.route('/api/contents/search', methods=['GET'])
 def search_contents():
     """전체 DB에서 콘텐츠 제목을 검색하여 결과를 반환합니다."""
@@ -44,7 +30,10 @@ def search_contents():
         (query, content_type, query)
     )
 
-    results = [process_row(row) for row in cursor.fetchall()]
+    results = [
+        {**row, 'meta': row['meta'] or {}}
+        for row in cursor.fetchall()
+    ]
     cursor.close()
     return jsonify(results)
 
@@ -62,7 +51,10 @@ def get_ongoing_contents():
         (content_type,)
     )
 
-    all_contents = [process_row(row) for row in cursor.fetchall()]
+    all_contents = [
+        {**row, 'meta': row['meta'] or {}}
+        for row in cursor.fetchall()
+    ]
     cursor.close()
 
     # 콘텐츠 타입에 따라 분기
@@ -102,7 +94,10 @@ def get_hiatus_contents():
         (*query_params, per_page)
     )
 
-    results = [process_row(row) for row in cursor.fetchall()]
+    results = [
+        {**row, 'meta': row['meta'] or {}}
+        for row in cursor.fetchall()
+    ]
     cursor.close()
 
     next_cursor = None
@@ -136,7 +131,10 @@ def get_completed_contents():
         (*query_params, per_page)
     )
 
-    results = [process_row(row) for row in cursor.fetchall()]
+    results = [
+        {**row, 'meta': row['meta'] or {}}
+        for row in cursor.fetchall()
+    ]
     cursor.close()
 
     next_cursor = None

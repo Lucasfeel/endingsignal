@@ -33,14 +33,15 @@ class NaverWebtoonCrawler(ContentCrawler):
             data = await response.json()
             return data.get('titleList', data.get('list', []))
 
-    async def _fetch_paginated_finished_candidates(self, session):
+    async def _fetch_paginated_data(self, session, base_url, max_pages, description):
+        """
+        주어진 API URL의 모든 페이지를 순회하며 데이터를 수집하는 범용 함수
+        """
         all_candidates = {}
-        page = 1
-        MAX_PAGES = 150
-        print("\n'완결/장기 휴재 후보' 목록 확보를 위해 페이지네이션 수집 시작...")
-        while page <= MAX_PAGES:
+        print(f"\n'{description}' 목록 확보를 위해 페이지네이션 수집 시작...")
+        for page in range(1, max_pages + 1):
             try:
-                api_url = f"{config.NAVER_API_URL}/finished?order=UPDATE&page={page}&pageSize=100"
+                api_url = f"{base_url}&page={page}&pageSize=100"
                 webtoons_on_page = await self._fetch_from_api(session, api_url)
                 if not webtoons_on_page:
                     print(f"  -> {page-1} 페이지에서 수집 종료 (데이터 없음).")
@@ -49,46 +50,35 @@ class NaverWebtoonCrawler(ContentCrawler):
                     if webtoon['titleId'] not in all_candidates:
                         all_candidates[webtoon['titleId']] = webtoon
                 print(f"  -> {page} 페이지 수집 완료. (현재 후보군: {len(all_candidates)}개)")
-                page += 1
                 await asyncio.sleep(0.1)
             except Exception as e:
                 print(f"  -> {page} 페이지 수집 중 오류 발생: {e}")
                 break
-        if page > MAX_PAGES:
-            print(f"  -> 최대 {MAX_PAGES} 페이지까지 수집하여 종료합니다.")
-        return all_candidates
-
-    async def _fetch_paginated_weekday_data(self, session, api_day):
-        all_candidates = {}
-        page = 1
-        MAX_PAGES = 50  # You can adjust this if needed
-        # print(f"\n'{api_day}' 요일 웹툰 목록 확보를 위해 페이지네이션 수집 시작...")
-        while page <= MAX_PAGES:
-            try:
-                api_url = f"{config.NAVER_API_URL}/weekday?week={api_day}&page={page}&pageSize=100"
-                webtoons_on_page = await self._fetch_from_api(session, api_url)
-                if not webtoons_on_page:
-                    # print(f"  -> {api_day}: {page-1} 페이지에서 수집 종료 (데이터 없음).")
-                    break
-                for webtoon in webtoons_on_page:
-                    if webtoon['titleId'] not in all_candidates:
-                        all_candidates[webtoon['titleId']] = webtoon
-                # print(f"  -> {api_day}: {page} 페이지 수집 완료. (현재 후보군: {len(all_candidates)}개)")
-                page += 1
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                # print(f"  -> {api_day}: {page} 페이지 수집 중 오류 발생: {e}")
-                break
-        # if page > MAX_PAGES:
-        #     print(f"  -> {api_day}: 최대 {MAX_PAGES} 페이지까지 수집하여 종료합니다.")
+        else:
+            print(f"  -> 최대 {max_pages} 페이지까지 수집하여 종료합니다.")
         return all_candidates
 
     async def fetch_all_data(self):
         print("네이버 웹툰 서버에서 오늘의 최신 데이터를 가져옵니다...")
         async with aiohttp.ClientSession() as session:
-            ongoing_tasks = [self._fetch_paginated_weekday_data(session, api_day) for api_day in WEEKDAYS.keys()]
-            ongoing_results = await asyncio.gather(*ongoing_tasks, return_exceptions=True)
-            finished_candidates = await self._fetch_paginated_finished_candidates(session)
+            # 주간 웹툰 작업 생성
+            ongoing_tasks = []
+            for api_day in WEEKDAYS.keys():
+                base_url = f"{config.NAVER_API_URL}/weekday?week={api_day}"
+                task = self._fetch_paginated_data(session, base_url, 50, f"'{api_day}'요일 웹툰")
+                ongoing_tasks.append(task)
+
+            # 완결 웹툰 작업 생성
+            finished_base_url = f"{config.NAVER_API_URL}/finished?order=UPDATE"
+            finished_task = self._fetch_paginated_data(session, finished_base_url, 150, "완결/장기 휴재 후보")
+
+            # 모든 작업을 병렬로 실행
+            results = await asyncio.gather(*ongoing_tasks, finished_task, return_exceptions=True)
+
+            # 결과 분리
+            ongoing_results = results[:-1]
+            finished_candidates = results[-1] if not isinstance(results[-1], Exception) else {}
+
 
         print("\n--- 데이터 수집 결과 ---")
         naver_ongoing_today, naver_hiatus_today, naver_finished_today = {}, {}, {}
@@ -163,23 +153,16 @@ class NaverWebtoonCrawler(ContentCrawler):
             print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
 
         if inserts:
-            # === 🚨 [버그 수정] INSERT 리스트의 잠재적 중복 제거 ===
-            seen_keys = set()
-            unique_inserts = []
-            for record in inserts:
-                key = (record[0], record[1]) # (content_id, source)
-                if key not in seen_keys:
-                    unique_inserts.append(record)
-                    seen_keys.add(key)
-            # =======================================================
-
-            cursor.executemany("INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s)", unique_inserts) # 👈 unique_inserts 사용
-            print(f"{len(unique_inserts)}개 신규 웹툰 DB 추가 완료. (중복 {len(inserts) - len(unique_inserts)}개 제거)")
+            cursor.executemany(
+                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (content_id, source) DO NOTHING",
+                inserts
+            )
+            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
 
         conn.commit()
         cursor.close()
         print("DB 동기화 완료.")
-        return len(unique_inserts)
+        return len(inserts)
 
     async def run_daily_check(self, conn):
         print("LOG: run_daily_check started.")

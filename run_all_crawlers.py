@@ -6,17 +6,18 @@ import json
 import sys
 from dotenv import load_dotenv
 
+load_dotenv() # 👈 스크립트 최상단에서 환경 변수를 로드합니다.
+
 from database import create_standalone_connection, get_cursor
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
-from crawlers.kakaopage_crawler import KakaopageCrawler
+from crawlers.kakaowebtoon_crawler import KakaowebtoonCrawler
 
 # ----------------------------------------------------------------------
 # [중요] 실행할 모든 크롤러를 이곳에 등록합니다.
 # ----------------------------------------------------------------------
 ALL_CRAWLERS = [
     NaverWebtoonCrawler,
-    # KakaopageCrawler, # 👈 봇 감지 문제로 임시 비활성화
-    # (향후 새로운 크롤러 클래스를 여기에 추가)
+    KakaowebtoonCrawler,
 ]
 # ----------------------------------------------------------------------
 
@@ -69,16 +70,19 @@ async def run_one_crawler(crawler_class, db_conn):
             if report_conn:
                 report_conn.close()
 
+import os
+
 async def main():
     """
     등록된 모든 크롤러를 병렬로 실행하고, 각 크롤러의 실행 결과를 DB에 저장합니다.
     """
+    # .env 파일의 절대 경로를 명시적으로 지정하여 로드합니다.
+    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    load_dotenv(dotenv_path=dotenv_path)
     start_time = time.time()
     print("==========================================")
     print("   통합 크롤러 실행 스크립트 시작")
     print("==========================================")
-
-    load_dotenv()
 
     db_conn = None
     try:
