@@ -174,7 +174,14 @@ class KakaowebtoonCrawler(ContentCrawler):
                     "thumbnail_url": thumbnail_url
                 },
                 "attributes": {
-                    "weekdays": webtoon_data.get('weekdayDisplayGroups', [])
+                    "weekdays": webtoon_data.get('weekdayDisplayGroups', []),
+                    "lookThroughImage": content_data.get('lookThroughImage'),
+                    "backgroundImage": content_data.get('backgroundImage'),
+                    "featuredCharacterImageA": content_data.get('featuredCharacterImageA'),
+                    "featuredCharacterImageB": content_data.get('featuredCharacterImageB'),
+                    "titleImageA": content_data.get('titleImageA'),
+                    "titleImageB": content_data.get('titleImageB'),
+                    "lookThroughImages": content_data.get('lookThroughImages')
                 }
             }
 
