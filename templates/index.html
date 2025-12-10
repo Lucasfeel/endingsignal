@@ -17,6 +17,7 @@
             --text-gray-100: #E5E5E5;
             --text-gray-400: #A3A3A3;
             --text-gray-600: #525252;
+            --brand-glow: 0 0 10px rgba(79, 70, 229, 0.5);
         }
 
         body {
@@ -50,6 +51,17 @@
         .fade-in { animation: fadeIn 0.2s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+        /* Neon Glow Utilities */
+        .neon-glow {
+            box-shadow: var(--brand-glow);
+        }
+        .neon-text-glow {
+            text-shadow: 0 0 8px rgba(79, 70, 229, 0.6);
+        }
+        .neon-drop-shadow {
+            filter: drop-shadow(0 0 5px rgba(79, 70, 229, 0.6));
+        }
+
         /* Glassmorphism */
         .glass-bg {
             background-color: var(--bg-overlay);
@@ -65,7 +77,11 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 10px; font-weight: bold; color: #fff;
         }
-        .l1-logo.active { border: 2px solid var(--brand-primary); opacity: 1; }
+        .l1-logo.active {
+            border: 2px solid var(--brand-primary);
+            opacity: 1;
+            box-shadow: var(--brand-glow);
+        }
         .l1-logo.inactive { opacity: 0.4; filter: grayscale(100%); }
 
         /* L2 Text Tab Styles */
@@ -78,7 +94,11 @@
             border-bottom: 2px solid transparent;
             transition: all 0.2s;
         }
-        .l2-tab.active { color: var(--text-white); border-bottom-color: var(--brand-primary); }
+        .l2-tab.active {
+            color: var(--text-white);
+            border-bottom-color: var(--brand-primary);
+            text-shadow: 0 0 5px rgba(255,255,255,0.3);
+        }
 
         /* Skeleton Loading */
         .skeleton {
@@ -165,7 +185,7 @@
                 </div>
                 <div class="flex justify-end gap-2">
                     <button id="cancelButton" class="px-4 py-2 rounded-lg bg-[#3a3a3c] text-gray-300 text-sm font-medium spring-bounce">취소</button>
-                    <button id="subscribeButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce">구독하기</button>
+                    <button id="subscribeButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce neon-glow">구독하기</button>
                 </div>
             </div>
         </div>
@@ -239,11 +259,11 @@
                 const isActive = STATE.activeTab === tab.id;
                 btn.className = `flex flex-col items-center justify-center w-full spring-bounce ${isActive ? 'text-[#4F46E5]' : 'text-[#525252]'}`;
 
-                // SVG manipulation for active/inactive outline/solid could go here if icons support it.
-                // For now assuming icons are solid/outline by default or color change is sufficient.
+                // Neon glow on active icon
+                const iconClass = isActive ? 'scale-110 neon-drop-shadow' : 'scale-100';
 
                 btn.innerHTML = `
-                    <div class="mb-1 transform transition-transform duration-200 ${isActive ? 'scale-110' : 'scale-100'}">
+                    <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
                         ${tab.icon}
                     </div>
                     <span class="text-[10px] ${isActive ? 'font-bold' : 'font-medium'}">${tab.label}</span>
@@ -503,8 +523,9 @@
                     </div>`;
             }
 
+            // Using #1E1E1E for Card BG
             el.innerHTML = `
-                <div class="${aspectClass} rounded-lg overflow-hidden bg-[#2C2C2C] relative mb-2">
+                <div class="${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2">
                     <img src="${thumb}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
                     ${badge}
                     ${overlay}
