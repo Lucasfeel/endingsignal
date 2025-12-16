@@ -79,10 +79,11 @@ def setup_database_standalone():
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS subscriptions (
             id SERIAL PRIMARY KEY,
-            email TEXT NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            email TEXT,
             content_id TEXT NOT NULL,
             source TEXT NOT NULL,
-            UNIQUE(email, content_id, source)
+            UNIQUE(user_id, content_id, source)
         )""")
         print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
 
