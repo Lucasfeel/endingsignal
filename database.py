@@ -75,18 +75,6 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'contents' table created or already exists.")
 
-        print("LOG: [DB Setup] Creating 'subscriptions' table...")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            email TEXT,
-            content_id TEXT NOT NULL,
-            source TEXT NOT NULL,
-            UNIQUE(user_id, content_id, source)
-        )""")
-        print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
-
         print("LOG: [DB Setup] Creating 'users' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -99,6 +87,34 @@ def setup_database_standalone():
             last_login_at TIMESTAMP
         )""")
         print("LOG: [DB Setup] 'users' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'subscriptions' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            email TEXT,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            UNIQUE(user_id, content_id, source)
+        )""")
+        print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'admin_content_overrides' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admin_content_overrides (
+            id SERIAL PRIMARY KEY,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            override_status TEXT NOT NULL,
+            override_completed_at TIMESTAMP,
+            reason TEXT,
+            admin_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(content_id, source)
+        )""")
+        print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
 
         # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")
