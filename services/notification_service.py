@@ -17,7 +17,12 @@ def send_completion_notifications(cursor, newly_completed_ids, all_content_today
 
     for content_id in newly_completed_ids:
         content_data = all_content_today.get(content_id, {})
-        title = content_data.get('titleName', f'ID {content_id}')
+        title = (
+            content_data.get('title')
+            or content_data.get('titleName')
+            or content_data.get('content', {}).get('title')
+            or f'ID {content_id}'
+        )
 
         cursor.execute("SELECT email FROM subscriptions WHERE content_id = %s AND source = %s", (content_id, source))
         subscribers = [row['email'] for row in cursor.fetchall()]
