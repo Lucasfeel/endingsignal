@@ -8,7 +8,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base_crawler import ContentCrawler
 from database import get_cursor
-from services.notification_service import send_completion_notifications
 
 # --- KakaoWebtoon API Configuration ---
 API_BASE_URL = "https://gateway-kw.kakao.com/section/v1/pages"
@@ -121,6 +120,10 @@ class KakaowebtoonCrawler(ContentCrawler):
                         content_id = str(webtoon['id'])
                         webtoon['weekdayDisplayGroups'] = [weekday_eng]
 
+                        content_payload = webtoon.get('content', {})
+                        if 'title' not in webtoon:
+                            webtoon['title'] = content_payload.get('title')
+
                         status_text = webtoon.get('content', {}).get('onGoingStatus') # 'onGoingStatus' 사용
                         if status_text == 'PAUSE': # 휴재 상태 키 확인
                             if content_id not in hiatus_today:
@@ -134,9 +137,15 @@ class KakaowebtoonCrawler(ContentCrawler):
             if content_id not in ongoing_today and content_id not in hiatus_today:
                 # 완결 데이터는 'status'가 최상위에 있을 수 있음
                 webtoon['status'] = '완결'
+                content_payload = webtoon.get('content', {})
+                if 'title' not in webtoon:
+                    webtoon['title'] = content_payload.get('title')
                 finished_today[content_id] = webtoon
 
         all_content_today = {**ongoing_today, **hiatus_today, **finished_today}
+        for webtoon in all_content_today.values():
+            if 'title' not in webtoon:
+                webtoon['title'] = webtoon.get('content', {}).get('title')
         print(f"오늘자 데이터 수집 완료: 총 {len(all_content_today)}개 고유 웹툰 확인")
         print(f"  - 연재중: {len(ongoing_today)}개, 휴재: {len(hiatus_today)}개, 완결: {len(finished_today)}개")
         return ongoing_today, hiatus_today, finished_today, all_content_today
@@ -209,29 +218,3 @@ class KakaowebtoonCrawler(ContentCrawler):
         print("DB 동기화 완료.")
         return len(inserts)
 
-    async def run_daily_check(self, conn):
-        """
-        매일 실행되는 메인 로직입니다.
-        """
-        print(f"=== [{self.source_name.title()}] 일일 점검 시작 ===")
-        cursor = get_cursor(conn)
-
-        cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
-        db_state_before_sync = {row['content_id']: row['status'] for row in cursor.fetchall()}
-        cursor.close()
-        print(f"  -> DB에서 {len(db_state_before_sync)}개의 기존 콘텐츠 상태를 로드했습니다.")
-
-        ongoing, hiatus, finished, all_content = await self.fetch_all_data()
-
-        newly_completed_ids = {
-            cid for cid, status in db_state_before_sync.items()
-            if status in ('연재중', '휴재') and cid in finished
-        }
-        print(f"  -> {len(newly_completed_ids)}개의 신규 완결 작품을 감지했습니다.")
-
-        details, notified = send_completion_notifications(get_cursor(conn), newly_completed_ids, all_content, self.source_name)
-
-        added = self.synchronize_database(conn, all_content, ongoing, hiatus, finished)
-
-        print(f"=== [{self.source_name.title()}] 일일 점검 완료 ===")
-        return added, details, notified

@@ -2,6 +2,9 @@
 
 from abc import ABC, abstractmethod
 
+from database import get_cursor
+from services.notification_service import send_completion_notifications
+
 class ContentCrawler(ABC):
     """
     모든 콘텐츠 크롤러를 위한 추상 기본 클래스입니다.
@@ -26,9 +29,34 @@ class ContentCrawler(ABC):
         """
         pass
 
-    @abstractmethod
     async def run_daily_check(self, conn):
         """
         일일 데이터 점검 및 완결 알림 프로세스를 실행합니다.
+
+        Template Method 패턴 구현:
+        1) DB 스냅샷 로드
+        2) 원격 데이터 수집(fetch_all_data)
+        3) 신규 완결 감지 및 알림 발송
+        4) DB 동기화(synchronize_database)
         """
-        pass
+        cursor = get_cursor(conn)
+        cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
+        db_state_before_sync = {row['content_id']: row['status'] for row in cursor.fetchall()}
+        cursor.close()
+
+        ongoing_today, hiatus_today, finished_today, all_content_today = await self.fetch_all_data()
+
+        newly_completed_ids = {
+            cid for cid, status in db_state_before_sync.items()
+            if status in ('연재중', '휴재') and cid in finished_today
+        }
+
+        details, notified = send_completion_notifications(
+            get_cursor(conn), newly_completed_ids, all_content_today, self.source_name
+        )
+
+        added = self.synchronize_database(
+            conn, all_content_today, ongoing_today, hiatus_today, finished_today
+        )
+
+        return added, details, notified

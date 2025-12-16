@@ -39,9 +39,9 @@ This audit re-checks the current code against the supplied v2.01 specification t
 - **Rate limiting & Pydantic validation**: Flask-Limiter and runtime validation layers are not present in the API routes.【F:views/contents.py†L10-L173】【F:views/subscriptions.py†L10-L56】
 
 ## Gaps & Risks to Address
-- **Template Method embodiment**: `ContentCrawler` defines `run_daily_check` abstractly, but subclasses each own the orchestration. Extracting the shared flow into the base class (with hooks for fetch/transform/sync) would better reflect the spec’s Template Method narrative and reduce duplication.【F:crawlers/base_crawler.py†L1-L25】【F:crawlers/naver_webtoon_crawler.py†L150-L189】【F:crawlers/kakaowebtoon_crawler.py†L130-L186】
-- **Title normalization for Kakao notifications**: Notifications reference `titleName`, which exists on Naver but not Kakao responses, leading to placeholder IDs in emails. Normalizing a `title` field across crawler outputs before notification would align with the cross-platform expectation in the document.【F:services/notification_service.py†L18-L37】【F:crawlers/kakaowebtoon_crawler.py†L82-L137】
-- **Per-crawler DB isolation**: `run_all_crawlers.py` shares a single DB connection across all crawlers, so a connection failure could cascade. Issuing one connection per crawler instance would better honor the spec’s isolated execution intent.【F:run_all_crawlers.py†L41-L79】
+- **Template Method 구현**: 공통 일일 점검 흐름을 `ContentCrawler.run_daily_check`에 템플릿 메서드로 올려 하위 크롤러는 수집/동기화만 오버라이드하도록 맞췄습니다.【F:crawlers/base_crawler.py†L1-L41】
+- **제목 정규화 후 알림 발송**: 모든 크롤러가 `title` 필드를 채우고 알림 시 `title`→`titleName`→`content.title` 순으로 폴백하여 플랫폼 간 제목 누락 없이 이메일을 전송합니다.【F:crawlers/naver_webtoon_crawler.py†L53-L103】【F:crawlers/kakaowebtoon_crawler.py†L110-L140】【F:services/notification_service.py†L13-L35】
+- **크롤러별 DB 커넥션 분리**: `run_all_crawlers.py`가 각 크롤러 실행마다 별도 연결을 생성/종료해 한 연결 장애가 다른 크롤러로 전파되지 않도록 격리했습니다.【F:run_all_crawlers.py†L20-L73】
 
 ## Overall Assessment
 The implemented MVP matches the spec across stack choice, schema, async crawlers with CDC, notification strategy, search endpoints, subscriptions, and reporting. Remaining work is mostly structural hardening (template method, per-crawler DB isolation) and data normalization for multi-source notifications, alongside the unimplemented future roadmap items (Celery/Redis, Elasticsearch, JWT/OAuth, rate limiting, Pydantic).

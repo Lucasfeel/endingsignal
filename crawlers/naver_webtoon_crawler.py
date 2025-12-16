@@ -11,7 +11,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from dotenv import load_dotenv
 
 import config
-from services.notification_service import send_completion_notifications
 from .base_crawler import ContentCrawler
 from database import get_cursor, create_standalone_connection, setup_database_standalone
 
@@ -95,6 +94,8 @@ class NaverWebtoonCrawler(ContentCrawler):
                 if titleId not in naver_ongoing_today:
                     naver_ongoing_today[titleId] = webtoon
                     naver_ongoing_today[titleId]['normalized_weekdays'] = set()
+                    if 'title' not in naver_ongoing_today[titleId]:
+                        naver_ongoing_today[titleId]['title'] = webtoon.get('titleName')
 
                 naver_ongoing_today[titleId]['normalized_weekdays'].add(WEEKDAYS[day_key])
 
@@ -112,7 +113,13 @@ class NaverWebtoonCrawler(ContentCrawler):
                 else:
                     naver_finished_today[tid] = data
 
+                if 'title' not in data:
+                    data['title'] = data.get('titleName')
+
         all_naver_webtoons_today = {**naver_finished_today, **naver_hiatus_today, **naver_ongoing_today}
+        for webtoon in all_naver_webtoons_today.values():
+            if 'title' not in webtoon:
+                webtoon['title'] = webtoon.get('titleName')
         print(f"오늘자 데이터 수집 완료: 총 {len(all_naver_webtoons_today)}개 고유 웹툰 확인")
         return naver_ongoing_today, naver_hiatus_today, naver_finished_today, all_naver_webtoons_today
 
@@ -163,30 +170,6 @@ class NaverWebtoonCrawler(ContentCrawler):
         cursor.close()
         print("DB 동기화 완료.")
         return len(inserts)
-
-    async def run_daily_check(self, conn):
-        print("LOG: run_daily_check started.")
-        cursor = get_cursor(conn)
-        print(f"=== {self.source_name} 일일 점검 시작 ===")
-        cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
-        db_state_before_sync = {row['content_id']: row['status'] for row in cursor.fetchall()}
-        cursor.close()
-        print("LOG: Initial database state loaded.")
-
-        ongoing, hiatus, finished, all_content = await self.fetch_all_data()
-        print("LOG: Data fetched from API.")
-
-        newly_completed_ids = {cid for cid, s in db_state_before_sync.items() if s in ('연재중', '휴재') and cid in finished}
-        print(f"LOG: Found {len(newly_completed_ids)} newly completed items.")
-
-        details, notified = send_completion_notifications(get_cursor(conn), newly_completed_ids, all_content, self.source_name)
-        print("LOG: Notification service executed.")
-
-        added = self.synchronize_database(conn, all_content, ongoing, hiatus, finished)
-        print("LOG: Database synchronization executed.")
-
-        print("\n=== 일일 점검 완료 ===")
-        return added, details, notified
 
 if __name__ == '__main__':
     print("==========================================")
