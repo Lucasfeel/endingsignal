@@ -62,6 +62,19 @@ def setup_database_standalone():
         # cursor.execute("DROP TABLE IF EXISTS contents;")
         # print("LOG: [DB Setup] Tables dropped.")
 
+        print("LOG: [DB Setup] Creating 'users' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            last_login_at TIMESTAMP
+        )""")
+        print("LOG: [DB Setup] 'users' table created or already exists.")
+
         print("LOG: [DB Setup] Creating 'contents' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS contents (
@@ -75,29 +88,38 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'contents' table created or already exists.")
 
+        print("LOG: [DB Setup] Creating 'admin_content_overrides' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admin_content_overrides (
+            id SERIAL PRIMARY KEY,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            override_status TEXT NOT NULL,
+            override_completed_at TIMESTAMP NULL,
+            reason TEXT NULL,
+            admin_id INTEGER REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(content_id, source)
+        )""")
+        print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
+
         print("LOG: [DB Setup] Creating 'subscriptions' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS subscriptions (
             id SERIAL PRIMARY KEY,
-            email TEXT NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id),
             content_id TEXT NOT NULL,
             source TEXT NOT NULL,
-            UNIQUE(email, content_id, source)
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(user_id, content_id, source)
         )""")
         print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
 
-        print("LOG: [DB Setup] Creating 'users' table...")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'user',
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT NOW(),
-            last_login_at TIMESTAMP
-        )""")
-        print("LOG: [DB Setup] 'users' table created or already exists.")
+        print("LOG: [DB Setup] Ensuring 'subscriptions' schema hygiene (drop deprecated columns, add audit fields)...")
+        cursor.execute("ALTER TABLE subscriptions DROP COLUMN IF EXISTS email;")
+        cursor.execute("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();")
+        print("LOG: [DB Setup] 'subscriptions' schema aligned.")
 
         # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")
