@@ -86,6 +86,19 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
 
+        print("LOG: [DB Setup] Creating 'users' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            last_login_at TIMESTAMP
+        )""")
+        print("LOG: [DB Setup] 'users' table created or already exists.")
+
         # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")
         cursor.execute("""
