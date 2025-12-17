@@ -5,6 +5,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, g
 
 from database import get_db, get_cursor
+from services.admin_override_service import upsert_override_and_record_event
 from utils.auth import admin_required, login_required
 
 
@@ -36,6 +37,17 @@ def _serialize_override(row):
     }
 
 
+def _serialize_final_state(state):
+    if not state:
+        return state
+
+    final_completed_at = state.get('final_completed_at')
+    serialized = dict(state)
+    if hasattr(final_completed_at, 'isoformat'):
+        serialized['final_completed_at'] = final_completed_at.isoformat()
+    return serialized
+
+
 @admin_bp.route('/api/admin/contents/override', methods=['POST'])
 @login_required
 @admin_required
@@ -60,43 +72,28 @@ def upsert_content_override():
             return _error_response(400, 'INVALID_REQUEST', 'override_completed_at must be a valid ISO 8601 datetime string')
 
     conn = get_db()
-    cursor = get_cursor(conn)
-
-    cursor.execute(
-        "SELECT 1 FROM contents WHERE content_id = %s AND source = %s",
-        (content_id, source),
+    result = upsert_override_and_record_event(
+        conn,
+        admin_id=g.current_user['id'],
+        content_id=content_id,
+        source=source,
+        override_status=override_status,
+        override_completed_at=override_completed_at,
+        reason=reason,
     )
-    if cursor.fetchone() is None:
-        cursor.close()
+
+    if result.get('error') == 'CONTENT_NOT_FOUND':
         return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
-    cursor.execute(
-        """
-        INSERT INTO admin_content_overrides (
-            content_id,
-            source,
-            override_status,
-            override_completed_at,
-            reason,
-            admin_id,
-            updated_at
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, NOW())
-        ON CONFLICT (content_id, source) DO UPDATE SET
-            override_status = EXCLUDED.override_status,
-            override_completed_at = EXCLUDED.override_completed_at,
-            reason = EXCLUDED.reason,
-            admin_id = EXCLUDED.admin_id,
-            updated_at = NOW()
-        RETURNING id, content_id, source, override_status, override_completed_at, reason, admin_id, created_at, updated_at
-        """,
-        (content_id, source, override_status, override_completed_at, reason, g.current_user['id']),
+    return jsonify(
+        {
+            'success': True,
+            'override': _serialize_override(result['override']),
+            'previous_final_state': _serialize_final_state(result.get('previous_final_state')),
+            'new_final_state': _serialize_final_state(result.get('new_final_state')),
+            'event_recorded': result.get('event_recorded', False),
+        }
     )
-    override_row = cursor.fetchone()
-    conn.commit()
-    cursor.close()
-
-    return jsonify({'success': True, 'override': _serialize_override(override_row)})
 
 
 @admin_bp.route('/api/admin/contents/overrides', methods=['GET'])
