@@ -3,7 +3,9 @@
 from abc import ABC, abstractmethod
 
 from database import get_cursor
-from services.notification_service import send_completion_notifications
+from services.cdc_constants import STATUS_COMPLETED
+from services.cdc_event_service import record_content_completed_event
+from services.final_state_resolver import resolve_final_state
 
 class ContentCrawler(ABC):
     """
@@ -31,32 +33,96 @@ class ContentCrawler(ABC):
 
     async def run_daily_check(self, conn):
         """
-        일일 데이터 점검 및 완결 알림 프로세스를 실행합니다.
+        일일 데이터 점검 및 완결 CDC 이벤트 기록 프로세스를 실행합니다.
 
         Template Method 패턴 구현:
         1) DB 스냅샷 로드
         2) 원격 데이터 수집(fetch_all_data)
-        3) 신규 완결 감지 및 알림 발송
+        3) 신규 완결 감지 및 CDC 이벤트 기록
         4) DB 동기화(synchronize_database)
         """
         cursor = get_cursor(conn)
         cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
-        db_state_before_sync = {row['content_id']: row['status'] for row in cursor.fetchall()}
+        db_status_map = {row['content_id']: row['status'] for row in cursor.fetchall()}
+
+        cursor.execute(
+            "SELECT content_id, override_status, override_completed_at FROM admin_content_overrides WHERE source = %s",
+            (self.source_name,),
+        )
+        override_map = {row['content_id']: row for row in cursor.fetchall()}
         cursor.close()
+
+        db_state_before_sync = {}
+        for content_id in set(db_status_map.keys()) | set(override_map.keys()):
+            db_state_before_sync[content_id] = resolve_final_state(
+                db_status_map.get(content_id), override_map.get(content_id)
+            )
 
         ongoing_today, hiatus_today, finished_today, all_content_today = await self.fetch_all_data()
 
-        newly_completed_ids = {
-            cid for cid, status in db_state_before_sync.items()
-            if status in ('연재중', '휴재') and cid in finished_today
-        }
+        current_status_map = {}
+        for content_id in all_content_today.keys():
+            if content_id in finished_today:
+                current_status_map[content_id] = '완결'
+            elif content_id in hiatus_today:
+                current_status_map[content_id] = '휴재'
+            elif content_id in ongoing_today:
+                current_status_map[content_id] = '연재중'
 
-        details, notified = send_completion_notifications(
-            get_cursor(conn), newly_completed_ids, all_content_today, self.source_name
-        )
+        for content_id, previous_state in db_state_before_sync.items():
+            current_status_map.setdefault(content_id, previous_state['final_status'])
+
+        current_final_state_map = {}
+        for content_id in set(current_status_map.keys()) | set(override_map.keys()):
+            current_final_state_map[content_id] = resolve_final_state(
+                current_status_map.get(content_id), override_map.get(content_id)
+            )
+
+        newly_completed_items = []
+        newly_completed_raw_completed_at = {}
+        for content_id, current_final_state in current_final_state_map.items():
+            previous_final_state = db_state_before_sync.get(content_id, {'final_status': None})
+            if previous_final_state.get('final_status') != STATUS_COMPLETED and current_final_state['final_status'] == STATUS_COMPLETED:
+                final_completed_at = current_final_state['final_completed_at']
+                display_completed_at = final_completed_at.isoformat() if hasattr(final_completed_at, 'isoformat') else final_completed_at
+                newly_completed_raw_completed_at[content_id] = final_completed_at
+
+                newly_completed_items.append(
+                    (
+                        content_id,
+                        self.source_name,
+                        display_completed_at,
+                        current_final_state['resolved_by'],
+                    )
+                )
+
+        resolved_by_counts = {}
+        for _, _, _, resolved_by in newly_completed_items:
+            resolved_by_counts[resolved_by] = resolved_by_counts.get(resolved_by, 0) + 1
+        cdc_events_inserted_count = 0
+        cdc_events_inserted_items = []
+        for content_id, _, final_completed_at, resolved_by in newly_completed_items:
+            inserted = record_content_completed_event(
+                conn,
+                content_id=content_id,
+                source=self.source_name,
+                final_completed_at=newly_completed_raw_completed_at.get(content_id),
+                resolved_by=resolved_by,
+            )
+            if inserted:
+                cdc_events_inserted_count += 1
+                cdc_events_inserted_items.append(content_id)
+
+        cdc_info = {
+            'cdc_mode': 'final_state',
+            'newly_completed_count': len(newly_completed_items),
+            'resolved_by_counts': resolved_by_counts,
+            'cdc_events_inserted_count': cdc_events_inserted_count,
+            'cdc_events_inserted_items': cdc_events_inserted_items,
+        }
 
         added = self.synchronize_database(
             conn, all_content_today, ongoing_today, hiatus_today, finished_today
         )
 
-        return added, details, notified
+        return added, newly_completed_items, cdc_info
