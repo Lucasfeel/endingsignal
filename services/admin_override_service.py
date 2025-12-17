@@ -1,6 +1,8 @@
+from datetime import datetime
+
 from database import get_cursor
-from services.final_state_resolver import resolve_final_state
 from services.cdc_event_service import record_content_completed_event
+from services.final_state_resolver import resolve_final_state
 
 
 _DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
@@ -31,8 +33,11 @@ def upsert_override_and_record_event(
     override_status,
     override_completed_at,
     reason,
+    now=None,
 ):
     cursor = get_cursor(conn)
+
+    effective_now = now if now is not None else datetime.now()
 
     cursor.execute(
         "SELECT status FROM contents WHERE content_id = %s AND source = %s",
@@ -53,7 +58,9 @@ def upsert_override_and_record_event(
     )
     existing_override = cursor.fetchone()
 
-    previous_final_state = resolve_final_state(content_row['status'], existing_override)
+    previous_final_state = resolve_final_state(
+        content_row['status'], existing_override, now=effective_now
+    )
 
     cursor.execute(
         """
@@ -83,7 +90,9 @@ def upsert_override_and_record_event(
         'override_status': override_status,
         'override_completed_at': override_completed_at,
     }
-    new_final_state = resolve_final_state(content_row['status'], new_override)
+    new_final_state = resolve_final_state(
+        content_row['status'], new_override, now=effective_now
+    )
 
     event_recorded = False
     if previous_final_state.get('final_status') != '완결' and new_final_state.get('final_status') == '완결':
