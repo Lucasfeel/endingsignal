@@ -53,11 +53,6 @@ def register_user(email: str, password: str):
             return None, '이미 등록된 이메일입니다.'
 
         role = 'user'
-        allow_first_admin = os.getenv('ALLOW_FIRST_ADMIN', 'false').lower() == 'true'
-        if allow_first_admin:
-            cursor.execute('SELECT COUNT(*) FROM users')
-            if cursor.fetchone()[0] == 0:
-                role = 'admin'
 
         password_hash = hash_password(password)
         cursor.execute(
