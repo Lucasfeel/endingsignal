@@ -3,6 +3,14 @@ from datetime import datetime
 from services.final_state_resolver import resolve_final_state
 
 
+class RowLike:
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+
 def test_scheduled_completion_pending():
     now = datetime(2025, 12, 17, 12, 0, 0)
     override_completed_at = datetime(2025, 12, 30, 0, 0, 0)
@@ -64,3 +72,20 @@ def test_resolver_uses_kst_default_now(monkeypatch):
 
     assert result["final_status"] == "연재중"
     assert result["resolved_by"] == "crawler"
+
+
+def test_row_like_override_is_supported():
+    now = datetime(2025, 12, 17, 12, 0, 0)
+    override_completed_at = datetime(2025, 12, 30, 0, 0, 0)
+    override = RowLike(
+        {
+            "override_status": "완결",
+            "override_completed_at": override_completed_at,
+        }
+    )
+
+    result = resolve_final_state("연재중", override, now=now)
+
+    assert result["final_status"] == "연재중"
+    assert result["resolved_by"] == "crawler"
+    assert result["final_completed_at"] is None

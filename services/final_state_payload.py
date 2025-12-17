@@ -1,3 +1,4 @@
+from utils.record import read_field
 from utils.time import now_kst_naive
 from services.final_state_resolver import resolve_final_state
 
@@ -26,8 +27,8 @@ def build_final_state_payload(contents_status, override_record=None, now=None):
     override_status = None
     override_completed_at = None
     if override_record:
-        override_status = override_record.get("override_status")
-        override_completed_at = override_record.get("override_completed_at")
+        override_status = read_field(override_record, "override_status")
+        override_completed_at = read_field(override_record, "override_completed_at")
 
     final_state = resolve_final_state(contents_status, override_record, now=effective_now)
 

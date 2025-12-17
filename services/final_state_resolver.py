@@ -6,6 +6,7 @@ content. It is intentionally side-effect free so it can be reused in
 CDC snapshot and current-state calculations.
 """
 
+from utils.record import read_field
 from utils.time import now_kst_naive
 
 
@@ -31,8 +32,8 @@ def resolve_final_state(content_status, override=None, now=None):
             "resolved_by": "crawler",
         }
 
-    override_status = override.get("override_status")
-    override_completed_at = override.get("override_completed_at")
+    override_status = read_field(override, "override_status")
+    override_completed_at = read_field(override, "override_completed_at")
 
     # Non-completion overrides apply immediately.
     if override_status != "완결":
