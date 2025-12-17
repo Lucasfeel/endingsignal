@@ -1,12 +1,11 @@
 # views/admin.py
 
-from datetime import datetime
-
 from flask import Blueprint, jsonify, request, g
 
 from database import get_db, get_cursor
 from services.admin_override_service import upsert_override_and_record_event
 from utils.auth import admin_required, login_required
+from utils.time import parse_iso_naive_kst
 
 
 admin_bp = Blueprint('admin', __name__)
@@ -14,13 +13,6 @@ admin_bp = Blueprint('admin', __name__)
 
 def _error_response(status_code: int, code: str, message: str):
     return jsonify({'success': False, 'error': {'code': code, 'message': message}}), status_code
-
-
-def _parse_iso_datetime(value):
-    try:
-        return datetime.fromisoformat(value) if value is not None else None
-    except ValueError:
-        return None
 
 
 def _serialize_override(row):
@@ -67,7 +59,7 @@ def upsert_content_override():
 
     override_completed_at = None
     if override_completed_at_raw is not None:
-        override_completed_at = _parse_iso_datetime(override_completed_at_raw)
+        override_completed_at = parse_iso_naive_kst(override_completed_at_raw)
         if override_completed_at is None:
             return _error_response(400, 'INVALID_REQUEST', 'override_completed_at must be a valid ISO 8601 datetime string')
 

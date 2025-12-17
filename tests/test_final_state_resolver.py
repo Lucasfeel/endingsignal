@@ -45,3 +45,23 @@ def test_immediate_completion_without_date():
     assert result['final_status'] == '완결'
     assert result['resolved_by'] == 'override'
     assert result['final_completed_at'] is None
+codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
+
+
+def test_resolver_uses_kst_default_now(monkeypatch):
+    override_completed_at = datetime(2025, 12, 30, 0, 0, 0)
+    override = {
+        'override_status': '완결',
+        'override_completed_at': override_completed_at,
+    }
+
+    monkeypatch.setattr(
+        "services.final_state_resolver.now_kst_naive",
+        lambda: datetime(2025, 12, 29, 23, 59, 59),
+    )
+
+    result = resolve_final_state('연재중', override)
+
+    assert result['final_status'] == '연재중'
+    assert result['resolved_by'] == 'crawler'
+

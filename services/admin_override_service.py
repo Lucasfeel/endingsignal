@@ -3,6 +3,9 @@ from datetime import datetime
 from database import get_cursor
 from services.cdc_event_service import record_content_completed_event
 from services.final_state_resolver import resolve_final_state
+ codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
+from utils.time import now_kst_naive
+
 
 
 _DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
@@ -37,7 +40,9 @@ def upsert_override_and_record_event(
 ):
     cursor = get_cursor(conn)
 
-    effective_now = now if now is not None else datetime.now()
+codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
+    effective_now = now if now is not None else now_kst_naive()
+
 
     cursor.execute(
         "SELECT status FROM contents WHERE content_id = %s AND source = %s",
