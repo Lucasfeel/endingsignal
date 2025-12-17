@@ -1,8 +1,13 @@
 from database import get_cursor
 from services.cdc_event_service import record_content_completed_event
 from services.final_state_resolver import resolve_final_state
-from services.final_state_payload import build_final_state_payload
 from utils.time import now_kst_naive
+
+# Optional: UI-friendly final state payload builder (may not exist on some branches)
+try:
+    from services.final_state_payload import build_final_state_payload
+except Exception:
+    build_final_state_payload = None
 
 
 _DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
@@ -97,9 +102,12 @@ def upsert_override_and_record_event(
         content_row["status"], new_override, now=effective_now
     )
 
-    final_state_payload = build_final_state_payload(
-        content_row["status"], new_override, now=effective_now
-    )
+    # Optional UI-friendly final payload
+    final_state_payload = None
+    if build_final_state_payload is not None:
+        final_state_payload = build_final_state_payload(
+            content_row["status"], new_override, now=effective_now
+        )
 
     # IMPORTANT: if override_completed_at is future, new_final_state won't be completed, so no event is recorded.
     event_recorded = False
@@ -115,10 +123,15 @@ def upsert_override_and_record_event(
     conn.commit()
     cursor.close()
 
-    return {
+    result = {
         "override": _serialize_override_row(override_row),
         "previous_final_state": previous_final_state,
         "new_final_state": new_final_state,
         "event_recorded": event_recorded,
-        "final_state": final_state_payload,
     }
+
+    # Add UI payload only if builder exists
+    if final_state_payload is not None:
+        result["final_state"] = final_state_payload
+
+    return result
