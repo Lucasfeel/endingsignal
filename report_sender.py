@@ -53,9 +53,21 @@ def send_consolidated_report():
 
             if status == '성공':
                 body_lines.append(f"  - 실행 시간: {data.get('duration', 0):.2f}초")
-                body_lines.append(f"  - 신규 등록: {data.get('new_webtoons', 0)}개")
-                body_lines.append(f"  - 완결 알림: {data.get('total_notified', 0)}명")
-                body_lines.append(f"  - 완결 내역: {len(data.get('completed_details', []))}건")
+                body_lines.append(f"  - 신규 등록: {data.get('new_webtoons', data.get('new_contents', 0))}개")
+
+                newly_completed_items = data.get('newly_completed_items', [])
+                cdc_info = data.get('cdc_info', {})
+                resolved_by_counts = cdc_info.get('resolved_by_counts', {})
+
+                newly_completed_count = cdc_info.get('newly_completed_count', len(newly_completed_items))
+                notified_user_count = data.get('total_notified', cdc_info.get('notified_user_count', 0))
+
+                body_lines.append(
+                    f"  - 신규 완결: {newly_completed_count}건 (CDC 모드: {cdc_info.get('cdc_mode', 'unknown')})"
+                )
+                if resolved_by_counts:
+                    body_lines.append(f"  - 완결 판정 출처: {resolved_by_counts}")
+                body_lines.append(f"  - 완결 알림 발송 수: {notified_user_count}명")
             else:
                 body_lines.append(f"  - 오류: {data.get('error_message', '알 수 없는 오류')}")
 

@@ -37,11 +37,18 @@ async def run_one_crawler(crawler_class):
         print(f"\n--- [{crawler_display_name}] 크롤러 작업 시작 ---")
 
         db_conn = create_standalone_connection()
-        new_contents, completed_details, total_notified = await crawler_instance.run_daily_check(db_conn)
+        (
+            new_contents,
+            newly_completed_items,
+            cdc_info,
+            notification_summary,
+        ) = await crawler_instance.run_daily_check(db_conn)
         report.update({
             'new_contents': new_contents,
-            'completed_details': completed_details,
-            'total_notified': total_notified
+            'newly_completed_items': newly_completed_items,
+            'cdc_info': cdc_info,
+            'notification_details': notification_summary.get('details', []),
+            'total_notified': notification_summary.get('notified_user_count', 0),
         })
     except Exception as e:
         crawler_display_name = crawler_display_name if 'crawler_display_name' in locals() else crawler_class.__name__

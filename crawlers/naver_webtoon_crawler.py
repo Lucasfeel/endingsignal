@@ -194,10 +194,21 @@ if __name__ == '__main__':
         print("LOG: NaverWebtoonCrawler instance created.")
 
         print("LOG: Calling asyncio.run(crawler.run_daily_check())...")
-        new_contents, completed_details, total_notified = asyncio.run(crawler.run_daily_check(db_conn))
+        (
+            new_contents,
+            newly_completed_items,
+            cdc_info,
+            notification_summary,
+        ) = asyncio.run(crawler.run_daily_check(db_conn))
         print("LOG: asyncio.run(crawler.run_daily_check()) finished.")
 
-        report.update({'new_webtoons': new_contents, 'completed_details': completed_details, 'total_notified': total_notified})
+        report.update({
+            'new_webtoons': new_contents,
+            'newly_completed_items': newly_completed_items,
+            'cdc_info': cdc_info,
+            'notification_details': notification_summary.get('details', []),
+            'total_notified': notification_summary.get('notified_user_count', 0),
+        })
 
     except Exception as e:
         print(f"치명적 오류 발생: {e}")
