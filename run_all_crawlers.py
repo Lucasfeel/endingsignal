@@ -6,20 +6,17 @@ import json
 import sys
 from dotenv import load_dotenv
 
-load_dotenv() # 👈 스크립트 최상단에서 환경 변수를 로드합니다.
+load_dotenv()
 
 from database import create_standalone_connection, get_cursor
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
 from crawlers.kakaowebtoon_crawler import KakaowebtoonCrawler
 
-# ----------------------------------------------------------------------
-# [중요] 실행할 모든 크롤러를 이곳에 등록합니다.
-# ----------------------------------------------------------------------
 ALL_CRAWLERS = [
     NaverWebtoonCrawler,
     KakaowebtoonCrawler,
 ]
-# ----------------------------------------------------------------------
+
 
 async def run_one_crawler(crawler_class):
     """
@@ -29,6 +26,7 @@ async def run_one_crawler(crawler_class):
     crawler_start_time = time.time()
 
     db_conn = None
+    crawler_display_name = crawler_class.__name__
     try:
         crawler_instance = crawler_class()
         crawler_display_name = getattr(crawler_instance, 'source_name', crawler_class.__name__)
@@ -37,34 +35,29 @@ async def run_one_crawler(crawler_class):
         print(f"\n--- [{crawler_display_name}] 크롤러 작업 시작 ---")
 
         db_conn = create_standalone_connection()
-        (
-            new_contents,
-            newly_completed_items,
-            cdc_info,
-            notification_summary,
-        ) = await crawler_instance.run_daily_check(db_conn)
+        new_contents, newly_completed_items, cdc_info = await crawler_instance.run_daily_check(db_conn)
+
         report.update({
             'new_contents': new_contents,
             'newly_completed_items': newly_completed_items,
             'cdc_info': cdc_info,
-            'notification_details': notification_summary.get('details', []),
-            'total_notified': notification_summary.get('notified_user_count', 0),
+            'total_notified': cdc_info.get('notified_user_count', 0),
+            'notification_details': cdc_info.get('notification_details', []),
         })
+
     except Exception as e:
-        crawler_display_name = crawler_display_name if 'crawler_display_name' in locals() else crawler_class.__name__
         crawler_display_name = crawler_display_name.replace('_', ' ').title()
         print(f"FATAL: [{crawler_display_name}] 크롤러 실행 중 치명적 오류 발생: {e}", file=sys.stderr)
         report['status'] = '실패'
         report['error_message'] = traceback.format_exc()
+
     finally:
         report['duration'] = time.time() - crawler_start_time
         if db_conn:
             db_conn.close()
 
-        # 각 크롤러의 실행 결과를 DB에 저장
         report_conn = None
         try:
-            # 보고서 저장을 위해 DB 연결이 끊어졌을 경우를 대비해 새로운 연결 생성
             report_conn = create_standalone_connection()
             report_cursor = get_cursor(report_conn)
             report_cursor.execute(
@@ -83,7 +76,6 @@ async def run_one_crawler(crawler_class):
             if report_conn:
                 report_conn.close()
 
-import os
 
 async def main():
     """
@@ -94,16 +86,9 @@ async def main():
     print("   통합 크롤러 실행 스크립트 시작")
     print("==========================================")
 
-    # 실행할 작업(task) 리스트 생성
-    tasks = []
-    for crawler_class in ALL_CRAWLERS:
-        tasks.append(run_one_crawler(crawler_class))
-
-    # asyncio.gather로 모든 크롤러를 동시에 실행
-    # return_exceptions=True로 설정하여 하나가 실패해도 다른 크롤러는 계속 실행
+    tasks = [run_one_crawler(crawler_class) for crawler_class in ALL_CRAWLERS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # (선택 사항) gather 실행 결과에서 예외가 있었는지 확인
     for result in results:
         if isinstance(result, Exception):
             print(f"WARNING: 크롤러 작업 중 일부가 gather 레벨에서 예외를 반환했습니다: {result}", file=sys.stderr)
@@ -113,6 +98,6 @@ async def main():
     print(f"  통합 크롤러 실행 완료 (총 소요 시간: {total_duration:.2f}초)")
     print("==========================================")
 
+
 if __name__ == '__main__':
-    # Python 3.7+
     asyncio.run(main())

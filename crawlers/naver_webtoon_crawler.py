@@ -12,12 +12,13 @@ from dotenv import load_dotenv
 
 import config
 from .base_crawler import ContentCrawler
-from database import get_cursor, create_standalone_connection, setup_database_standalone
+from database import get_cursor, create_standalone_connection
 
 load_dotenv()
 
 HEADERS = config.CRAWLER_HEADERS
 WEEKDAYS = config.WEEKDAYS
+
 
 class NaverWebtoonCrawler(ContentCrawler):
     """네이버 웹툰 크롤러"""
@@ -60,24 +61,18 @@ class NaverWebtoonCrawler(ContentCrawler):
     async def fetch_all_data(self):
         print("네이버 웹툰 서버에서 오늘의 최신 데이터를 가져옵니다...")
         async with aiohttp.ClientSession() as session:
-            # 주간 웹툰 작업 생성
             ongoing_tasks = []
             for api_day in WEEKDAYS.keys():
                 base_url = f"{config.NAVER_API_URL}/weekday?week={api_day}"
                 task = self._fetch_paginated_data(session, base_url, 50, f"'{api_day}'요일 웹툰")
                 ongoing_tasks.append(task)
 
-            # 완결 웹툰 작업 생성
             finished_base_url = f"{config.NAVER_API_URL}/finished?order=UPDATE"
             finished_task = self._fetch_paginated_data(session, finished_base_url, 150, "완결/장기 휴재 후보")
 
-            # 모든 작업을 병렬로 실행
             results = await asyncio.gather(*ongoing_tasks, finished_task, return_exceptions=True)
-
-            # 결과 분리
             ongoing_results = results[:-1]
             finished_candidates = results[-1] if not isinstance(results[-1], Exception) else {}
-
 
         print("\n--- 데이터 수집 결과 ---")
         naver_ongoing_today, naver_hiatus_today, naver_finished_today = {}, {}, {}
@@ -132,10 +127,14 @@ class NaverWebtoonCrawler(ContentCrawler):
 
         for content_id, webtoon_data in all_naver_webtoons_today.items():
             status = ''
-            if content_id in naver_finished_today: status = '완결'
-            elif content_id in naver_hiatus_today: status = '휴재'
-            elif content_id in naver_ongoing_today: status = '연재중'
-            else: continue
+            if content_id in naver_finished_today:
+                status = '완결'
+            elif content_id in naver_hiatus_today:
+                status = '휴재'
+            elif content_id in naver_ongoing_today:
+                status = '연재중'
+            else:
+                continue
 
             author = webtoon_data.get('author')
             meta_data = {
@@ -156,12 +155,16 @@ class NaverWebtoonCrawler(ContentCrawler):
                 inserts.append(record)
 
         if updates:
-            cursor.executemany("UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s", updates)
+            cursor.executemany(
+                "UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
+                updates
+            )
             print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
 
         if inserts:
             cursor.executemany(
-                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (content_id, source) DO NOTHING",
+                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (content_id, source) DO NOTHING",
                 inserts
             )
             print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
@@ -170,6 +173,7 @@ class NaverWebtoonCrawler(ContentCrawler):
         cursor.close()
         print("DB 동기화 완료.")
         return len(inserts)
+
 
 if __name__ == '__main__':
     print("==========================================")
@@ -181,11 +185,6 @@ if __name__ == '__main__':
     CRAWLER_DISPLAY_NAME = "네이버 웹툰"
 
     try:
-        # [삭제] 크롤러가 DB 셋업을 직접 호출하는 위험한 코드 제거
-        # print("LOG: Calling setup_database_standalone()...")
-        # setup_database_standalone()
-        # print("LOG: setup_database_standalone() finished.")
-
         print("LOG: Calling create_standalone_connection()...")
         db_conn = create_standalone_connection()
         print("LOG: create_standalone_connection() finished.")
@@ -194,20 +193,15 @@ if __name__ == '__main__':
         print("LOG: NaverWebtoonCrawler instance created.")
 
         print("LOG: Calling asyncio.run(crawler.run_daily_check())...")
-        (
-            new_contents,
-            newly_completed_items,
-            cdc_info,
-            notification_summary,
-        ) = asyncio.run(crawler.run_daily_check(db_conn))
+        new_contents, newly_completed_items, cdc_info = asyncio.run(crawler.run_daily_check(db_conn))
         print("LOG: asyncio.run(crawler.run_daily_check()) finished.")
 
         report.update({
             'new_webtoons': new_contents,
             'newly_completed_items': newly_completed_items,
             'cdc_info': cdc_info,
-            'notification_details': notification_summary.get('details', []),
-            'total_notified': notification_summary.get('notified_user_count', 0),
+            'total_notified': cdc_info.get('notified_user_count', 0),
+            'notification_details': cdc_info.get('notification_details', []),
         })
 
     except Exception as e:
@@ -222,7 +216,6 @@ if __name__ == '__main__':
 
         report['duration'] = time.time() - start_time
 
-        # === 🚨 [리팩토링] 메일 발송 대신 DB에 보고서 저장 ===
         report_conn = None
         try:
             report_conn = create_standalone_connection()
@@ -243,6 +236,14 @@ if __name__ == '__main__':
         finally:
             if report_conn:
                 report_conn.close()
+
+        print("==========================================")
+        print("  CRAWLER SCRIPT FINISHED")
+        print("==========================================")
+
+        if report['status'] == '실패':
+            sys.exit(1)
+
         # =================================================
 
         print("==========================================")
