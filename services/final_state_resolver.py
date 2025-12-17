@@ -6,9 +6,7 @@ content. It is intentionally side-effect free so it can be reused in
 CDC snapshot and current-state calculations.
 """
 
- codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
 from utils.time import now_kst_naive
-
 
 
 def resolve_final_state(content_status, override=None, now=None):
@@ -19,50 +17,50 @@ def resolve_final_state(content_status, override=None, now=None):
         override: Optional override row/dict containing ``override_status`` and
             ``override_completed_at``.
         now: Optional naive datetime for deterministic comparisons. Defaults to
- codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
-            ``now_kst_naive()``.
-
+            ``now_kst_naive()`` (naive KST).
 
     Returns:
-        dict: ``{"final_status", "final_completed_at", "resolved_by"}``
+        dict: {"final_status", "final_completed_at", "resolved_by"}
     """
-codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
     effective_now = now if now is not None else now_kst_naive()
-
 
     if not override:
         return {
-            'final_status': content_status,
-            'final_completed_at': None,
-            'resolved_by': 'crawler',
+            "final_status": content_status,
+            "final_completed_at": None,
+            "resolved_by": "crawler",
         }
 
-    override_status = override.get('override_status')
-    override_completed_at = override.get('override_completed_at')
+    override_status = override.get("override_status")
+    override_completed_at = override.get("override_completed_at")
 
-    if override_status != '완결':
+    # Non-completion overrides apply immediately.
+    if override_status != "완결":
         return {
-            'final_status': override_status,
-            'final_completed_at': None,
-            'resolved_by': 'override',
+            "final_status": override_status,
+            "final_completed_at": None,
+            "resolved_by": "override",
         }
 
+    # Completion override without date applies immediately.
     if override_completed_at is None:
         return {
-            'final_status': '완결',
-            'final_completed_at': None,
-            'resolved_by': 'override',
+            "final_status": "완결",
+            "final_completed_at": None,
+            "resolved_by": "override",
         }
 
+    # Scheduled completion: pending until the completion timestamp.
     if effective_now < override_completed_at:
         return {
-            'final_status': content_status,
-            'final_completed_at': None,
-            'resolved_by': 'crawler',
+            "final_status": content_status,
+            "final_completed_at": None,
+            "resolved_by": "crawler",
         }
 
+    # Effective scheduled completion.
     return {
-        'final_status': '완결',
-        'final_completed_at': override_completed_at,
-        'resolved_by': 'override',
+        "final_status": "완결",
+        "final_completed_at": override_completed_at,
+        "resolved_by": "override",
     }
