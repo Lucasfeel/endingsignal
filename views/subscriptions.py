@@ -72,12 +72,12 @@ def list_subscriptions():
 def subscribe():
     """현재 사용자 기준 구독을 추가합니다."""
     data = request.get_json() or {}
-    content_id = data.get('contentId')
+    content_id = data.get('content_id') or data.get('contentId')
     source = data.get('source')
 
     if not content_id or not source:
         return _error_response(
-            400, 'INVALID_REQUEST', 'contentId와 source는 필수입니다.',
+            400, 'INVALID_REQUEST', 'content_id/contentId와 source는 필수입니다.',
         )
 
     conn = get_db()
@@ -111,12 +111,12 @@ def subscribe():
 def unsubscribe():
     """현재 사용자 기준 구독을 제거합니다."""
     data = request.get_json() or {}
-    content_id = data.get('contentId')
+    content_id = data.get('content_id') or data.get('contentId')
     source = data.get('source')
 
     if not content_id or not source:
         return _error_response(
-            400, 'INVALID_REQUEST', 'contentId와 source는 필수입니다.',
+            400, 'INVALID_REQUEST', 'content_id/contentId와 source는 필수입니다.',
         )
 
     conn = get_db()
