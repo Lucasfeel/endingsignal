@@ -2,8 +2,12 @@
 from abc import ABC, abstractmethod
 
 from database import get_cursor
-from services.cdc_event_service import record_content_completed_event
+from services.cdc_event_service import (
+    record_content_completed_event,
+    record_due_scheduled_completions,
+)
 from services.final_state_resolver import resolve_final_state
+from utils.time import now_kst_naive
 
 
 class ContentCrawler(ABC):
@@ -47,6 +51,8 @@ class ContentCrawler(ABC):
         cursor = None
         try:
             cursor = get_cursor(conn)
+
+            now = now_kst_naive()
 
             # 1) Load previous crawler status snapshot (raw)
             cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
@@ -138,6 +144,13 @@ class ContentCrawler(ABC):
                 "cdc_events_inserted_count": cdc_events_inserted_count,
                 "cdc_events_inserted_items": cdc_events_inserted_items,
             }
+
+            scheduled_completion_cdc = record_due_scheduled_completions(conn, cursor, now)
+            cdc_info["scheduled_completion_due_count"] = scheduled_completion_cdc["due_count"]
+            cdc_info["scheduled_completion_events_inserted_count"] = scheduled_completion_cdc[
+                "inserted_count"
+            ]
+            cdc_info["cdc_events_inserted_count"] += scheduled_completion_cdc["inserted_count"]
 
             # 8) DB sync (commit is enforced here, not in crawler implementations)
             added = self.synchronize_database(conn, all_content_today, ongoing_today, hiatus_today, finished_today)
