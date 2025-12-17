@@ -116,6 +116,25 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
 
+        print("LOG: [DB Setup] Creating 'cdc_events' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cdc_events (
+            id SERIAL PRIMARY KEY,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            final_status TEXT NOT NULL,
+            final_completed_at TIMESTAMP NULL,
+            resolved_by TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT now(),
+            UNIQUE(content_id, source, event_type)
+        )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cdc_events_source_created_at ON cdc_events (source, created_at)"
+        )
+        print("LOG: [DB Setup] 'cdc_events' table created or already exists.")
+
         # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")
         cursor.execute("""

@@ -168,8 +168,6 @@ class NaverWebtoonCrawler(ContentCrawler):
                 inserts
             )
             print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
-
-        conn.commit()
         cursor.close()
         print("DB 동기화 완료.")
         return len(inserts)
@@ -200,8 +198,6 @@ if __name__ == '__main__':
             'new_webtoons': new_contents,
             'newly_completed_items': newly_completed_items,
             'cdc_info': cdc_info,
-            'total_notified': cdc_info.get('notified_user_count', 0),
-            'notification_details': cdc_info.get('notification_details', []),
         })
 
     except Exception as e:

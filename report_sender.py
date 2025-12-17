@@ -62,14 +62,14 @@ def send_consolidated_report():
                 resolved_by_counts = cdc_info.get('resolved_by_counts', {})
 
                 newly_completed_count = cdc_info.get('newly_completed_count', len(newly_completed_items))
-                notified_user_count = cdc_info.get('notified_user_count', data.get('total_notified', 0))
+                inserted_event_count = cdc_info.get('cdc_events_inserted_count', 0)
 
                 body_lines.append(
                     f"  - 신규 완결: {newly_completed_count}건 (CDC 모드: {cdc_info.get('cdc_mode', 'unknown')})"
                 )
                 if resolved_by_counts:
                     body_lines.append(f"  - 완결 판정 출처: {resolved_by_counts}")
-                body_lines.append(f"  - 완결 알림 발송 수: {notified_user_count}명")
+                body_lines.append(f"  - CDC 이벤트 기록 수: {inserted_event_count}건")
             else:
                 body_lines.append(f"  - 오류: {data.get('error_message', '알 수 없는 오류')}")
 

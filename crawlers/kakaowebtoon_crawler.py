@@ -212,8 +212,6 @@ class KakaowebtoonCrawler(ContentCrawler):
         if inserts:
             cursor.executemany("INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (content_id, source) DO NOTHING", inserts)
             print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
-
-        conn.commit()
         cursor.close()
         print("DB 동기화 완료.")
         return len(inserts)

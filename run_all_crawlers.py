@@ -41,8 +41,6 @@ async def run_one_crawler(crawler_class):
             'new_contents': new_contents,
             'newly_completed_items': newly_completed_items,
             'cdc_info': cdc_info,
-            'total_notified': cdc_info.get('notified_user_count', 0),
-            'notification_details': cdc_info.get('notification_details', []),
         })
 
     except Exception as e:
