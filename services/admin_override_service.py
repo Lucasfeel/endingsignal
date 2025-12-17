@@ -1,11 +1,8 @@
-from datetime import datetime
-
 from database import get_cursor
 from services.cdc_event_service import record_content_completed_event
 from services.final_state_resolver import resolve_final_state
- codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
+from services.final_state_payload import build_final_state_payload
 from utils.time import now_kst_naive
-
 
 
 _DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
@@ -15,15 +12,15 @@ def _serialize_override_row(row):
     if not row:
         return None
     return {
-        'id': row['id'],
-        'content_id': row['content_id'],
-        'source': row['source'],
-        'override_status': row['override_status'],
-        'override_completed_at': row['override_completed_at'],
-        'reason': row['reason'],
-        'admin_id': row['admin_id'],
-        'created_at': row['created_at'],
-        'updated_at': row['updated_at'],
+        "id": row["id"],
+        "content_id": row["content_id"],
+        "source": row["source"],
+        "override_status": row["override_status"],
+        "override_completed_at": row["override_completed_at"],
+        "reason": row["reason"],
+        "admin_id": row["admin_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }
 
 
@@ -39,11 +36,9 @@ def upsert_override_and_record_event(
     now=None,
 ):
     cursor = get_cursor(conn)
-
-codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
     effective_now = now if now is not None else now_kst_naive()
 
-
+    # Verify content exists
     cursor.execute(
         "SELECT status FROM contents WHERE content_id = %s AND source = %s",
         (content_id, source),
@@ -53,6 +48,7 @@ codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
         cursor.close()
         return _DEF_NOT_FOUND
 
+    # Load existing override for transition comparison
     cursor.execute(
         """
         SELECT override_status, override_completed_at
@@ -64,9 +60,10 @@ codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
     existing_override = cursor.fetchone()
 
     previous_final_state = resolve_final_state(
-        content_row['status'], existing_override, now=effective_now
+        content_row["status"], existing_override, now=effective_now
     )
 
+    # UPSERT override
     cursor.execute(
         """
         INSERT INTO admin_content_overrides (
@@ -91,30 +88,37 @@ codex/implement-scheduled-completion-in-final-state-resolver-4qeeqy
     )
     override_row = cursor.fetchone()
 
+    # Compute new final state (scheduled completion rules apply here)
     new_override = {
-        'override_status': override_status,
-        'override_completed_at': override_completed_at,
+        "override_status": override_status,
+        "override_completed_at": override_completed_at,
     }
     new_final_state = resolve_final_state(
-        content_row['status'], new_override, now=effective_now
+        content_row["status"], new_override, now=effective_now
     )
 
+    final_state_payload = build_final_state_payload(
+        content_row["status"], new_override, now=effective_now
+    )
+
+    # IMPORTANT: if override_completed_at is future, new_final_state won't be completed, so no event is recorded.
     event_recorded = False
-    if previous_final_state.get('final_status') != '완결' and new_final_state.get('final_status') == '완결':
+    if previous_final_state.get("final_status") != "완결" and new_final_state.get("final_status") == "완결":
         event_recorded = record_content_completed_event(
             conn,
             content_id=content_id,
             source=source,
-            final_completed_at=new_final_state.get('final_completed_at'),
-            resolved_by='override',
+            final_completed_at=new_final_state.get("final_completed_at"),
+            resolved_by="override",
         )
 
     conn.commit()
     cursor.close()
 
     return {
-        'override': _serialize_override_row(override_row),
-        'previous_final_state': previous_final_state,
-        'new_final_state': new_final_state,
-        'event_recorded': event_recorded,
+        "override": _serialize_override_row(override_row),
+        "previous_final_state": previous_final_state,
+        "new_final_state": new_final_state,
+        "event_recorded": event_recorded,
+        "final_state": final_state_payload,
     }

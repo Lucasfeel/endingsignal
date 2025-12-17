@@ -89,3 +89,7 @@ def test_scheduled_override_does_not_record_event(monkeypatch):
     assert recorded_events == []
     assert result['new_final_state']['final_status'] == '연재중'
     assert result['new_final_state']['resolved_by'] == 'crawler'
+    assert result['final_state']['is_scheduled_completion'] is True
+    assert result['final_state']['scheduled_completed_at'] == datetime(
+        2025, 12, 30, 0, 0, 0
+    ).isoformat()

@@ -84,6 +84,9 @@ def upsert_content_override():
             'previous_final_state': _serialize_final_state(result.get('previous_final_state')),
             'new_final_state': _serialize_final_state(result.get('new_final_state')),
             'event_recorded': result.get('event_recorded', False),
+            'is_scheduled_completion': result.get('final_state', {}).get('is_scheduled_completion'),
+            'scheduled_completed_at': result.get('final_state', {}).get('scheduled_completed_at'),
+            'final_state': result.get('final_state'),
         }
     )
 

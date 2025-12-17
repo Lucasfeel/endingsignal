@@ -4,7 +4,9 @@ import psycopg2
 from flask import Blueprint, jsonify, request, g
 
 from database import get_db, get_cursor
+from services.final_state_payload import build_final_state_payload
 from utils.auth import login_required, _error_response
+from utils.time import now_kst_naive
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
 
@@ -28,17 +30,37 @@ def list_subscriptions():
     try:
         cursor.execute(
             """
-            SELECT c.content_id, c.source, c.content_type, c.title, c.status, c.meta
+            SELECT c.content_id, c.source, c.content_type, c.title, c.status, c.meta,
+                   o.override_status, o.override_completed_at
             FROM subscriptions s
             JOIN contents c
                 ON s.content_id = c.content_id AND s.source = c.source
+            LEFT JOIN admin_content_overrides o
+                ON o.content_id = c.content_id AND o.source = c.source
             WHERE s.user_id = %s
             ORDER BY c.title
             """,
             (user_id,),
         )
         rows = cursor.fetchall()
-        return jsonify({'success': True, 'data': [dict(row) for row in rows]}), 200
+        effective_now = now_kst_naive()
+        data = []
+        for row in rows:
+            row_dict = dict(row)
+            override_status = row_dict.pop('override_status', None)
+            override_completed_at = row_dict.pop('override_completed_at', None)
+            override = None
+            if override_status is not None or override_completed_at is not None:
+                override = {
+                    'override_status': override_status,
+                    'override_completed_at': override_completed_at,
+                }
+            row_dict['final_state'] = build_final_state_payload(
+                row_dict.get('status'), override, now=effective_now
+            )
+            data.append(row_dict)
+
+        return jsonify({'success': True, 'data': data}), 200
     except psycopg2.Error:
         return _error_response(500, 'DB_ERROR', '데이터베이스 오류가 발생했습니다.')
     finally:
