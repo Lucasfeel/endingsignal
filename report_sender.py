@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from database import create_standalone_connection, get_cursor
 from services.email import get_email_service
 
+
 def send_consolidated_report():
     load_dotenv()
     admin_email = os.getenv('ADMIN_EMAIL')
@@ -35,10 +36,11 @@ def send_consolidated_report():
 
         print(f"LOG: {len(reports)}개의 크롤러 보고서를 취합합니다.")
 
-        # --- 1. 이메일 본문 생성 ---
         overall_status_icon = "✅"
         overall_status_text = "성공"
-        body_lines = [f"안녕하세요, 관리자님.\n\n일일 콘텐츠 동기화 작업이 완료되었습니다.\n총 {len(reports)}개의 작업 결과가 보고되었습니다.\n"]
+        body_lines = [
+            f"안녕하세요, 관리자님.\n\n일일 콘텐츠 동기화 작업이 완료되었습니다.\n총 {len(reports)}개의 작업 결과가 보고되었습니다.\n"
+        ]
 
         for report in reports:
             name = report['crawler_name']
@@ -59,13 +61,15 @@ def send_consolidated_report():
                 cdc_info = data.get('cdc_info', {})
                 resolved_by_counts = cdc_info.get('resolved_by_counts', {})
 
+                newly_completed_count = cdc_info.get('newly_completed_count', len(newly_completed_items))
+                notified_user_count = cdc_info.get('notified_user_count', data.get('total_notified', 0))
+
                 body_lines.append(
-                    f"  - 신규 완결: {cdc_info.get('newly_completed_count', len(newly_completed_items))}건 "
-                    f"(CDC 모드: {cdc_info.get('cdc_mode', 'unknown')})"
+                    f"  - 신규 완결: {newly_completed_count}건 (CDC 모드: {cdc_info.get('cdc_mode', 'unknown')})"
                 )
                 if resolved_by_counts:
                     body_lines.append(f"  - 완결 판정 출처: {resolved_by_counts}")
-                body_lines.append(f"  - 완결 알림 발송 수: {data.get('total_notified', 0)}명")
+                body_lines.append(f"  - 완결 알림 발송 수: {notified_user_count}명")
             else:
                 body_lines.append(f"  - 오류: {data.get('error_message', '알 수 없는 오류')}")
 
@@ -73,17 +77,14 @@ def send_consolidated_report():
         now = datetime.now().strftime("%Y-%m-%d")
         subject = f"{overall_status_icon} [{overall_status_text}] 일일 통합 보고서 ({now})"
 
-        # --- 2. 이메일 발송 ---
         print(f"LOG: 관리자({admin_email})에게 통합 보고서를 발송합니다...")
         success = email_service.send_mail(admin_email, subject, body)
 
-        # [수정] 이메일 발송 실패 시, 즉시 예외를 발생시켜 TRUNCATE를 막음
         if not success:
             raise Exception("이메일 발송에 실패했습니다 (send_mail이 False 반환). 보고서 DB를 TRUNCATE하지 않습니다.")
 
         print("LOG: 통합 보고서 발송 완료.")
 
-        # --- 3. (중요) 발송 '성공' 시에만 테이블 비우기 ---
         print("LOG: 'daily_crawler_reports' 테이블을 비웁니다 (TRUNCATE)...")
         cursor.execute("TRUNCATE TABLE daily_crawler_reports;")
         conn.commit()
@@ -95,6 +96,7 @@ def send_consolidated_report():
     finally:
         if conn:
             conn.close()
+
 
 if __name__ == "__main__":
     print("==========================================")
