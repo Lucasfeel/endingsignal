@@ -30,6 +30,9 @@ const STATE = {
   contents: {},
   isLoading: false,
   currentModalContent: null,
+  subscriptionsSet: new Set(),
+  mySubscriptions: [],
+  subscriptionsLoadedAt: null,
 };
 
 const UI = {
@@ -43,6 +46,28 @@ const UI = {
   seriesFooter: document.getElementById('seriesFooterButton'),
   toggleIndicator: document.getElementById('toggleIndicator'),
   header: document.getElementById('mainHeader'),
+};
+
+/* =========================
+   Minimal auth helpers
+   ========================= */
+
+const getAccessToken = () => {
+  try {
+    return localStorage.getItem('es_access_token');
+  } catch (e) {
+    console.warn('Failed to read access token', e);
+    return null;
+  }
+};
+
+const requireAuthOrPrompt = (_actionName) => {
+  const token = getAccessToken();
+  if (!token) {
+    alert('로그인이 필요합니다.');
+    return false;
+  }
+  return true;
 };
 
 /* =========================
@@ -158,10 +183,164 @@ const normalizeMeta = (input) => {
 };
 
 /* =========================
+   Subscription helpers/state
+   ========================= */
+
+const buildSubscriptionKey = (content) => {
+  if (!content) return '';
+  const source = content.source || content?.meta?.source || '';
+  const contentId = content.content_id || content.contentId || content.id;
+  if (!source || !contentId) return '';
+  return `${source}::${contentId}`;
+};
+
+const isSubscribed = (content) => {
+  const key = buildSubscriptionKey(content);
+  return key ? STATE.subscriptionsSet.has(key) : false;
+};
+
+async function loadSubscriptions({ force = false } = {}) {
+  const token = getAccessToken();
+  if (!token) {
+    STATE.subscriptionsSet = new Set();
+    STATE.mySubscriptions = [];
+    STATE.subscriptionsLoadedAt = null;
+    return [];
+  }
+
+  if (!force && STATE.subscriptionsLoadedAt) {
+    return STATE.mySubscriptions;
+  }
+
+  try {
+    const res = await apiRequest('GET', '/api/me/subscriptions', { token });
+    if (!res || res.success !== true || !Array.isArray(res.data)) {
+      throw new Error('구독 정보를 불러오지 못했습니다.');
+    }
+
+    const normalized = res.data.map((item) => {
+      const finalState =
+        item?.final_state && typeof item.final_state === 'object'
+          ? item.final_state
+          : {};
+      return {
+        ...item,
+        meta: normalizeMeta(item?.meta),
+        final_state: finalState,
+      };
+    });
+
+    const nextSet = new Set();
+    normalized.forEach((item) => {
+      const key = buildSubscriptionKey(item);
+      if (key) nextSet.add(key);
+    });
+
+    STATE.subscriptionsSet = nextSet;
+    STATE.mySubscriptions = normalized;
+    STATE.subscriptionsLoadedAt = Date.now();
+    return normalized;
+  } catch (e) {
+    alert(e?.message || '구독 정보를 불러오지 못했습니다.');
+    STATE.subscriptionsSet = new Set();
+    STATE.mySubscriptions = [];
+    STATE.subscriptionsLoadedAt = null;
+    return [];
+  }
+}
+
+async function subscribeContent(content) {
+  const token = getAccessToken();
+  if (!token) {
+    alert('로그인이 필요합니다.');
+    return;
+  }
+
+  const contentId = content?.content_id || content?.contentId || content?.id;
+  const source = content?.source;
+  const key = buildSubscriptionKey({ ...content, content_id: contentId, source });
+  if (!contentId || !source) {
+    alert('콘텐츠 정보가 없습니다.');
+    return;
+  }
+
+  try {
+    await apiRequest('POST', '/api/me/subscriptions', {
+      body: { content_id: contentId, contentId, source },
+      token,
+    });
+    if (key) STATE.subscriptionsSet.add(key);
+    await loadSubscriptions({ force: true });
+  } catch (e) {
+    if (key) STATE.subscriptionsSet.delete(key);
+    alert(e?.message || '구독에 실패했습니다.');
+    throw e;
+  }
+}
+
+async function unsubscribeContent(content) {
+  const token = getAccessToken();
+  if (!token) {
+    alert('로그인이 필요합니다.');
+    return;
+  }
+
+  const contentId = content?.content_id || content?.contentId || content?.id;
+  const source = content?.source;
+  const key = buildSubscriptionKey({ ...content, content_id: contentId, source });
+  if (!contentId || !source) {
+    alert('콘텐츠 정보가 없습니다.');
+    return;
+  }
+
+  try {
+    await apiRequest('DELETE', '/api/me/subscriptions', {
+      body: { content_id: contentId, contentId, source },
+      token,
+    });
+    if (key) STATE.subscriptionsSet.delete(key);
+    await loadSubscriptions({ force: true });
+  } catch (e) {
+    if (key) STATE.subscriptionsSet.add(key);
+    alert(e?.message || '구독 해제에 실패했습니다.');
+    throw e;
+  }
+}
+
+const formatDateKST = (isoString) => {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return isoString;
+    const parts = new Intl.DateTimeFormat('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(date)
+      .reduce((acc, part) => {
+        if (part.type !== 'literal') acc[part.type] = part.value;
+        return acc;
+      }, {});
+    return `${parts.year}.${parts.month}.${parts.day}`;
+  } catch (e) {
+    console.warn('Failed to format date', isoString, e);
+    return isoString;
+  }
+};
+
+/* =========================
    App lifecycle
    ========================= */
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await loadSubscriptions();
+  } catch (e) {
+    console.warn('Failed to preload subscriptions', e);
+  }
+
   renderBottomNav();
   updateTab('webtoon'); // Initial Load
   setupScrollEffect();
@@ -397,51 +576,72 @@ async function fetchAndRenderContent(tabId) {
   let data = [];
 
   try {
-    let url = '';
-    let query = {};
-
-    if (tabId === 'webtoon' || tabId === 'novel') {
-      const day = STATE.filters[tabId].day;
-      const source = STATE.filters[tabId].source;
-      query = { type: tabId, source };
-
-      if (day === 'completed') {
-        url = buildUrl('/api/contents/completed', query);
-      } else if (day === 'hiatus') {
-        url = buildUrl('/api/contents/hiatus', query);
-      } else {
-        url = buildUrl('/api/contents/ongoing', query);
+    if (tabId === 'my') {
+      const token = getAccessToken();
+      if (!token) {
+        STATE.isLoading = false;
+        UI.contentGrid.innerHTML =
+          '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold" onclick="alert(\'로그인이 필요합니다.\')">로그인하기</button></div>';
+        return;
       }
-    }
 
-    // Simulated delay for effect
-    await new Promise((r) => setTimeout(r, 300));
+      const subs = await loadSubscriptions();
+      const mode = STATE.filters?.my?.viewMode || 'subscribing';
 
-    if (url) {
-      const json = await apiRequest('GET', url);
+      data = (subs || []).filter((item) => {
+        const finalState = item?.final_state || {};
+        const isScheduled = finalState?.is_scheduled_completion === true;
+        const isCompleted = finalState?.final_status === '완결' && !isScheduled;
+        if (mode === 'completed') return isCompleted;
+        return !isCompleted;
+      });
+    } else {
+      let url = '';
+      let query = {};
 
       if (tabId === 'webtoon' || tabId === 'novel') {
         const day = STATE.filters[tabId].day;
+        const source = STATE.filters[tabId].source;
+        query = { type: tabId, source };
 
-        if (day !== 'completed' && day !== 'hiatus' && day !== 'all') {
-          data = Array.isArray(json?.[day]) ? json[day] : [];
-        } else if (day === 'all') {
-          data = [];
-          Object.values(json || {}).forEach((arr) => {
-            if (Array.isArray(arr)) data.push(...arr);
-          });
+        if (day === 'completed') {
+          url = buildUrl('/api/contents/completed', query);
+        } else if (day === 'hiatus') {
+          url = buildUrl('/api/contents/hiatus', query);
         } else {
-          // completed/hiatus endpoints: { contents: [...], next_cursor: ... }
-          data = Array.isArray(json?.contents) ? json.contents : [];
+          url = buildUrl('/api/contents/ongoing', query);
         }
       }
-    } else {
-      // Mock for Series / OTT / My Sub as backend endpoints might be missing
-      data = [
-        { title: 'Mock Item 1', meta: { common: { thumbnail_url: null, authors: [] } } },
-        { title: 'Mock Item 2', meta: { common: { thumbnail_url: null, authors: [] } } },
-        { title: 'Mock Item 3', meta: { common: { thumbnail_url: null, authors: [] } } },
-      ];
+
+      // Simulated delay for effect
+      await new Promise((r) => setTimeout(r, 300));
+
+      if (url) {
+        const json = await apiRequest('GET', url);
+
+        if (tabId === 'webtoon' || tabId === 'novel') {
+          const day = STATE.filters[tabId].day;
+
+          if (day !== 'completed' && day !== 'hiatus' && day !== 'all') {
+            data = Array.isArray(json?.[day]) ? json[day] : [];
+          } else if (day === 'all') {
+            data = [];
+            Object.values(json || {}).forEach((arr) => {
+              if (Array.isArray(arr)) data.push(...arr);
+            });
+          } else {
+            // completed/hiatus endpoints: { contents: [...], next_cursor: ... }
+            data = Array.isArray(json?.contents) ? json.contents : [];
+          }
+        }
+      } else {
+        // Mock for Series / OTT as backend endpoints might be missing
+        data = [
+          { title: 'Mock Item 1', meta: { common: { thumbnail_url: null, authors: [] } } },
+          { title: 'Mock Item 2', meta: { common: { thumbnail_url: null, authors: [] } } },
+          { title: 'Mock Item 3', meta: { common: { thumbnail_url: null, authors: [] } } },
+        ];
+      }
     }
 
     // Normalize meta for safety
@@ -479,71 +679,138 @@ function createCard(content, tabId, aspectClass) {
     ? meta.common.authors.join(', ')
     : '';
 
-  // Bell Overlay for 'My Sub' (legacy; will be replaced in later phases)
-  let overlay = '';
+  const cardContainer = document.createElement('div');
+  cardContainer.className = `${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2`;
+
+  const imgEl = document.createElement('img');
+  imgEl.src = thumb;
+  imgEl.className =
+    'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
+  cardContainer.appendChild(imgEl);
+
+  // Badge Logic
   if (tabId === 'my') {
-    const isOn = true;
-    overlay = `
-      <div class="absolute top-[6px] right-[6px] h-[20px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 ${
-        isOn ? 'bg-black/60' : 'bg-black/40'
-      }" onclick="event.stopPropagation(); toggleBell(this)">
-        <span class="text-[10px]">${isOn ? '🔔' : '🔕'}</span>
-        <span class="text-[9px] font-bold ${isOn ? 'text-white' : 'text-gray-400'}">${
-      isOn ? 'ON' : 'OFF'
-    }</span>
-      </div>
-    `;
+    const finalState = content?.final_state || {};
+    const isScheduled = finalState?.is_scheduled_completion === true;
+    const isCompleted = finalState?.final_status === '완결';
+    const isHiatus =
+      finalState?.final_status === '휴재' || content?.status === '휴재';
+
+    const badgeEl = document.createElement('div');
+    badgeEl.className =
+      'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-0.5';
+
+    if (isScheduled) {
+      badgeEl.className += ' bg-yellow-500/80';
+      badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span><span class="text-[10px] text-black leading-none">${formatDateKST(finalState?.scheduled_completed_at)}</span>`;
+      cardContainer.appendChild(badgeEl);
+    } else if (isCompleted) {
+      badgeEl.className += ' bg-green-500/80';
+      badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
+      cardContainer.appendChild(badgeEl);
+    } else if (isHiatus) {
+      badgeEl.className += ' bg-gray-600/80';
+      badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">휴재</span>`;
+      cardContainer.appendChild(badgeEl);
+    }
+  } else if (content.status === '완결') {
+    const badgeEl = document.createElement('div');
+    badgeEl.className =
+      'absolute top-0 left-0 bg-black/60 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-0.5';
+    badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">EN</span><span class="text-[10px] text-yellow-400 leading-none">🔔</span>`;
+    cardContainer.appendChild(badgeEl);
   }
 
-  // Badge Logic (Existing)
-  let badge = '';
-  if (content.status === '완결') {
-    badge = `
-      <div class="absolute top-0 left-0 bg-black/60 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-0.5">
-        <span class="text-[10px] font-black text-white leading-none">EN</span>
-        <span class="text-[10px] text-yellow-400 leading-none">🔔</span>
-      </div>
-    `;
-  }
+  const gradient = document.createElement('div');
+  gradient.className =
+    'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
+  cardContainer.appendChild(gradient);
 
-  el.innerHTML = `
-    <div class="${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2">
-      <img src="${thumb}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
-      ${badge}
-      ${overlay}
-      <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60"></div>
-    </div>
-    <div class="px-0.5">
-      <h3 class="font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate">${content.title}</h3>
-      <p class="text-[11px] text-[#A3A3A3] mt-0.5 truncate">${authors}</p>
-    </div>
-  `;
+  const starButton = document.createElement('button');
+  starButton.type = 'button';
+  starButton.className =
+    'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors';
+
+  const setStarVisual = (on) => {
+    starButton.innerHTML = on
+      ? '<span class="text-[12px]">★</span><span class="text-[10px]">구독중</span>'
+      : '<span class="text-[12px]">☆</span><span class="text-[10px]">구독</span>';
+    starButton.className =
+      'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors ' +
+      (on ? 'bg-black/60 text-[#4F46E5]' : 'bg-black/40 text-gray-400');
+  };
+
+  setStarVisual(isSubscribed(content));
+
+  starButton.onclick = async (evt) => {
+    evt.stopPropagation();
+    if (!requireAuthOrPrompt()) return;
+
+    const key = buildSubscriptionKey(content);
+    if (!key) {
+      alert('콘텐츠 정보가 없습니다.');
+      return;
+    }
+    const currentlySubscribed = isSubscribed(content);
+    const nextState = !currentlySubscribed;
+
+    setStarVisual(nextState);
+    if (nextState) STATE.subscriptionsSet.add(key);
+    else STATE.subscriptionsSet.delete(key);
+
+    try {
+      if (nextState) {
+        await subscribeContent(content);
+      } else {
+        await unsubscribeContent(content);
+      }
+      if (STATE.activeTab === 'my') {
+        fetchAndRenderContent('my');
+      }
+    } catch (e) {
+      if (key) {
+        if (currentlySubscribed) STATE.subscriptionsSet.add(key);
+        else STATE.subscriptionsSet.delete(key);
+      }
+      setStarVisual(currentlySubscribed);
+    }
+  };
+
+  cardContainer.appendChild(starButton);
+
+  el.appendChild(cardContainer);
+
+  const textContainer = document.createElement('div');
+  textContainer.className = 'px-0.5';
+
+  const titleEl = document.createElement('h3');
+  titleEl.className =
+    'font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate';
+  titleEl.textContent = content.title || '';
+
+  const authorEl = document.createElement('p');
+  authorEl.className = 'text-[11px] text-[#A3A3A3] mt-0.5 truncate';
+  authorEl.textContent = authors;
+
+  textContainer.appendChild(titleEl);
+  textContainer.appendChild(authorEl);
+  el.appendChild(textContainer);
 
   el.onclick = () => openModal(content);
   return el;
 }
 
 /* =========================
-   Legacy bell toggle (dummy)
+   Modal: subscription toggle
    ========================= */
 
-window.toggleBell = (el) => {
-  const isCurrentlyOn = el.querySelector('span:last-child')?.innerText === 'ON';
-  const newState = !isCurrentlyOn;
-
-  if (newState) {
-    el.className = el.className.replace('bg-black/40', 'bg-black/60');
-    el.innerHTML = `<span class="text-[10px]">🔔</span><span class="text-[9px] font-bold text-white">ON</span>`;
-  } else {
-    el.className = el.className.replace('bg-black/60', 'bg-black/40');
-    el.innerHTML = `<span class="text-[10px]">🔕</span><span class="text-[9px] font-bold text-gray-400">OFF</span>`;
-  }
+const syncModalButton = () => {
+  const btn = document.getElementById('subscribeButton');
+  const content = STATE.currentModalContent;
+  if (!btn || !content) return;
+  const on = isSubscribed(content);
+  btn.textContent = on ? '구독 해제' : '구독하기';
 };
-
-/* =========================
-   Modal: legacy email subscription
-   (will be replaced by /api/me/subscriptions later)
-   ========================= */
 
 function openModal(content) {
   STATE.currentModalContent = content;
@@ -552,48 +819,36 @@ function openModal(content) {
 
   if (titleEl) titleEl.textContent = content.title || '';
   if (modalEl) modalEl.classList.remove('hidden');
+  syncModalButton();
 }
 
 function closeModal() {
   const modalEl = document.getElementById('subscribeModal');
-  const inputEl = document.getElementById('emailInput');
-  const errorEl = document.getElementById('emailError');
-
   if (modalEl) modalEl.classList.add('hidden');
-  if (inputEl) inputEl.value = '';
-  if (errorEl) errorEl.textContent = '';
   STATE.currentModalContent = null;
 }
 
-async function submitSubscription() {
-  const emailEl = document.getElementById('emailInput');
-  const errorMsg = document.getElementById('emailError');
-  const email = emailEl ? emailEl.value : '';
+window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
+  if (!content) return;
+  if (!requireAuthOrPrompt()) return;
 
-  if (!errorMsg) return;
-
-  if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-    errorMsg.textContent = '올바른 이메일 형식이 아닙니다.';
-    return;
-  }
-
+  const currently = isSubscribed(content);
   try {
-    await apiRequest('POST', '/api/subscriptions', {
-      body: {
-        email: email,
-        contentId: content?.content_id,
-        source: content?.source,
-      },
-    });
-
-    alert('구독이 완료되었습니다!');
-    closeModal();
+    if (currently) {
+      await unsubscribeContent(content);
+    } else {
+      await subscribeContent(content);
+    }
+    syncModalButton();
+    alert(currently ? '구독이 해제되었습니다.' : '구독이 설정되었습니다.');
+    if (STATE.activeTab === 'my') {
+      fetchAndRenderContent('my');
+    }
   } catch (e) {
-    console.error(e);
-    errorMsg.textContent = e?.message || '서버 통신 오류';
+    // errors already handled in subscribe/unsubscribe
   }
-}
+};
 
 /* =========================
    Series sort (minimal, optional)
@@ -623,4 +878,8 @@ function setupSeriesSortHandlers() {
 
 window.updateMySubTab = updateMySubTab;
 window.closeModal = closeModal;
-window.submitSubscription = submitSubscription;
+
+// Quick sanity test steps (manual):
+// 1) localStorage.setItem('es_access_token', '<token>')
+// 2) Open the "My Sub" tab
+// 3) Toggle the star on content cards to confirm subscription changes
