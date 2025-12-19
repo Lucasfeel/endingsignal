@@ -5,6 +5,11 @@
    - Keeps existing UI behavior
 */
 
+const DEBUG_API = false;
+function debugLog(...args) {
+  if (DEBUG_API) console.log(...args);
+}
+
 const ICONS = {
   webtoon: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 4H3C1.9 4 1 4.9 1 6v13c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 19V6h8v13H3zm18 0h-8V6h8v13z"/></svg>`, // Open Book approximation
   novel: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.127 22.562l-7.127 1.438 1.438-7.128 5.689 5.69zm1.414-1.414l11.228-11.225-5.69-5.692-11.227 11.227 5.689 5.69zm9.768-21.148l-2.816 2.817 5.691 5.691 2.816-2.819-5.691-5.689z"/></svg>`, // Feather Pen approximation
@@ -76,11 +81,18 @@ async function apiRequest(method, path, { query, body, token } = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  debugLog('[apiRequest]', method, url, {
+    hasBody: body !== undefined,
+    hasToken: Boolean(token),
+  });
+
   const response = await fetch(url, { method, headers, body: serializedBody });
+  debugLog('[apiResponse]', response.status, response.ok);
 
   const buildError = async () => {
     let message = response.statusText || 'Request failed';
     let code;
+    let handled = false;
 
     if (isJsonResponse(response)) {
       try {
@@ -91,8 +103,20 @@ async function apiRequest(method, path, { query, body, token } = {}) {
         } else if (typeof json?.message === 'string') {
           message = json.message;
         }
+        handled = true;
       } catch {
         // ignore parse failures
+      }
+    }
+
+    if (!handled) {
+      try {
+        const text = await response.clone().text();
+        if (text) {
+          message = text.slice(0, 300);
+        }
+      } catch {
+        // ignore text fallback failures
       }
     }
 
@@ -111,7 +135,12 @@ async function apiRequest(method, path, { query, body, token } = {}) {
     }
   }
 
-  return null;
+  try {
+    const text = await response.text();
+    return text || null;
+  } catch {
+    return null;
+  }
 }
 
 const normalizeMeta = (input) => {
@@ -369,17 +398,19 @@ async function fetchAndRenderContent(tabId) {
 
   try {
     let url = '';
+    let query = {};
 
     if (tabId === 'webtoon' || tabId === 'novel') {
       const day = STATE.filters[tabId].day;
       const source = STATE.filters[tabId].source;
+      query = { type: tabId, source };
 
       if (day === 'completed') {
-        url = `/api/contents/completed?type=${tabId}&source=${source}`;
+        url = buildUrl('/api/contents/completed', query);
       } else if (day === 'hiatus') {
-        url = `/api/contents/hiatus?type=${tabId}&source=${source}`;
+        url = buildUrl('/api/contents/hiatus', query);
       } else {
-        url = `/api/contents/ongoing?type=${tabId}&source=${source}`;
+        url = buildUrl('/api/contents/ongoing', query);
       }
     }
 
