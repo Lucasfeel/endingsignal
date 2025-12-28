@@ -35,6 +35,12 @@ const STATE = {
   isLoading: false,
   currentModalContent: null,
 
+  auth: {
+    isAuthenticated: false,
+    user: null,
+    isChecking: false,
+  },
+
   // subscriptions
   subscriptionsSet: new Set(),
   mySubscriptions: [],
@@ -52,6 +58,8 @@ const UI = {
   seriesFooter: document.getElementById('seriesFooterButton'),
   toggleIndicator: document.getElementById('toggleIndicator'),
   header: document.getElementById('mainHeader'),
+  profileButton: document.getElementById('profileButton'),
+  profileButtonText: document.getElementById('profileButtonText'),
 };
 
 /* =========================
@@ -109,14 +117,103 @@ const getAccessToken = () => {
   }
 };
 
+const setAccessToken = (token) => {
+  try {
+    if (token) localStorage.setItem('es_access_token', token);
+  } catch (e) {
+    console.warn('Failed to save access token', e);
+  }
+};
+
+const clearAccessToken = () => {
+  try {
+    localStorage.removeItem('es_access_token');
+  } catch (e) {
+    console.warn('Failed to clear access token', e);
+  }
+};
+
 const requireAuthOrPrompt = (_actionName) => {
   const token = getAccessToken();
   if (!token) {
-    showToast('로그인이 필요합니다. 로그인 후 이용해주세요.', { type: 'error' });
+    showToast('로그인이 필요합니다.', { type: 'error' });
+    openAuthModal({ reason: _actionName || 'auth-required' });
     return false;
   }
   return true;
 };
+
+async function fetchMe() {
+  const token = getAccessToken();
+  if (!token) {
+    STATE.auth.isAuthenticated = false;
+    STATE.auth.user = null;
+    updateProfileButtonState();
+    return null;
+  }
+
+  STATE.auth.isChecking = true;
+
+  try {
+    const res = await apiRequest('GET', '/api/auth/me', { token });
+    const user = res?.data?.user || res?.user || null;
+
+    STATE.auth.user = user;
+    STATE.auth.isAuthenticated = Boolean(user || token);
+    updateProfileButtonState();
+    return user;
+  } catch (e) {
+    if (e?.httpStatus === 401 || e?.httpStatus === 403) {
+      STATE.auth.isAuthenticated = false;
+      STATE.auth.user = null;
+    }
+    updateProfileButtonState();
+    return null;
+  } finally {
+    STATE.auth.isChecking = false;
+  }
+}
+
+async function login(email, password) {
+  const res = await apiRequest('POST', '/api/auth/login', {
+    body: { email, password },
+  });
+
+  const token = res?.data?.access_token || res?.access_token;
+  if (!token) throw new Error('토큰을 받지 못했습니다.');
+
+  setAccessToken(token);
+  const user = res?.data?.user || res?.user || null;
+  STATE.auth.isAuthenticated = true;
+  STATE.auth.user = user;
+  updateProfileButtonState();
+
+  try {
+    await loadSubscriptions({ force: true });
+  } catch (e) {
+    console.warn('Failed to refresh subscriptions after login', e);
+  }
+
+  await fetchMe().catch(() => {});
+  showToast('로그인되었습니다', { type: 'success' });
+  closeAuthModal();
+  await fetchAndRenderContent(STATE.activeTab);
+  return res;
+}
+
+function logout({ silent = false } = {}) {
+  clearAccessToken();
+  STATE.auth.isAuthenticated = false;
+  STATE.auth.user = null;
+
+  STATE.subscriptionsSet = new Set();
+  STATE.mySubscriptions = [];
+  STATE.subscriptionsLoadedAt = null;
+
+  if (!silent) showToast('로그아웃되었습니다', { type: 'info' });
+  updateProfileButtonState();
+  fetchAndRenderContent(STATE.activeTab);
+}
 
 /* =========================
    CP2: API Contract Baseline + CP2.1 hardening
@@ -196,7 +293,15 @@ async function apiRequest(method, path, { query, body, token } = {}) {
   };
 
   if (!response.ok) {
-    throw await buildError();
+    const errorObj = await buildError();
+
+    if (response.status === 401 || response.status === 403) {
+      logout({ silent: true });
+      showToast('세션이 만료되었습니다. 다시 로그인해주세요.', { type: 'error' });
+    }
+
+    errorObj.httpStatus = errorObj.httpStatus || response.status;
+    throw errorObj;
   }
 
   if (isJsonResponse(response)) {
@@ -427,8 +532,13 @@ const formatDateKST = (isoString) => {
    ========================= */
 
 document.addEventListener('DOMContentLoaded', async () => {
+  setupAuthModalListeners();
+  setupProfileButton();
+  updateProfileButtonState();
+
   try {
     // preload subscriptions so stars render correctly (if token exists)
+    await fetchMe();
     await loadSubscriptions();
   } catch (e) {
     console.warn('Failed to preload subscriptions', e);
@@ -454,6 +564,108 @@ function setupScrollEffect() {
     else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
   });
 }
+
+/* =========================
+   Auth modal + profile
+   ========================= */
+
+function updateProfileButtonState() {
+  const btn = UI.profileButton;
+  const textEl = UI.profileButtonText;
+  if (!btn || !textEl) return;
+
+  const isAuth = STATE.auth.isAuthenticated;
+  const user = STATE.auth.user;
+
+  const baseClasses =
+    'w-[32px] h-[32px] rounded-full border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]';
+  btn.className = baseClasses + (isAuth ? ' bg-[#4F46E5]' : ' bg-[#2d2d2d]');
+
+  if (isAuth && user) {
+    const initial = safeString(user.email || user.id || 'M', 'M')
+      .charAt(0)
+      .toUpperCase();
+    textEl.textContent = initial || 'M';
+    btn.setAttribute('title', safeString(user.email, '로그아웃'));
+  } else {
+    textEl.textContent = '로그인';
+    btn.setAttribute('title', '로그인');
+  }
+}
+
+function setupProfileButton() {
+  const btn = UI.profileButton;
+  if (!btn) return;
+
+  btn.onclick = () => {
+    if (STATE.auth.isAuthenticated) {
+      logout();
+    } else {
+      openAuthModal({ reason: 'profile' });
+    }
+  };
+}
+
+function openAuthModal(_opts = {}) {
+  const modal = document.getElementById('authModal');
+  const emailEl = document.getElementById('authEmail');
+  const pwdEl = document.getElementById('authPassword');
+  const errorEl = document.getElementById('authError');
+  if (!modal) return;
+
+  modal.classList.remove('hidden');
+  if (errorEl) errorEl.textContent = '';
+  if (emailEl) emailEl.focus();
+  if (pwdEl) pwdEl.value = '';
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function setupAuthModalListeners() {
+  const submitBtn = document.getElementById('authSubmitButton');
+  const cancelBtn = document.getElementById('authCancelButton');
+  const emailEl = document.getElementById('authEmail');
+  const pwdEl = document.getElementById('authPassword');
+  const errorEl = document.getElementById('authError');
+
+  if (cancelBtn) cancelBtn.onclick = () => closeAuthModal();
+
+  const handleSubmit = async () => {
+    if (!emailEl || !pwdEl) return;
+    const email = emailEl.value.trim();
+    const password = pwdEl.value;
+
+    if (!/.+@.+\..+/.test(email)) {
+      if (errorEl) errorEl.textContent = '유효한 이메일을 입력해주세요.';
+      return;
+    }
+
+    if (!password || password.length < 6) {
+      if (errorEl) errorEl.textContent = '비밀번호는 6자 이상 입력해주세요.';
+      return;
+    }
+
+    if (errorEl) errorEl.textContent = '';
+
+    try {
+      await login(email, password);
+    } catch (e) {
+      if (errorEl) errorEl.textContent = e?.message || '로그인에 실패했습니다.';
+    }
+  };
+
+  if (submitBtn) submitBtn.onclick = handleSubmit;
+  if (pwdEl)
+    pwdEl.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') handleSubmit();
+    });
+}
+
+window.openAuthModal = openAuthModal;
+window.closeAuthModal = closeAuthModal;
 
 /* =========================
    Navigation + Filters
@@ -686,8 +898,7 @@ async function fetchAndRenderContent(tabId) {
 
         const loginBtn = document.getElementById('myTabLoginButton');
         if (loginBtn) {
-          loginBtn.onclick = () =>
-            showToast('로그인 기능은 CP3에서 연결됩니다.', { type: 'info' });
+          loginBtn.onclick = () => openAuthModal({ reason: 'my-tab' });
         }
         return;
       }
