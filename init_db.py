@@ -1,22 +1,84 @@
-# init_db.py
+"""Database bootstrap script with readiness checks and idempotency."""
+
 import sys
-from database import setup_database_standalone
+import time
+
+import psycopg2
+
+from database import create_standalone_connection, setup_database_standalone
 from dotenv import load_dotenv
 
-print("==========================================")
-print("  DATABASE INITIALIZATION SCRIPT STARTED")
-print("==========================================")
-try:
-    load_dotenv()
-    setup_database_standalone()
-    print("\n[SUCCESS] Database initialization complete.")
+
+def connect_with_retries(max_attempts: int = 10):
+    """Connect to the database with basic retry/backoff for cold starts."""
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(
+                f"[CHECK] Connecting to database (attempt {attempt}/{max_attempts})..."
+            )
+            return create_standalone_connection()
+        except psycopg2.OperationalError as exc:  # Retry only on connectivity issues
+            if attempt == max_attempts:
+                raise
+
+            sleep_seconds = attempt
+            print(
+                f"[RETRY] Database not ready: {exc}. Retrying in {sleep_seconds}s..."
+            )
+            time.sleep(sleep_seconds)
+
+
+def database_already_initialized() -> bool:
+    """Determine whether the schema already exists by checking the contents table."""
+
+    conn = None
+    cursor = None
+    try:
+        conn = connect_with_retries()
+        cursor = conn.cursor()
+        cursor.execute("SELECT to_regclass('public.contents') as t;")
+        row = cursor.fetchone()
+        return bool(row and row[0])
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+def main():
     print("==========================================")
-    print("  DATABASE INITIALIZATION SCRIPT FINISHED")
+    print("  DATABASE INITIALIZATION SCRIPT STARTED")
     print("==========================================")
-    sys.exit(0)
-except Exception as e:
-    print(f"\n[FATAL] An error occurred during database initialization: {e}", file=sys.stderr)
-    print("==========================================")
-    print("  DATABASE INITIALIZATION SCRIPT FAILED")
-    print("==========================================")
-    sys.exit(1)
+
+    try:
+        load_dotenv()
+
+        if database_already_initialized():
+            print("[SKIP] Database already initialized. Skipping setup.")
+            print("==========================================")
+            print("  DATABASE INITIALIZATION SCRIPT FINISHED")
+            print("==========================================")
+            sys.exit(0)
+
+        print("[INFO] Database not initialized. Running setup...")
+        setup_database_standalone()
+        print("\n[SUCCESS] Database initialization complete.")
+        print("==========================================")
+        print("  DATABASE INITIALIZATION SCRIPT FINISHED")
+        print("==========================================")
+        sys.exit(0)
+    except Exception as e:
+        print(
+            f"\n[FATAL] An error occurred during database initialization: {e}",
+            file=sys.stderr,
+        )
+        print("==========================================")
+        print("  DATABASE INITIALIZATION SCRIPT FAILED")
+        print("==========================================")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
