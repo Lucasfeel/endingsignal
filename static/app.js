@@ -39,6 +39,7 @@ const STATE = {
     isAuthenticated: false,
     user: null,
     isChecking: false,
+    uiMode: 'login',
   },
 
   // subscriptions
@@ -187,18 +188,16 @@ async function login(email, password) {
   STATE.auth.isAuthenticated = true;
   STATE.auth.user = user;
   updateProfileButtonState();
-
-  try {
-    await loadSubscriptions({ force: true });
-  } catch (e) {
-    console.warn('Failed to refresh subscriptions after login', e);
-  }
-
-  await fetchMe().catch(() => {});
-  showToast('로그인되었습니다', { type: 'success' });
-  closeAuthModal();
-  await fetchAndRenderContent(STATE.activeTab);
   return res;
+}
+
+async function register(email, password) {
+  const res = await apiRequest('POST', '/api/auth/register', {
+    body: { email, password },
+  });
+
+  showToast('회원가입이 완료되었습니다. 로그인 중...', { type: 'success' });
+  return login(email, password);
 }
 
 function logout({ silent = false } = {}) {
@@ -606,17 +605,52 @@ function setupProfileButton() {
   };
 }
 
+function applyAuthMode(mode = 'login') {
+  STATE.auth.uiMode = mode;
+
+  const titleEl = document.getElementById('authTitle');
+  const submitBtn = document.getElementById('authSubmitBtn');
+  const confirmRow = document.getElementById('authPasswordConfirmRow');
+  const confirmInput = document.getElementById('authPasswordConfirm');
+  const hintTextEl = document.getElementById('authModeHintText');
+  const toggleBtn = document.getElementById('authToggleModeBtn');
+  const errorEl = document.getElementById('authError');
+
+  if (errorEl) errorEl.textContent = '';
+
+  if (mode === 'register') {
+    if (titleEl) titleEl.textContent = '회원가입';
+    if (submitBtn) submitBtn.textContent = '회원가입';
+    if (confirmRow) confirmRow.classList.remove('hidden');
+    if (hintTextEl) hintTextEl.textContent = '이미 계정이 있나요?';
+    if (toggleBtn) toggleBtn.textContent = '로그인';
+  } else {
+    if (titleEl) titleEl.textContent = '로그인';
+    if (submitBtn) submitBtn.textContent = '로그인';
+    if (confirmRow) confirmRow.classList.add('hidden');
+    if (hintTextEl) hintTextEl.textContent = '계정이 없으신가요?';
+    if (toggleBtn) toggleBtn.textContent = '회원가입';
+    if (confirmInput) confirmInput.value = '';
+  }
+}
+
 function openAuthModal(_opts = {}) {
   const modal = document.getElementById('authModal');
   const emailEl = document.getElementById('authEmail');
   const pwdEl = document.getElementById('authPassword');
+  const confirmEl = document.getElementById('authPasswordConfirm');
   const errorEl = document.getElementById('authError');
   if (!modal) return;
 
+  const mode = typeof _opts === 'string' ? _opts : _opts?.mode || 'login';
+
   modal.classList.remove('hidden');
   if (errorEl) errorEl.textContent = '';
-  if (emailEl) emailEl.focus();
+  if (emailEl) emailEl.value = '';
   if (pwdEl) pwdEl.value = '';
+  if (confirmEl) confirmEl.value = '';
+  applyAuthMode(mode);
+  if (emailEl) emailEl.focus();
 }
 
 function closeAuthModal() {
@@ -625,18 +659,26 @@ function closeAuthModal() {
 }
 
 function setupAuthModalListeners() {
-  const submitBtn = document.getElementById('authSubmitButton');
-  const cancelBtn = document.getElementById('authCancelButton');
+  const submitBtn = document.getElementById('authSubmitBtn');
+  const cancelBtn = document.getElementById('authCloseBtn');
+  const toggleBtn = document.getElementById('authToggleModeBtn');
   const emailEl = document.getElementById('authEmail');
   const pwdEl = document.getElementById('authPassword');
+  const confirmEl = document.getElementById('authPasswordConfirm');
   const errorEl = document.getElementById('authError');
 
   if (cancelBtn) cancelBtn.onclick = () => closeAuthModal();
+  if (toggleBtn)
+    toggleBtn.onclick = () => {
+      const nextMode = STATE.auth.uiMode === 'login' ? 'register' : 'login';
+      applyAuthMode(nextMode);
+    };
 
   const handleSubmit = async () => {
     if (!emailEl || !pwdEl) return;
     const email = emailEl.value.trim();
     const password = pwdEl.value;
+    const mode = STATE.auth.uiMode || 'login';
 
     if (!/.+@.+\..+/.test(email)) {
       if (errorEl) errorEl.textContent = '유효한 이메일을 입력해주세요.';
@@ -648,20 +690,50 @@ function setupAuthModalListeners() {
       return;
     }
 
+    if (mode === 'register') {
+      const confirmPwd = confirmEl ? confirmEl.value : '';
+      if (password !== confirmPwd) {
+        if (errorEl) errorEl.textContent = '비밀번호가 일치하지 않습니다.';
+        return;
+      }
+    }
+
     if (errorEl) errorEl.textContent = '';
 
     try {
-      await login(email, password);
+      if (mode === 'register') await register(email, password);
+      else await login(email, password);
+
+      await fetchMe();
+      updateProfileButtonState();
+
+      const hasToken = Boolean(getAccessToken());
+      if (hasToken) {
+        try {
+          await loadSubscriptions({ force: true });
+        } catch (e) {
+          console.warn('Failed to refresh subscriptions after auth', e);
+        }
+      }
+
+      closeAuthModal();
+      showToast('로그인되었습니다', { type: 'success' });
+
+      if (STATE.activeTab === 'my') await fetchAndRenderContent('my');
+      else await fetchAndRenderContent(STATE.activeTab);
     } catch (e) {
       if (errorEl) errorEl.textContent = e?.message || '로그인에 실패했습니다.';
+      showToast(e?.message || '오류가 발생했습니다.', { type: 'error' });
     }
   };
 
   if (submitBtn) submitBtn.onclick = handleSubmit;
-  if (pwdEl)
-    pwdEl.addEventListener('keydown', (evt) => {
-      if (evt.key === 'Enter') handleSubmit();
-    });
+  [pwdEl, confirmEl].forEach((el) => {
+    if (el)
+      el.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Enter') handleSubmit();
+      });
+  });
 }
 
 window.openAuthModal = openAuthModal;
