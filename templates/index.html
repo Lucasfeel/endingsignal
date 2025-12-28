@@ -122,9 +122,11 @@
                 <button id="searchButton" class="spring-bounce">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                 </button>
-                <div class="w-[28px] h-[28px] rounded-full bg-[#525252]"></div> <!-- Profile Placeholder -->
+                <button id="profileButton" class="w-[28px] h-[28px] rounded-full bg-[#525252] flex items-center justify-center text-[12px] font-bold text-white/80 transition-colors spring-bounce"></button>
             </div>
         </header>
+
+        <div id="toastContainer" class="fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[480px] pointer-events-none"></div>
 
         <main class="min-h-screen pb-24 relative">
              <!-- Top Filters Container -->
@@ -179,13 +181,26 @@
                 <h2 class="text-xl font-bold mb-1 text-white">완결 알림 받기</h2>
                 <p id="modalWebtoonTitle" class="mb-4 text-gray-400 text-sm"></p>
                 <div id="modalWebtoonLinkContainer" class="mb-6 text-sm"></div>
-                <div class="mb-4">
-                    <input type="email" id="emailInput" placeholder="이메일 주소 입력" class="w-full p-3 rounded-lg bg-[#2c2c2e] border-none text-white focus:ring-2 focus:ring-indigo-500 text-sm placeholder-gray-500">
-                    <p id="emailError" class="text-red-500 text-xs mt-1 h-4"></p>
-                </div>
+                <p class="mb-4 text-sm text-gray-400">구독은 로그인 후 가능합니다.</p>
                 <div class="flex justify-end gap-2">
-                    <button id="cancelButton" onclick="closeModal()" class="px-4 py-2 rounded-lg bg-[#3a3a3c] text-gray-300 text-sm font-medium spring-bounce">취소</button>
-                    <button id="subscribeButton" onclick="submitSubscription()" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce neon-glow">구독하기</button>
+                    <button id="cancelButton" onclick="closeModal()" class="px-4 py-2 rounded-lg bg-[#3a3a3c] text-gray-300 text-sm font-medium spring-bounce">닫기</button>
+                    <button id="subscribeButton" onclick="toggleSubscriptionFromModal()" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce neon-glow">구독/해제</button>
+                </div>
+            </div>
+        </div>
+        <div id="authModal" class="fixed inset-0 flex items-center justify-center z-[105] hidden">
+            <div class="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
+            <div class="relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all">
+                <h2 class="text-xl font-bold mb-1 text-white">로그인</h2>
+                <p class="mb-4 text-sm text-gray-400">이메일과 비밀번호로 로그인하세요.</p>
+                <div class="space-y-3">
+                    <input id="authEmail" type="email" placeholder="email" class="w-full px-3 py-2 rounded-lg bg-[#2a2a2a] text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#4f46e5]" />
+                    <input id="authPassword" type="password" placeholder="password" class="w-full px-3 py-2 rounded-lg bg-[#2a2a2a] text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#4f46e5]" />
+                    <p id="authError" class="text-xs text-red-400 min-h-[16px]"></p>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button id="authCancelButton" class="px-4 py-2 rounded-lg bg-[#3a3a3c] text-gray-300 text-sm font-medium spring-bounce">닫기</button>
+                    <button id="authSubmitButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce neon-glow">로그인</button>
                 </div>
             </div>
         </div>
