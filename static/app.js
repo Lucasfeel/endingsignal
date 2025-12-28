@@ -1,22 +1,25 @@
 /* static/app.js
-   CP2 integrated: apiRequest + normalizeMeta + conflict-free merge
-   Notes:
-   - No backend changes
-   - Keeps existing UI behavior
+   CP2 + CP2.1 + CP4 + CP4.1 integrated (conflict-free)
+   - apiRequest + normalizeMeta
+   - authenticated subscriptions via /api/me/subscriptions
+   - My Sub uses real data + final_state (scheduled completion supported)
+   - toast-based UX (no alert) + hardened schema parsing
+   - no backend changes
 */
 
 const DEBUG_API = false;
 const DEBUG_TOOLS = false;
+
 function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
 }
 
 const ICONS = {
-  webtoon: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 4H3C1.9 4 1 4.9 1 6v13c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 19V6h8v13H3zm18 0h-8V6h8v13z"/></svg>`, // Open Book approximation
-  novel: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.127 22.562l-7.127 1.438 1.438-7.128 5.689 5.69zm1.414-1.414l11.228-11.225-5.69-5.692-11.227 11.227 5.689 5.69zm9.768-21.148l-2.816 2.817 5.691 5.691 2.816-2.819-5.691-5.689z"/></svg>`, // Feather Pen approximation
-  ott: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`, // Play Circle
-  series: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>`, // TV
-  my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`, // Star
+  webtoon: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 4H3C1.9 4 1 4.9 1 6v13c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 19V6h8v13H3zm18 0h-8V6h8v13z"/></svg>`,
+  novel: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.127 22.562l-7.127 1.438 1.438-7.128 5.689 5.69zm1.414-1.414l11.228-11.225-5.69-5.692-11.227 11.227 5.689 5.69zm9.768-21.148l-2.816 2.817 5.691 5.691 2.816-2.819-5.691-5.689z"/></svg>`,
+  ott: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`,
+  series: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>`,
+  my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
 };
 
 const STATE = {
@@ -31,6 +34,8 @@ const STATE = {
   contents: {},
   isLoading: false,
   currentModalContent: null,
+
+  // subscriptions
   subscriptionsSet: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
@@ -50,13 +55,15 @@ const UI = {
 };
 
 /* =========================
-   Toast helper
+   Toast helper (CP4.1)
+   Requires #toastContainer in HTML (optional; gracefully degrades)
    ========================= */
 
 function showToast(message, { type = 'info', duration = 2200 } = {}) {
   const container = document.getElementById('toastContainer');
   if (!container) {
-    console.warn('Toast container missing');
+    // graceful fallback (do not crash)
+    console.warn('Toast container missing:', message);
     return;
   }
 
@@ -112,7 +119,7 @@ const requireAuthOrPrompt = (_actionName) => {
 };
 
 /* =========================
-   CP2: API Contract Baseline
+   CP2: API Contract Baseline + CP2.1 hardening
    ========================= */
 
 const isJsonResponse = (response) => {
@@ -175,14 +182,13 @@ async function apiRequest(method, path, { query, body, token } = {}) {
       }
     }
 
+    // fallback for non-json error responses (e.g., HTML 404)
     if (!handled) {
       try {
         const text = await response.clone().text();
-        if (text) {
-          message = text.slice(0, 300);
-        }
+        if (text) message = text.slice(0, 300);
       } catch {
-        // ignore text fallback failures
+        // ignore
       }
     }
 
@@ -201,6 +207,7 @@ async function apiRequest(method, path, { query, body, token } = {}) {
     }
   }
 
+  // optional text fallback for OK non-json responses
   try {
     const text = await response.text();
     return text || null;
@@ -223,9 +230,13 @@ const normalizeMeta = (input) => {
   return {};
 };
 
+/* =========================
+   Schema safety (CP4.1)
+   ========================= */
+
 const safeString = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
 const safeBool = (v, fallback = false) =>
-  typeof v === 'boolean' ? v : Boolean(fallback);
+  typeof v === 'boolean' ? v : fallback;
 const safeObj = (v) => (v && typeof v === 'object' ? v : {});
 
 const normalizeSubscriptionItem = (item) => {
@@ -236,7 +247,10 @@ const normalizeSubscriptionItem = (item) => {
   if (!contentId || !source) return null;
 
   const fsRaw = safeObj(item.final_state);
-  const finalStatus = safeString(fsRaw.final_status, safeString(fsRaw.raw_status, ''));
+  const finalStatus = safeString(
+    fsRaw.final_status,
+    safeString(fsRaw.raw_status, '')
+  );
 
   const finalState = {
     ...fsRaw,
@@ -259,12 +273,12 @@ const normalizeSubscriptionItem = (item) => {
 };
 
 /* =========================
-   Subscription helpers/state
+   Subscriptions helpers/state (CP4 + CP4.1)
    ========================= */
 
 const buildSubscriptionKey = (content) => {
   if (!content) return '';
-  const source = content.source || content?.meta?.source || '';
+  const source = content.source || '';
   const contentId = content.content_id || content.contentId || content.id;
   if (!source || !contentId) return '';
   return `${source}::${contentId}`;
@@ -288,34 +302,26 @@ async function loadSubscriptions({ force = false } = {}) {
     return STATE.mySubscriptions;
   }
 
-  try {
-    const res = await apiRequest('GET', '/api/me/subscriptions', { token });
-    if (!res || res.success !== true || !Array.isArray(res.data)) {
-      throw new Error('구독 정보를 불러오지 못했습니다.');
-    }
-
-    const normalized = res.data
-      .map((item) => normalizeSubscriptionItem(item))
-      .filter(Boolean);
-
-    const nextSet = new Set();
-    normalized.forEach((item) => {
-      const key = buildSubscriptionKey(item);
-      if (key) nextSet.add(key);
-    });
-
-    STATE.subscriptionsSet = nextSet;
-    STATE.mySubscriptions = normalized;
-    STATE.subscriptionsLoadedAt = Date.now();
-    return normalized;
-  } catch (e) {
-    const err = new Error(e?.message || '구독 정보를 불러오지 못했습니다.');
-    STATE.subscriptionsSet = new Set();
-    STATE.mySubscriptions = [];
-    STATE.subscriptionsLoadedAt = null;
-    showToast(err.message, { type: 'error' });
-    throw err;
+  const res = await apiRequest('GET', '/api/me/subscriptions', { token });
+  if (!res || res.success !== true || !Array.isArray(res.data)) {
+    throw new Error('구독 정보를 불러오지 못했습니다.');
   }
+
+  const normalized = res.data
+    .map((x) => normalizeSubscriptionItem(x))
+    .filter(Boolean);
+
+  const nextSet = new Set();
+  normalized.forEach((item) => {
+    const key = buildSubscriptionKey(item);
+    if (key) nextSet.add(key);
+  });
+
+  STATE.subscriptionsSet = nextSet;
+  STATE.mySubscriptions = normalized;
+  STATE.subscriptionsLoadedAt = Date.now();
+
+  return normalized;
 }
 
 async function subscribeContent(content) {
@@ -328,6 +334,7 @@ async function subscribeContent(content) {
   const contentId = content?.content_id || content?.contentId || content?.id;
   const source = content?.source;
   const key = buildSubscriptionKey({ ...content, content_id: contentId, source });
+
   if (!contentId || !source) {
     showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
     return;
@@ -338,12 +345,14 @@ async function subscribeContent(content) {
       body: { content_id: contentId, contentId, source },
       token,
     });
+
     if (key) STATE.subscriptionsSet.add(key);
-    try {
-      await loadSubscriptions({ force: true });
-    } catch (err) {
-      console.warn('Failed to refresh subscriptions after subscribe', err);
-    }
+
+    // best-effort refresh (does not block UX)
+    loadSubscriptions({ force: true }).catch((err) =>
+      console.warn('Failed to refresh subscriptions after subscribe', err)
+    );
+
     showToast('구독이 추가되었습니다.', { type: 'success' });
   } catch (e) {
     if (key) STATE.subscriptionsSet.delete(key);
@@ -362,6 +371,7 @@ async function unsubscribeContent(content) {
   const contentId = content?.content_id || content?.contentId || content?.id;
   const source = content?.source;
   const key = buildSubscriptionKey({ ...content, content_id: contentId, source });
+
   if (!contentId || !source) {
     showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
     return;
@@ -372,12 +382,13 @@ async function unsubscribeContent(content) {
       body: { content_id: contentId, contentId, source },
       token,
     });
+
     if (key) STATE.subscriptionsSet.delete(key);
-    try {
-      await loadSubscriptions({ force: true });
-    } catch (err) {
-      console.warn('Failed to refresh subscriptions after unsubscribe', err);
-    }
+
+    loadSubscriptions({ force: true }).catch((err) =>
+      console.warn('Failed to refresh subscriptions after unsubscribe', err)
+    );
+
     showToast('구독이 해제되었습니다.', { type: 'success' });
   } catch (e) {
     if (key) STATE.subscriptionsSet.add(key);
@@ -391,6 +402,7 @@ const formatDateKST = (isoString) => {
   try {
     const date = new Date(isoString);
     if (Number.isNaN(date.getTime())) return isoString;
+
     const parts = new Intl.DateTimeFormat('ko-KR', {
       timeZone: 'Asia/Seoul',
       year: 'numeric',
@@ -402,6 +414,7 @@ const formatDateKST = (isoString) => {
         if (part.type !== 'literal') acc[part.type] = part.value;
         return acc;
       }, {});
+
     return `${parts.year}.${parts.month}.${parts.day}`;
   } catch (e) {
     console.warn('Failed to format date', isoString, e);
@@ -415,13 +428,14 @@ const formatDateKST = (isoString) => {
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    // preload subscriptions so stars render correctly (if token exists)
     await loadSubscriptions();
   } catch (e) {
     console.warn('Failed to preload subscriptions', e);
   }
 
   renderBottomNav();
-  updateTab('webtoon'); // Initial Load
+  updateTab('webtoon');
   setupScrollEffect();
   setupSeriesSortHandlers();
 });
@@ -440,6 +454,10 @@ function setupScrollEffect() {
     else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
   });
 }
+
+/* =========================
+   Navigation + Filters
+   ========================= */
 
 function renderBottomNav() {
   if (!UI.bottomNav) return;
@@ -466,9 +484,7 @@ function renderBottomNav() {
       <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
         ${tab.icon}
       </div>
-      <span class="text-[10px] ${isActive ? 'font-bold' : 'font-medium'}">${
-      tab.label
-    }</span>
+      <span class="text-[10px] ${isActive ? 'font-bold' : 'font-medium'}">${tab.label}</span>
     `;
     btn.onclick = () => updateTab(tab.id);
     UI.bottomNav.appendChild(btn);
@@ -484,12 +500,18 @@ async function updateTab(tabId) {
   renderL2Filters(tabId);
 
   await fetchAndRenderContent(tabId);
-
   window.scrollTo({ top: 0 });
 }
 
 function updateFilterVisibility(tabId) {
-  if (!UI.l1Filter || !UI.l2Filter || !UI.mySubToggle || !UI.seriesSort || !UI.seriesFooter) return;
+  if (
+    !UI.l1Filter ||
+    !UI.l2Filter ||
+    !UI.mySubToggle ||
+    !UI.seriesSort ||
+    !UI.seriesFooter
+  )
+    return;
 
   UI.l1Filter.classList.add('hidden');
   UI.l2Filter.classList.add('hidden');
@@ -519,8 +541,8 @@ function renderL1Filters(tabId) {
       { id: 'all', label: '전체', color: '#A3A3A3' },
       { id: 'naver_webtoon', label: 'N', color: '#00D564' },
       { id: 'kakaowebtoon', label: 'K', color: '#F7E600' },
-      { id: 'lezhin', label: 'L', color: '#E62E2E' }, // may return empty from backend
-      { id: 'laftel', label: 'R', color: '#6C5CE7' }, // may return empty from backend
+      { id: 'lezhin', label: 'L', color: '#E62E2E' },
+      { id: 'laftel', label: 'R', color: '#6C5CE7' },
     ];
   } else if (tabId === 'novel') {
     items = [
@@ -569,7 +591,6 @@ function renderL2Filters(tabId) {
   UI.l2Filter.innerHTML = '';
   let items = [];
 
-  // Added 'hiatus' to match existing fetch branch (safe; backend supports /hiatus)
   const days = [
     { id: 'all', label: 'ALL' },
     { id: 'mon', label: '월' },
@@ -609,7 +630,8 @@ function renderL2Filters(tabId) {
     el.textContent = item.label;
 
     el.onclick = () => {
-      if (tabId === 'webtoon' || tabId === 'novel') STATE.filters[tabId].day = item.id;
+      if (tabId === 'webtoon' || tabId === 'novel')
+        STATE.filters[tabId].day = item.id;
       if (tabId === 'ott') STATE.filters[tabId].genre = item.id;
 
       renderL2Filters(tabId);
@@ -645,7 +667,7 @@ async function fetchAndRenderContent(tabId) {
   if (tabId === 'novel') aspectClass = 'aspect-[1/1.4]';
   if (tabId === 'ott') aspectClass = 'aspect-[2/3]';
 
-  // Skeletons (match aspect for nicer feel)
+  // skeletons
   for (let i = 0; i < 9; i++) {
     const skel = document.createElement('div');
     skel.className = `${aspectClass} rounded-lg skeleton`;
@@ -661,6 +683,7 @@ async function fetchAndRenderContent(tabId) {
         STATE.isLoading = false;
         UI.contentGrid.innerHTML =
           '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">로그인하기</button></div>';
+
         const loginBtn = document.getElementById('myTabLoginButton');
         if (loginBtn) {
           loginBtn.onclick = () =>
@@ -690,34 +713,30 @@ async function fetchAndRenderContent(tabId) {
         }
         return;
       }
+
       const mode = STATE.filters?.my?.viewMode || 'subscribing';
 
       data = (subs || []).filter((item) => {
-        const finalState = item?.final_state || {};
-        const isScheduled = finalState?.is_scheduled_completion === true;
-        const isCompleted = finalState?.final_status === '완결' && !isScheduled;
+        const fs = item?.final_state || {};
+        const isScheduled = fs?.is_scheduled_completion === true;
+        const isCompleted = fs?.final_status === '완결' && !isScheduled;
+
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
     } else {
       let url = '';
-      let query = {};
 
       if (tabId === 'webtoon' || tabId === 'novel') {
         const day = STATE.filters[tabId].day;
         const source = STATE.filters[tabId].source;
-        query = { type: tabId, source };
+        const query = { type: tabId, source };
 
-        if (day === 'completed') {
-          url = buildUrl('/api/contents/completed', query);
-        } else if (day === 'hiatus') {
-          url = buildUrl('/api/contents/hiatus', query);
-        } else {
-          url = buildUrl('/api/contents/ongoing', query);
-        }
+        if (day === 'completed') url = buildUrl('/api/contents/completed', query);
+        else if (day === 'hiatus') url = buildUrl('/api/contents/hiatus', query);
+        else url = buildUrl('/api/contents/ongoing', query);
       }
 
-      // Simulated delay for effect
       await new Promise((r) => setTimeout(r, 300));
 
       if (url) {
@@ -734,12 +753,11 @@ async function fetchAndRenderContent(tabId) {
               if (Array.isArray(arr)) data.push(...arr);
             });
           } else {
-            // completed/hiatus endpoints: { contents: [...], next_cursor: ... }
             data = Array.isArray(json?.contents) ? json.contents : [];
           }
         }
       } else {
-        // Mock for Series / OTT as backend endpoints might be missing
+        // minimal mocks for tabs without endpoints in current backend
         data = [
           { title: 'Mock Item 1', meta: { common: { thumbnail_url: null, authors: [] } } },
           { title: 'Mock Item 2', meta: { common: { thumbnail_url: null, authors: [] } } },
@@ -748,12 +766,12 @@ async function fetchAndRenderContent(tabId) {
       }
     }
 
-    // Normalize meta for safety
     data = Array.isArray(data)
       ? data.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
       : [];
   } catch (e) {
     console.error('Fetch error', e);
+    showToast(e?.message || '오류가 발생했습니다.', { type: 'error' });
   }
 
   STATE.isLoading = false;
@@ -792,24 +810,26 @@ function createCard(content, tabId, aspectClass) {
     'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
   cardContainer.appendChild(imgEl);
 
-  // Badge Logic
+  // Badge logic
   if (tabId === 'my') {
-    const finalState = content?.final_state || {};
-    const isScheduled = finalState?.is_scheduled_completion === true;
-    const scheduledDate = safeString(finalState?.scheduled_completed_at, '');
-    const isCompleted = finalState?.final_status === '완결';
+    const fs = safeObj(content?.final_state);
+    const isScheduled = fs?.is_scheduled_completion === true;
+    const scheduledDate = safeString(fs?.scheduled_completed_at, '');
+    const isCompleted = safeString(fs?.final_status, '') === '완결';
     const isHiatus =
-      finalState?.final_status === '휴재' || content?.status === '휴재';
+      safeString(fs?.final_status, '') === '휴재' || content?.status === '휴재';
 
     const badgeEl = document.createElement('div');
     badgeEl.className =
-      'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-0.5';
+      'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-1';
 
     if (isScheduled) {
       badgeEl.className += ' bg-yellow-500/80';
       const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
       badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
-        formatted ? `<span class="text-[10px] text-black leading-none">${formatted}</span>` : ''
+        formatted
+          ? `<span class="text-[10px] text-black leading-none">${formatted}</span>`
+          : ''
       }`;
       cardContainer.appendChild(badgeEl);
     } else if (isCompleted) {
@@ -834,6 +854,7 @@ function createCard(content, tabId, aspectClass) {
     'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
   cardContainer.appendChild(gradient);
 
+  // Star overlay (subscribe toggle)
   const starButton = document.createElement('button');
   starButton.type = 'button';
   starButton.className =
@@ -843,6 +864,7 @@ function createCard(content, tabId, aspectClass) {
     starButton.innerHTML = on
       ? '<span class="text-[12px]">★</span><span class="text-[10px]">구독중</span>'
       : '<span class="text-[12px]">☆</span><span class="text-[10px]">구독</span>';
+
     starButton.className =
       'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors ' +
       (on ? 'bg-black/60 text-[#4F46E5]' : 'bg-black/40 text-gray-400');
@@ -852,40 +874,36 @@ function createCard(content, tabId, aspectClass) {
 
   starButton.onclick = async (evt) => {
     evt.stopPropagation();
-    if (!requireAuthOrPrompt()) return;
+    if (!requireAuthOrPrompt('subscription-toggle')) return;
 
     const key = buildSubscriptionKey(content);
     if (!key) {
       showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
       return;
     }
+
     const currentlySubscribed = isSubscribed(content);
     const nextState = !currentlySubscribed;
 
+    // optimistic update
     setStarVisual(nextState);
     if (nextState) STATE.subscriptionsSet.add(key);
     else STATE.subscriptionsSet.delete(key);
 
     try {
-      if (nextState) {
-        await subscribeContent(content);
-      } else {
-        await unsubscribeContent(content);
-      }
-      if (STATE.activeTab === 'my') {
-        fetchAndRenderContent('my');
-      }
+      if (nextState) await subscribeContent(content);
+      else await unsubscribeContent(content);
+
+      if (STATE.activeTab === 'my') fetchAndRenderContent('my');
     } catch (e) {
-      if (key) {
-        if (currentlySubscribed) STATE.subscriptionsSet.add(key);
-        else STATE.subscriptionsSet.delete(key);
-      }
+      // rollback
+      if (currentlySubscribed) STATE.subscriptionsSet.add(key);
+      else STATE.subscriptionsSet.delete(key);
       setStarVisual(currentlySubscribed);
     }
   };
 
   cardContainer.appendChild(starButton);
-
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
@@ -939,21 +957,20 @@ function closeModal() {
 window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
-  if (!requireAuthOrPrompt()) return;
+  if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
 
   const currently = isSubscribed(content);
   try {
-    if (currently) {
-      await unsubscribeContent(content);
-    } else {
-      await subscribeContent(content);
-    }
+    if (currently) await unsubscribeContent(content);
+    else await subscribeContent(content);
+
     syncModalButton();
+
     if (STATE.activeTab === 'my') {
       fetchAndRenderContent('my');
     }
   } catch (e) {
-    // errors already handled in subscribe/unsubscribe
+    // errors already toasted in subscribe/unsubscribe
   }
 };
 
@@ -962,9 +979,6 @@ window.toggleSubscriptionFromModal = async function () {
    ========================= */
 
 function setupSeriesSortHandlers() {
-  // This is intentionally minimal; keep behavior stable.
-  // If your HTML has buttons inside #seriesSortOptions with data-sort attributes,
-  // this will toggle STATE.filters.series.sort and refresh.
   if (!UI.seriesSort) return;
 
   UI.seriesSort.addEventListener('click', (evt) => {
@@ -997,5 +1011,5 @@ window.closeModal = closeModal;
 
 // Quick sanity test steps (manual):
 // 1) localStorage.setItem('es_access_token', '<token>')
-// 2) Open the "My Sub" tab
-// 3) Toggle the star on content cards to confirm subscription changes
+// 2) Reload and open the "My Sub" tab
+// 3) Toggle the star on content cards and watch POST/DELETE /api/me/subscriptions
