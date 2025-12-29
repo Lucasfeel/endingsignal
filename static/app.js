@@ -41,6 +41,7 @@ const STATE = {
   },
   contents: {},
   isLoading: false,
+  contentRequestSeq: 0,
   currentModalContent: null,
 
   auth: {
@@ -95,13 +96,22 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
   const prefix =
     type === 'success' ? '[성공] ' : type === 'error' ? '[오류] ' : '[알림] ';
 
+  const normalizedMessage = String(message ?? '').trim();
+  const truncatedMessage =
+    normalizedMessage.length > 400
+      ? `${normalizedMessage.slice(0, 400)}…`
+      : normalizedMessage;
+
   const toast = document.createElement('div');
   toast.className =
     'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2';
 
-  toast.innerHTML = `<div class="inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white">${prefix}${
-    message || ''
-  }</div>`;
+  const inner = document.createElement('div');
+  inner.className =
+    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white';
+  inner.textContent = `${prefix}${truncatedMessage}`;
+
+  toast.appendChild(inner);
 
   container.appendChild(toast);
 
@@ -297,8 +307,10 @@ async function apiRequest(method, path, { query, body, token } = {}) {
     // fallback for non-json error responses (e.g., HTML 404)
     if (!handled) {
       try {
+        const statusCode = response.status || 'unknown';
         const text = await response.clone().text();
-        if (text) message = text.slice(0, 300);
+        if (text) console.warn('Non-JSON error body:', text);
+        message = `Request failed (HTTP ${statusCode}).`;
       } catch {
         // ignore
       }
@@ -1211,6 +1223,9 @@ function updateMySubTab(mode) {
 async function fetchAndRenderContent(tabId) {
   if (!UI.contentGrid) return;
 
+  const requestSeq = ++STATE.contentRequestSeq;
+  const isStale = () => STATE.contentRequestSeq !== requestSeq;
+
   UI.contentGrid.innerHTML = '';
   STATE.isLoading = true;
 
@@ -1218,12 +1233,18 @@ async function fetchAndRenderContent(tabId) {
   if (tabId === 'novel') aspectClass = 'aspect-[1/1.4]';
   if (tabId === 'ott') aspectClass = 'aspect-[2/3]';
 
-  // skeletons
-  for (let i = 0; i < 9; i++) {
-    const skel = document.createElement('div');
-    skel.className = `${aspectClass} rounded-lg skeleton`;
-    UI.contentGrid.appendChild(skel);
-  }
+  let skeletonShown = false;
+  const showSkeleton = () => {
+    if (isStale() || skeletonShown) return;
+    skeletonShown = true;
+    UI.contentGrid.innerHTML = '';
+    for (let i = 0; i < 9; i++) {
+      const skel = document.createElement('div');
+      skel.className = `${aspectClass} rounded-lg skeleton`;
+      UI.contentGrid.appendChild(skel);
+    }
+  };
+  const skeletonTimer = setTimeout(showSkeleton, 120);
 
   let data = [];
 
@@ -1231,13 +1252,14 @@ async function fetchAndRenderContent(tabId) {
     if (tabId === 'my') {
       const token = getAccessToken();
       if (!token) {
-        STATE.isLoading = false;
-        UI.contentGrid.innerHTML =
-          '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">로그인하기</button></div>';
+        if (!isStale()) {
+          UI.contentGrid.innerHTML =
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">로그인하기</button></div>';
 
-        const loginBtn = document.getElementById('myTabLoginButton');
-        if (loginBtn) {
-          loginBtn.onclick = () => openAuthModal({ reason: 'my-tab' });
+          const loginBtn = document.getElementById('myTabLoginButton');
+          if (loginBtn) {
+            loginBtn.onclick = () => openAuthModal({ reason: 'my-tab' });
+          }
         }
         return;
       }
@@ -1246,20 +1268,21 @@ async function fetchAndRenderContent(tabId) {
       try {
         subs = await loadSubscriptions();
       } catch (e) {
-        STATE.isLoading = false;
-        UI.contentGrid.innerHTML =
-          '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">다시 시도</button></div>';
+        if (!isStale()) {
+          UI.contentGrid.innerHTML =
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">다시 시도</button></div>';
 
-        const retryBtn = document.getElementById('mySubRetryButton');
-        if (retryBtn) {
-          retryBtn.onclick = async () => {
-            try {
-              await loadSubscriptions({ force: true });
-              fetchAndRenderContent('my');
-            } catch (err) {
-              showToast(err?.message || '오류가 발생했습니다.', { type: 'error' });
-            }
-          };
+          const retryBtn = document.getElementById('mySubRetryButton');
+          if (retryBtn) {
+            retryBtn.onclick = async () => {
+              try {
+                await loadSubscriptions({ force: true });
+                fetchAndRenderContent('my');
+              } catch (err) {
+                showToast(err?.message || '오류가 발생했습니다.', { type: 'error' });
+              }
+            };
+          }
         }
         return;
       }
@@ -1286,8 +1309,6 @@ async function fetchAndRenderContent(tabId) {
         else if (day === 'hiatus') url = buildUrl('/api/contents/hiatus', query);
         else url = buildUrl('/api/contents/ongoing', query);
       }
-
-      await new Promise((r) => setTimeout(r, 300));
 
       if (url) {
         const json = await apiRequest('GET', url);
@@ -1322,9 +1343,13 @@ async function fetchAndRenderContent(tabId) {
   } catch (e) {
     console.error('Fetch error', e);
     showToast(e?.message || '오류가 발생했습니다.', { type: 'error' });
+  } finally {
+    clearTimeout(skeletonTimer);
+    STATE.isLoading = false;
   }
 
-  STATE.isLoading = false;
+  if (isStale()) return;
+
   UI.contentGrid.innerHTML = '';
 
   if (!data.length) {
