@@ -69,17 +69,14 @@ const UI = {
   header: document.getElementById('mainHeader'),
   profileButton: document.getElementById('profileButton'),
   profileButtonText: document.getElementById('profileButtonText'),
+  headerSearchWrap: document.getElementById('headerSearchWrap'),
   searchButton: document.getElementById('searchButton'),
-  searchModal: document.getElementById('searchModal'),
-  searchCloseBtn: document.getElementById('searchCloseBtn'),
   searchInput: document.getElementById('searchInput'),
   searchClearBtn: document.getElementById('searchClearBtn'),
   searchPanel: document.getElementById('searchPanel'),
   searchResultsGrid: document.getElementById('searchResultsGrid'),
   searchEmptyState: document.getElementById('searchEmptyState'),
   searchLoadingState: document.getElementById('searchLoadingState'),
-  searchOverlay: document.getElementById('searchOverlay'),
-  searchSubmitBtn: document.getElementById('searchSubmitBtn'),
 };
 
 /* =========================
@@ -631,29 +628,65 @@ function renderSearchLoading(type) {
 
 function resetSearchUI({ preserveInput = false } = {}) {
   if (!preserveInput && UI.searchInput) UI.searchInput.value = '';
-  STATE.search.q = preserveInput && UI.searchInput ? UI.searchInput.value.trim() : '';
+  STATE.search.q = UI.searchInput ? UI.searchInput.value.trim() : '';
   STATE.search.requestSeq += 1; // invalidate inflight requests
   if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
-  showSearchEmpty('검색어를 입력하세요.');
+  if (STATE.search.q) {
+    if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
+  } else {
+    showSearchEmpty('검색어를 입력하세요.');
+  }
 }
 
-function closeSearchModal() {
-  const modal = UI.searchModal;
-  if (!modal) return;
-  modal.classList.add('hidden');
+function updateSearchInputVisibility(isOpen) {
+  const input = UI.searchInput;
+  if (!input) return;
+  const collapsed = ['w-0', 'opacity-0', 'pointer-events-none', 'ml-0'];
+  const expanded = ['w-[220px]', 'opacity-100', 'pointer-events-auto', 'ml-2'];
+
+  if (isOpen) {
+    collapsed.forEach((c) => input.classList.remove(c));
+    expanded.forEach((c) => input.classList.add(c));
+  } else {
+    expanded.forEach((c) => input.classList.remove(c));
+    collapsed.forEach((c) => input.classList.add(c));
+  }
+
+  if (UI.searchClearBtn) {
+    const hasValue = Boolean(input.value);
+    UI.searchClearBtn.classList.toggle('hidden', !isOpen || !hasValue);
+  }
+}
+
+function closeInlineSearch({ clearInput = false } = {}) {
   STATE.search.isOpen = false;
-  resetSearchUI();
+  STATE.search.requestSeq += 1;
+  if (STATE.search.debounceTimer) {
+    clearTimeout(STATE.search.debounceTimer);
+    STATE.search.debounceTimer = null;
+  }
+
+  if (UI.searchPanel) UI.searchPanel.classList.add('hidden');
+  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+  if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
+  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
+
+  if (UI.searchInput && clearInput) UI.searchInput.value = '';
+  STATE.search.q = UI.searchInput ? UI.searchInput.value.trim() : '';
+  updateSearchInputVisibility(false);
 }
 
-function openSearchModal() {
-  const modal = UI.searchModal;
-  if (!modal) return;
-  resetSearchUI();
-  modal.classList.remove('hidden');
+function openInlineSearch() {
   STATE.search.isOpen = true;
+  updateSearchInputVisibility(true);
+  if (UI.searchPanel) UI.searchPanel.classList.remove('hidden');
+  resetSearchUI({ preserveInput: true });
+
   if (UI.searchInput) {
     UI.searchInput.focus();
+    const value = UI.searchInput.value.trim();
+    if (value) performSearch(value);
   }
 }
 
@@ -685,7 +718,7 @@ function renderSearchResults(items, effectiveType) {
 
     const card = createCard(normalized, effectiveType, aspectClass);
     card.onclick = () => {
-      closeSearchModal();
+      closeInlineSearch();
       openModal(normalized);
     };
     grid.appendChild(card);
@@ -739,46 +772,47 @@ function debouncedSearch(q) {
 }
 
 function setupSearchHandlers() {
-  if (UI.searchButton) UI.searchButton.onclick = openSearchModal;
-  if (UI.searchCloseBtn) UI.searchCloseBtn.onclick = closeSearchModal;
-  if (UI.searchOverlay) UI.searchOverlay.onclick = closeSearchModal;
-  if (UI.searchPanel)
-    UI.searchPanel.addEventListener('click', (evt) => {
-      evt.stopPropagation();
-    });
+  if (UI.searchButton)
+    UI.searchButton.onclick = () => {
+      if (STATE.search.isOpen) closeInlineSearch();
+      else openInlineSearch();
+    };
 
   document.addEventListener('keydown', (evt) => {
     if (evt.key === 'Escape' && STATE.search.isOpen) {
-      closeSearchModal();
+      closeInlineSearch();
     } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
       evt.preventDefault();
-      openSearchModal();
+      if (STATE.search.isOpen) closeInlineSearch();
+      else openInlineSearch();
     }
   });
 
+  document.addEventListener('click', (evt) => {
+    if (!STATE.search.isOpen) return;
+    if (UI.headerSearchWrap && UI.headerSearchWrap.contains(evt.target)) return;
+    closeInlineSearch();
+  });
+
   if (UI.searchInput) {
-    UI.searchInput.addEventListener('input', (evt) => debouncedSearch(evt.target.value));
+    UI.searchInput.addEventListener('input', (evt) => {
+      updateSearchInputVisibility(true);
+      debouncedSearch(evt.target.value);
+    });
     UI.searchInput.addEventListener('keydown', (evt) => {
       if (evt.key === 'Enter') performSearch(evt.target.value);
     });
   }
 
   if (UI.searchClearBtn)
-    UI.searchClearBtn.onclick = () => {
+    UI.searchClearBtn.onclick = (evt) => {
+      evt.stopPropagation();
       resetSearchUI();
-      if (UI.searchInput) UI.searchInput.focus();
+      if (UI.searchInput) {
+        UI.searchInput.focus();
+        updateSearchInputVisibility(true);
+      }
     };
-
-  if (UI.searchSubmitBtn)
-    UI.searchSubmitBtn.onclick = () => {
-      const value = UI.searchInput ? UI.searchInput.value : '';
-      performSearch(value);
-    };
-
-  if (UI.searchModal)
-    UI.searchModal.addEventListener('click', (evt) => {
-      if (evt.target === UI.searchModal) closeSearchModal();
-    });
 }
 
 /* =========================
@@ -1009,6 +1043,7 @@ function renderBottomNav() {
 async function updateTab(tabId) {
   STATE.activeTab = tabId;
   if (tabId !== 'my') STATE.lastBrowseTab = tabId;
+  if (STATE.search.isOpen) closeInlineSearch();
 
   renderBottomNav();
   updateFilterVisibility(tabId);
