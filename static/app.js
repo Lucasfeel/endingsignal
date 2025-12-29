@@ -24,12 +24,20 @@ const ICONS = {
 
 const STATE = {
   activeTab: 'webtoon',
+  lastBrowseTab: 'webtoon',
   filters: {
     webtoon: { source: 'all', day: 'mon' },
     novel: { source: 'all', day: 'mon' },
     ott: { source: 'all', genre: 'drama' },
     series: { sort: 'latest' },
     my: { viewMode: 'subscribing' },
+  },
+  search: {
+    isOpen: false,
+    q: '',
+    isLoading: false,
+    debounceTimer: null,
+    requestSeq: 0,
   },
   contents: {},
   isLoading: false,
@@ -61,6 +69,17 @@ const UI = {
   header: document.getElementById('mainHeader'),
   profileButton: document.getElementById('profileButton'),
   profileButtonText: document.getElementById('profileButtonText'),
+  searchButton: document.getElementById('searchButton'),
+  searchModal: document.getElementById('searchModal'),
+  searchCloseBtn: document.getElementById('searchCloseBtn'),
+  searchInput: document.getElementById('searchInput'),
+  searchClearBtn: document.getElementById('searchClearBtn'),
+  searchPanel: document.getElementById('searchPanel'),
+  searchResultsGrid: document.getElementById('searchResultsGrid'),
+  searchEmptyState: document.getElementById('searchEmptyState'),
+  searchLoadingState: document.getElementById('searchLoadingState'),
+  searchOverlay: document.getElementById('searchOverlay'),
+  searchSubmitBtn: document.getElementById('searchSubmitBtn'),
 };
 
 /* =========================
@@ -534,6 +553,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupAuthModalListeners();
   setupProfileButton();
   updateProfileButtonState();
+  setupSearchHandlers();
 
   try {
     // preload subscriptions so stars render correctly (if token exists)
@@ -562,6 +582,203 @@ function setupScrollEffect() {
     if (scrolled) UI.filtersWrapper.classList.add('border-b', 'border-white/5');
     else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
   });
+}
+
+/* =========================
+   Search modal
+   ========================= */
+
+const getSearchType = () =>
+  STATE.activeTab === 'my'
+    ? STATE.lastBrowseTab || 'webtoon'
+    : STATE.activeTab || 'webtoon';
+
+const getSearchSource = (type) => {
+  if (['webtoon', 'novel', 'ott'].includes(type)) {
+    const src = STATE.filters?.[type]?.source;
+    return src || 'all';
+  }
+  return 'all';
+};
+
+const getAspectByType = (type) => {
+  if (type === 'novel') return 'aspect-[1/1.4]';
+  if (type === 'ott') return 'aspect-[2/3]';
+  return 'aspect-[3/4]';
+};
+
+function showSearchEmpty(message) {
+  if (UI.searchEmptyState) {
+    UI.searchEmptyState.textContent = message;
+    UI.searchEmptyState.classList.remove('hidden');
+  }
+  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
+  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+}
+
+function renderSearchLoading(type) {
+  const container = UI.searchLoadingState;
+  if (!container) return;
+  container.classList.remove('hidden');
+  container.innerHTML = '';
+  const aspectClass = getAspectByType(type);
+  for (let i = 0; i < 6; i += 1) {
+    const item = document.createElement('div');
+    item.className = `${aspectClass} rounded-lg skeleton`;
+    container.appendChild(item);
+  }
+}
+
+function resetSearchUI({ preserveInput = false } = {}) {
+  if (!preserveInput && UI.searchInput) UI.searchInput.value = '';
+  STATE.search.q = preserveInput && UI.searchInput ? UI.searchInput.value.trim() : '';
+  STATE.search.requestSeq += 1; // invalidate inflight requests
+  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
+  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+  showSearchEmpty('검색어를 입력하세요.');
+}
+
+function closeSearchModal() {
+  const modal = UI.searchModal;
+  if (!modal) return;
+  modal.classList.add('hidden');
+  STATE.search.isOpen = false;
+  resetSearchUI();
+}
+
+function openSearchModal() {
+  const modal = UI.searchModal;
+  if (!modal) return;
+  resetSearchUI();
+  modal.classList.remove('hidden');
+  STATE.search.isOpen = true;
+  if (UI.searchInput) {
+    UI.searchInput.focus();
+  }
+}
+
+function renderSearchResults(items, effectiveType) {
+  const grid = UI.searchResultsGrid;
+  if (!grid) return;
+
+  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+  if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
+
+  grid.innerHTML = '';
+  const aspectClass = getAspectByType(effectiveType);
+
+  const normalizedItems = Array.isArray(items) ? items : [];
+  if (!normalizedItems.length) {
+    showSearchEmpty('검색 결과가 없습니다.');
+    return;
+  }
+
+  normalizedItems.forEach((raw) => {
+    const normalized = {
+      ...raw,
+      meta: normalizeMeta(raw?.meta),
+      title: safeString(raw?.title, ''),
+      content_id: raw?.content_id || raw?.contentId || raw?.id,
+      id: raw?.id || raw?.content_id || raw?.contentId,
+      source: raw?.source || getSearchSource(effectiveType),
+    };
+
+    const card = createCard(normalized, effectiveType, aspectClass);
+    card.onclick = () => {
+      closeSearchModal();
+      openModal(normalized);
+    };
+    grid.appendChild(card);
+  });
+}
+
+function performSearch(q) {
+  const query = (q || '').trim();
+  const effectiveType = getSearchType();
+  const source = getSearchSource(effectiveType);
+
+  STATE.search.q = query;
+
+  if (!query) {
+    showSearchEmpty('검색어를 입력하세요.');
+    if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+    if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
+    return;
+  }
+
+  const seq = ++STATE.search.requestSeq;
+  STATE.search.isLoading = true;
+
+  if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
+  renderSearchLoading(effectiveType);
+  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
+
+  apiRequest('GET', '/api/contents/search', {
+    query: { q: query, type: effectiveType, source },
+  })
+    .then((res) => {
+      if (seq !== STATE.search.requestSeq) return;
+      const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+      renderSearchResults(items, effectiveType);
+    })
+    .catch((e) => {
+      if (seq !== STATE.search.requestSeq) return;
+      showToast(e?.message || '검색에 실패했습니다.', { type: 'error' });
+      showSearchEmpty('검색 결과가 없습니다.');
+    })
+    .finally(() => {
+      if (seq !== STATE.search.requestSeq) return;
+      STATE.search.isLoading = false;
+      if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+    });
+}
+
+function debouncedSearch(q) {
+  if (STATE.search.debounceTimer) clearTimeout(STATE.search.debounceTimer);
+  STATE.search.debounceTimer = setTimeout(() => performSearch(q), 300);
+}
+
+function setupSearchHandlers() {
+  if (UI.searchButton) UI.searchButton.onclick = openSearchModal;
+  if (UI.searchCloseBtn) UI.searchCloseBtn.onclick = closeSearchModal;
+  if (UI.searchOverlay) UI.searchOverlay.onclick = closeSearchModal;
+  if (UI.searchPanel)
+    UI.searchPanel.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+    });
+
+  document.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Escape' && STATE.search.isOpen) {
+      closeSearchModal();
+    } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
+      evt.preventDefault();
+      openSearchModal();
+    }
+  });
+
+  if (UI.searchInput) {
+    UI.searchInput.addEventListener('input', (evt) => debouncedSearch(evt.target.value));
+    UI.searchInput.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') performSearch(evt.target.value);
+    });
+  }
+
+  if (UI.searchClearBtn)
+    UI.searchClearBtn.onclick = () => {
+      resetSearchUI();
+      if (UI.searchInput) UI.searchInput.focus();
+    };
+
+  if (UI.searchSubmitBtn)
+    UI.searchSubmitBtn.onclick = () => {
+      const value = UI.searchInput ? UI.searchInput.value : '';
+      performSearch(value);
+    };
+
+  if (UI.searchModal)
+    UI.searchModal.addEventListener('click', (evt) => {
+      if (evt.target === UI.searchModal) closeSearchModal();
+    });
 }
 
 /* =========================
@@ -791,6 +1008,7 @@ function renderBottomNav() {
 
 async function updateTab(tabId) {
   STATE.activeTab = tabId;
+  if (tabId !== 'my') STATE.lastBrowseTab = tabId;
 
   renderBottomNav();
   updateFilterVisibility(tabId);
