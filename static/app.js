@@ -1514,36 +1514,115 @@ const syncModalButton = () => {
 };
 
 function getContentUrl(content) {
-  const u =
-    content?.meta?.common?.content_url ||
-    content?.meta?.common?.url ||
-    content?.content_url ||
-    '';
-  return typeof u === 'string' && u.trim() ? u.trim() : '';
+  const candidates = [
+    content?.meta?.common?.content_url,
+    content?.meta?.common?.url,
+    content?.content_url,
+    content?.meta?.content_url,
+  ];
+
+  for (const u of candidates) {
+    if (typeof u === 'string' && u.trim()) return u.trim();
+  }
+
+  const source = String(content?.source || '').toLowerCase();
+  const contentId = String(
+    content?.content_id ?? content?.contentId ?? content?.id ?? ''
+  ).trim();
+  const title = String(content?.title || '').trim();
+
+  if (!contentId) return '';
+
+  if (source.includes('naver')) {
+    return `https://m.comic.naver.com/webtoon/list?titleId=${encodeURIComponent(
+      contentId
+    )}`;
+  }
+
+  if (source.includes('kakao')) {
+    if (!title) return '';
+    return `https://webtoon.kakao.com/content/${encodeURIComponent(
+      title
+    )}/${encodeURIComponent(contentId)}`;
+  }
+
+  return '';
 }
 
 function openModal(content) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
+  const linkContainer = document.getElementById('modalWebtoonLinkContainer');
+
+  const titleText = String(content?.title || '').trim();
+  const url = getContentUrl(content);
+
+  if (!titleEl && window.ES_DEBUG) {
+    console.error('[subscribeModal] title element missing');
+  }
+
+  if (window.ES_DEBUG) {
+    console.debug('[subscribeModal] url=', url, 'title=', titleText);
+  }
 
   if (titleEl) {
     while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
 
-    const title = content.title || '';
-    const url = getContentUrl(content);
-    const hasUrl = Boolean(url);
-
-    if (hasUrl) {
+    if (url && titleText) {
       const anchor = document.createElement('a');
-      anchor.textContent = title;
+      anchor.textContent = titleText;
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
-      anchor.className = 'inline-block text-gray-200 hover:underline hover:text-white cursor-pointer';
+      anchor.className =
+        'inline-block text-gray-200 underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
-      titleEl.textContent = title;
+      titleEl.textContent = titleText;
+    }
+  } else if (modalEl) {
+    const fallbackEl = modalEl.querySelector('p');
+    if (fallbackEl) fallbackEl.textContent = titleText;
+  }
+
+  if (linkContainer) {
+    while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
+
+    if (url) {
+      linkContainer.classList.remove('hidden');
+
+      const wrapper = document.createElement('div');
+      wrapper.className =
+        'flex items-center gap-2 px-3 py-2 rounded-lg bg-[#242424] border border-white/10 text-gray-200';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.readOnly = true;
+      input.value = url;
+      input.className = 'flex-1 bg-transparent text-sm text-gray-200 outline-none truncate';
+      input.setAttribute('aria-label', '작품 링크');
+      input.addEventListener('click', () => input.select());
+
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.textContent = '복사';
+      copyBtn.className =
+        'px-3 py-1 rounded-md bg-[#3a3a3c] text-gray-100 text-sm font-medium hover:bg-[#4a4a4d]';
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('링크가 복사되었습니다.', { type: 'success' });
+        } catch (_err) {
+          showToast('복사에 실패했습니다.', { type: 'error' });
+        }
+      });
+
+      wrapper.appendChild(input);
+      wrapper.appendChild(copyBtn);
+      linkContainer.appendChild(wrapper);
+    } else {
+      linkContainer.classList.add('hidden');
     }
   }
   if (modalEl) modalEl.classList.remove('hidden');
