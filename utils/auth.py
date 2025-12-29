@@ -5,8 +5,39 @@ import jwt
 from flask import jsonify, request, g
 from jwt import ExpiredSignatureError, InvalidIssuerError, InvalidTokenError
 
-JWT_SECRET = os.getenv('JWT_SECRET')
 JWT_ISSUER = 'ending-signal'
+
+
+class AuthConfigError(Exception):
+    def __init__(self, code="JWT_SECRET_MISSING", message="JWT_SECRET is not configured."):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+_DEV_FALLBACK_SECRET = None
+
+
+def get_jwt_secret():
+    global _DEV_FALLBACK_SECRET
+
+    env_secret = os.getenv('JWT_SECRET')
+    if env_secret:
+        return env_secret
+
+    allow_insecure_dev = os.getenv('FLASK_ENV') != 'production' or os.getenv(
+        'ALLOW_INSECURE_JWT_DEV'
+    )
+    if allow_insecure_dev:
+        if _DEV_FALLBACK_SECRET is None:
+            _DEV_FALLBACK_SECRET = os.urandom(24).hex()
+            print(
+                '[WARN] JWT_SECRET is not configured; using insecure dev secret. '
+                'Tokens will be invalidated on server restart.'
+            )
+        return _DEV_FALLBACK_SECRET
+
+    raise AuthConfigError()
 
 
 def _error_response(status_code: int, code: str, message: str):
@@ -17,12 +48,11 @@ def _error_response(status_code: int, code: str, message: str):
 
 
 def _decode_token(token: str):
-    if not JWT_SECRET:
-        raise InvalidTokenError('JWT secret is not configured')
+    secret = get_jwt_secret()
 
     return jwt.decode(
         token,
-        JWT_SECRET,
+        secret,
         algorithms=['HS256'],
         issuer=JWT_ISSUER,
     )
@@ -41,6 +71,8 @@ def login_required(func):
 
         try:
             payload = _decode_token(token)
+        except AuthConfigError as e:
+            return _error_response(503, e.code, '서버 설정(JWT_SECRET)이 누락되었습니다.')
         except ExpiredSignatureError:
             return _error_response(401, 'TOKEN_EXPIRED', 'Token has expired')
         except InvalidIssuerError:
