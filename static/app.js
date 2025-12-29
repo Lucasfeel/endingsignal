@@ -1513,6 +1513,15 @@ const syncModalButton = () => {
   btn.textContent = on ? '구독 해제' : '구독하기';
 };
 
+function getContentUrl(content) {
+  const u =
+    content?.meta?.common?.content_url ||
+    content?.meta?.common?.url ||
+    content?.content_url ||
+    '';
+  return typeof u === 'string' && u.trim() ? u.trim() : '';
+}
+
 function openModal(content) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
@@ -1522,8 +1531,8 @@ function openModal(content) {
     while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
 
     const title = content.title || '';
-    const url = content?.meta?.common?.content_url;
-    const hasUrl = typeof url === 'string' && url.trim();
+    const url = getContentUrl(content);
+    const hasUrl = Boolean(url);
 
     if (hasUrl) {
       const anchor = document.createElement('a');
@@ -1531,7 +1540,7 @@ function openModal(content) {
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
-      anchor.className = 'hover:underline';
+      anchor.className = 'inline-block text-gray-200 hover:underline hover:text-white cursor-pointer';
       titleEl.appendChild(anchor);
     } else {
       titleEl.textContent = title;
