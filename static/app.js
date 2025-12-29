@@ -685,8 +685,8 @@ function setupAuthModalListeners() {
       return;
     }
 
-    if (!password || password.length < 6) {
-      if (errorEl) errorEl.textContent = '비밀번호는 6자 이상 입력해주세요.';
+    if (!password || password.length < 8) {
+      if (errorEl) errorEl.textContent = '비밀번호는 8자 이상 입력해주세요.';
       return;
     }
 
@@ -722,8 +722,22 @@ function setupAuthModalListeners() {
       if (STATE.activeTab === 'my') await fetchAndRenderContent('my');
       else await fetchAndRenderContent(STATE.activeTab);
     } catch (e) {
-      if (errorEl) errorEl.textContent = e?.message || '로그인에 실패했습니다.';
-      showToast(e?.message || '오류가 발생했습니다.', { type: 'error' });
+      let message = '서버 오류가 발생했습니다.';
+
+      if (e?.httpStatus === 401) {
+        message = '이메일 또는 비밀번호가 올바르지 않습니다.';
+      } else if (e?.code === 'EMAIL_ALREADY_EXISTS') {
+        message = '이미 등록된 이메일입니다.';
+      } else if (e?.code === 'PASSWORD_TOO_SHORT') {
+        message = '비밀번호는 8자 이상이어야 합니다.';
+      } else if (e?.code === 'JWT_SECRET_MISSING') {
+        message = '서버 설정 오류로 로그인/회원가입을 진행할 수 없습니다. 관리자에게 문의해주세요.';
+      } else if (e?.message) {
+        message = e.message;
+      }
+
+      if (errorEl) errorEl.textContent = message;
+      showToast(message, { type: 'error' });
     }
   };
 

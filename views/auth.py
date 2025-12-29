@@ -7,7 +7,7 @@ from services.auth_service import (
     is_valid_email,
     register_user,
 )
-from utils.auth import _error_response, admin_required, login_required
+from utils.auth import AuthConfigError, _error_response, admin_required, login_required
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -20,16 +20,20 @@ def register():
 
     if not email or not password:
         return _error_response(400, 'INVALID_INPUT', '이메일과 비밀번호가 필요합니다.')
+    if password and len(password) < 8:
+        return _error_response(400, 'PASSWORD_TOO_SHORT', '비밀번호는 8자 이상이어야 합니다.')
     if not is_valid_email(email):
         return _error_response(400, 'INVALID_INPUT', '올바른 이메일 형식이 아닙니다.')
 
     try:
         user, error = register_user(email, password)
         if error:
-            return _error_response(400, 'EMAIL_ALREADY_EXISTS', error)
+            return _error_response(409, 'EMAIL_ALREADY_EXISTS', error)
         return jsonify({'success': True, 'user_id': user['id']}), 201
     except psycopg2.Error:
         return _error_response(500, 'INTERNAL_ERROR', '데이터베이스 오류가 발생했습니다.')
+    except AuthConfigError:
+        return _error_response(503, 'JWT_SECRET_MISSING', '서버 설정(JWT_SECRET)이 누락되었습니다.')
     except Exception:
         return _error_response(500, 'INTERNAL_ERROR', '서버 오류가 발생했습니다.')
 
@@ -62,6 +66,8 @@ def login():
         )
     except psycopg2.Error:
         return _error_response(500, 'INTERNAL_ERROR', '데이터베이스 오류가 발생했습니다.')
+    except AuthConfigError:
+        return _error_response(503, 'JWT_SECRET_MISSING', '서버 설정(JWT_SECRET)이 누락되었습니다.')
     except Exception:
         return _error_response(500, 'INTERNAL_ERROR', '서버 오류가 발생했습니다.')
 
