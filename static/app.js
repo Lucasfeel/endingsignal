@@ -1514,37 +1514,81 @@ const syncModalButton = () => {
 };
 
 function getContentUrl(content) {
-  const u =
-    content?.meta?.common?.content_url ||
-    content?.meta?.common?.url ||
-    content?.content_url ||
-    '';
-  return typeof u === 'string' && u.trim() ? u.trim() : '';
+  const candidates = [
+    content?.meta?.common?.content_url,
+    content?.meta?.common?.url,
+    content?.content_url,
+    content?.meta?.content_url,
+  ];
+
+  for (const u of candidates) {
+    if (typeof u === 'string' && u.trim()) return u.trim();
+  }
+
+  const source = String(content?.source || '').toLowerCase();
+  const contentId = String(
+    content?.content_id ?? content?.contentId ?? content?.id ?? ''
+  ).trim();
+  const title = String(content?.title || '').trim();
+
+  if (!contentId) return '';
+
+  if (source.includes('naver')) {
+    return `https://comic.naver.com/webtoon/list?titleId=${encodeURIComponent(
+      contentId
+    )}`;
+  }
+
+  if (source.includes('kakao')) {
+    if (!title) return '';
+    return `https://webtoon.kakao.com/content/${encodeURIComponent(
+      title
+    )}/${encodeURIComponent(contentId)}`;
+  }
+
+  return '';
 }
 
 function openModal(content) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
+  const linkContainer = document.getElementById('modalWebtoonLinkContainer');
+
+  const titleText = String(content?.title || '').trim();
+  const url = getContentUrl(content);
+
+  if (!titleEl && window.ES_DEBUG) {
+    console.error('[subscribeModal] title element missing');
+  }
+
+  if (window.ES_DEBUG) {
+    console.debug('[subscribeModal] url=', url, 'title=', titleText);
+  }
 
   if (titleEl) {
     while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
 
-    const title = content.title || '';
-    const url = getContentUrl(content);
-    const hasUrl = Boolean(url);
-
-    if (hasUrl) {
+    if (url && titleText) {
       const anchor = document.createElement('a');
-      anchor.textContent = title;
+      anchor.textContent = titleText;
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
-      anchor.className = 'inline-block text-gray-200 hover:underline hover:text-white cursor-pointer';
+      anchor.className =
+        'inline-block text-blue-400 underline underline-offset-2 hover:text-blue-300 cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
-      titleEl.textContent = title;
+      titleEl.textContent = titleText;
     }
+  } else if (modalEl) {
+    const fallbackEl = modalEl.querySelector('p');
+    if (fallbackEl) fallbackEl.textContent = titleText;
+  }
+
+  if (linkContainer) {
+    while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
+    linkContainer.classList.add('hidden');
   }
   if (modalEl) modalEl.classList.remove('hidden');
   syncModalButton();
