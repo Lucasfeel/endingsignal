@@ -1513,12 +1513,39 @@ const syncModalButton = () => {
   btn.textContent = on ? '구독 해제' : '구독하기';
 };
 
+function getContentUrl(content) {
+  const u =
+    content?.meta?.common?.content_url ||
+    content?.meta?.common?.url ||
+    content?.content_url ||
+    '';
+  return typeof u === 'string' && u.trim() ? u.trim() : '';
+}
+
 function openModal(content) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
 
-  if (titleEl) titleEl.textContent = content.title || '';
+  if (titleEl) {
+    while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
+
+    const title = content.title || '';
+    const url = getContentUrl(content);
+    const hasUrl = Boolean(url);
+
+    if (hasUrl) {
+      const anchor = document.createElement('a');
+      anchor.textContent = title;
+      anchor.href = url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.className = 'inline-block text-gray-200 hover:underline hover:text-white cursor-pointer';
+      titleEl.appendChild(anchor);
+    } else {
+      titleEl.textContent = title;
+    }
+  }
   if (modalEl) modalEl.classList.remove('hidden');
   syncModalButton();
 }
