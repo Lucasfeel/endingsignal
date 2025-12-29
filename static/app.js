@@ -1525,6 +1525,7 @@ function getContentUrl(content) {
     if (typeof u === 'string' && u.trim()) return u.trim();
   }
 
+  // Fallback: derive canonical URL from known sources if meta url is missing
   const source = String(content?.source || '').toLowerCase();
   const contentId = String(
     content?.content_id ?? content?.contentId ?? content?.id ?? ''
@@ -1534,7 +1535,7 @@ function getContentUrl(content) {
   if (!contentId) return '';
 
   if (source.includes('naver')) {
-    return `https://comic.naver.com/webtoon/list?titleId=${encodeURIComponent(
+    return `https://m.comic.naver.com/webtoon/list?titleId=${encodeURIComponent(
       contentId
     )}`;
   }
@@ -1551,6 +1552,7 @@ function getContentUrl(content) {
 
 function openModal(content) {
   STATE.currentModalContent = content;
+
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
@@ -1575,6 +1577,7 @@ function openModal(content) {
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
+      // Prefer new feature: improved hyperlink visibility
       anchor.className =
         'inline-block text-blue-400 underline underline-offset-2 hover:text-blue-300 cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
@@ -1586,76 +1589,36 @@ function openModal(content) {
     if (fallbackEl) fallbackEl.textContent = titleText;
   }
 
+  // Prefer new feature: link container + copy UI
   if (linkContainer) {
-    while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
-    linkContainer.classList.add('hidden');
-  }
-  if (modalEl) modalEl.classList.remove('hidden');
-  syncModalButton();
-}
-
-function closeModal() {
-  const modalEl = document.getElementById('subscribeModal');
-  if (modalEl) modalEl.classList.add('hidden');
-  STATE.currentModalContent = null;
-}
-
-window.toggleSubscriptionFromModal = async function () {
-  const content = STATE.currentModalContent;
-  if (!content) return;
-  if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
-
-  const currently = isSubscribed(content);
-  try {
-    if (currently) await unsubscribeContent(content);
-    else await subscribeContent(content);
-
-    syncModalButton();
-
-    if (STATE.activeTab === 'my') {
-      fetchAndRenderContent('my');
+    while (linkContainer.firstChild) {
+      linkContainer.removeChild(linkContainer.firstChild);
     }
-  } catch (e) {
-    // errors already toasted in subscribe/unsubscribe
-  }
-};
 
-/* =========================
-   Series sort (minimal, optional)
-   ========================= */
+    if (url) {
+      linkContainer.classList.remove('hidden');
 
-function setupSeriesSortHandlers() {
-  if (!UI.seriesSort) return;
+      const wrapper = document.createElement('div');
+      wrapper.className =
+        'flex items-center gap-2 px-3 py-2 rounded-lg bg-[#242424] border border-white/10 text-gray-200';
 
-  UI.seriesSort.addEventListener('click', (evt) => {
-    const btn = evt.target?.closest?.('[data-sort]');
-    if (!btn) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.readOnly = true;
+      input.value = url;
+      input.className =
+        'flex-1 bg-transparent text-sm text-gray-200 outline-none truncate';
+      input.setAttribute('aria-label', '작품 링크');
+      input.addEventListener('click', () => input.select());
 
-    const sort = btn.getAttribute('data-sort');
-    if (!sort) return;
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.textContent = '복사';
+      copyBtn.className =
+        'px-3 py-1 rounded-md bg-[#3a3a3c] text-gray-100 text-sm font-medium hover:bg-[#4a4a4d]';
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('링크가 복사되었습니다.', { type: 'success' });
+        } catch (_err) {
 
-    STATE.filters.series.sort = sort;
-    fetchAndRenderContent('series');
-  });
-}
-
-/* =========================
-   Expose required globals
-   ========================= */
-
-if (DEBUG_TOOLS) {
-  window.__es = {
-    state: STATE,
-    loadSubscriptions: () => loadSubscriptions({ force: true }),
-    setToken: (t) => localStorage.setItem('es_access_token', t),
-    clearToken: () => localStorage.removeItem('es_access_token'),
-  };
-}
-
-window.updateMySubTab = updateMySubTab;
-window.closeModal = closeModal;
-
-// Quick sanity test steps (manual):
-// 1) localStorage.setItem('es_access_token', '<token>')
-// 2) Reload and open the "My Sub" tab
-// 3) Toggle the star on content cards and watch POST/DELETE /api/me/subscriptions
