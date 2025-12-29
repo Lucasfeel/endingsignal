@@ -1577,8 +1577,9 @@ function openModal(content) {
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
+      // Prefer new feature: improved hyperlink visibility
       anchor.className =
-        'inline-block text-gray-200 underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
+        'inline-block text-blue-400 underline underline-offset-2 hover:text-blue-300 cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
       titleEl.textContent = titleText;
@@ -1588,9 +1589,11 @@ function openModal(content) {
     if (fallbackEl) fallbackEl.textContent = titleText;
   }
 
+  // Prefer new feature: link container + copy UI
   if (linkContainer) {
-    while (linkContainer.firstChild)
+    while (linkContainer.firstChild) {
       linkContainer.removeChild(linkContainer.firstChild);
+    }
 
     if (url) {
       linkContainer.classList.remove('hidden');
@@ -1618,84 +1621,4 @@ function openModal(content) {
           await navigator.clipboard.writeText(url);
           showToast('링크가 복사되었습니다.', { type: 'success' });
         } catch (_err) {
-          showToast('복사에 실패했습니다.', { type: 'error' });
-        }
-      });
 
-      wrapper.appendChild(input);
-      wrapper.appendChild(copyBtn);
-      linkContainer.appendChild(wrapper);
-    } else {
-      linkContainer.classList.add('hidden');
-    }
-  }
-
-  if (modalEl) modalEl.classList.remove('hidden');
-  syncModalButton();
-}
-
-function closeModal() {
-  const modalEl = document.getElementById('subscribeModal');
-  if (modalEl) modalEl.classList.add('hidden');
-  STATE.currentModalContent = null;
-}
-
-window.toggleSubscriptionFromModal = async function () {
-  const content = STATE.currentModalContent;
-  if (!content) return;
-  if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
-
-  const currently = isSubscribed(content);
-  try {
-    if (currently) await unsubscribeContent(content);
-    else await subscribeContent(content);
-
-    syncModalButton();
-
-    if (STATE.activeTab === 'my') {
-      fetchAndRenderContent('my');
-    }
-  } catch (e) {
-    // errors already toasted in subscribe/unsubscribe
-  }
-};
-
-/* =========================
-   Series sort (minimal, optional)
-   ========================= */
-
-function setupSeriesSortHandlers() {
-  if (!UI.seriesSort) return;
-
-  UI.seriesSort.addEventListener('click', (evt) => {
-    const btn = evt.target?.closest?.('[data-sort]');
-    if (!btn) return;
-
-    const sort = btn.getAttribute('data-sort');
-    if (!sort) return;
-
-    STATE.filters.series.sort = sort;
-    fetchAndRenderContent('series');
-  });
-}
-
-/* =========================
-   Expose required globals
-   ========================= */
-
-if (DEBUG_TOOLS) {
-  window.__es = {
-    state: STATE,
-    loadSubscriptions: () => loadSubscriptions({ force: true }),
-    setToken: (t) => localStorage.setItem('es_access_token', t),
-    clearToken: () => localStorage.removeItem('es_access_token'),
-  };
-}
-
-window.updateMySubTab = updateMySubTab;
-window.closeModal = closeModal;
-
-// Quick sanity test steps (manual):
-// 1) localStorage.setItem('es_access_token', '<token>')
-// 2) Reload and open the "My Sub" tab
-// 3) Toggle the star on content cards and watch POST/DELETE /api/me/subscriptions
