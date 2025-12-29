@@ -1,16 +1,15 @@
+import datetime
 import os
 import re
-import datetime
 
 import bcrypt
 import jwt
 import psycopg2
 
 from database import get_db, get_cursor
+from utils.auth import JWT_ISSUER, get_jwt_secret
 
-JWT_SECRET = os.getenv('JWT_SECRET')
 ACCESS_TOKEN_EXP_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_EXP_MINUTES', '20'))
-JWT_ISSUER = 'ending-signal'
 
 
 def is_valid_email(email: str) -> bool:
@@ -26,8 +25,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(user: dict):
-    if not JWT_SECRET:
-        raise ValueError('JWT_SECRET is not configured')
+    secret = get_jwt_secret()
 
     now = datetime.datetime.utcnow()
     expires_at = now + datetime.timedelta(minutes=ACCESS_TOKEN_EXP_MINUTES)
@@ -40,7 +38,7 @@ def create_access_token(user: dict):
         'exp': expires_at,
         'iss': JWT_ISSUER,
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm='HS256')
+    token = jwt.encode(payload, secret, algorithm='HS256')
     return token, int((expires_at - now).total_seconds())
 
 
