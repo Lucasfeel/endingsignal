@@ -1518,7 +1518,25 @@ function openModal(content) {
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
 
-  if (titleEl) titleEl.textContent = content.title || '';
+  if (titleEl) {
+    while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
+
+    const title = content.title || '';
+    const url = content?.meta?.common?.content_url;
+    const hasUrl = typeof url === 'string' && url.trim();
+
+    if (hasUrl) {
+      const anchor = document.createElement('a');
+      anchor.textContent = title;
+      anchor.href = url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.className = 'hover:underline';
+      titleEl.appendChild(anchor);
+    } else {
+      titleEl.textContent = title;
+    }
+  }
   if (modalEl) modalEl.classList.remove('hidden');
   syncModalButton();
 }

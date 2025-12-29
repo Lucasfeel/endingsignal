@@ -4,6 +4,7 @@ import asyncio
 import aiohttp
 import json
 import os
+import urllib.parse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base_crawler import ContentCrawler
@@ -170,6 +171,12 @@ class KakaowebtoonCrawler(ContentCrawler):
             content_data = webtoon_data.get('content', {})
             author_names = [author['name'] for author in content_data.get('authors', [])]
 
+            title = content_data.get('title')
+            if not title:
+                continue
+
+            encoded_title = urllib.parse.quote(title, safe='')
+
             # 우선순위: lookThroughImage (단일) -> featuredCharacterImageA (캐릭터) -> lookThroughImages[0] (슬라이스)
             thumbnail_url = content_data.get('lookThroughImage')
             if not thumbnail_url and content_data.get('featuredCharacterImageA'):
@@ -180,7 +187,8 @@ class KakaowebtoonCrawler(ContentCrawler):
             meta_data = {
                 "common": {
                     "authors": author_names,
-                    "thumbnail_url": thumbnail_url
+                    "thumbnail_url": thumbnail_url,
+                    "content_url": f"https://webtoon.kakao.com/content/{encoded_title}/{content_id}"
                 },
                 "attributes": {
                     "weekdays": webtoon_data.get('weekdayDisplayGroups', []),
@@ -193,10 +201,6 @@ class KakaowebtoonCrawler(ContentCrawler):
                     "lookThroughImages": content_data.get('lookThroughImages')
                 }
             }
-
-            title = content_data.get('title')
-            if not title:
-                continue
 
             if content_id in db_existing_ids:
                 record = ('webtoon', title, status, json.dumps(meta_data), content_id, self.source_name)
