@@ -840,7 +840,7 @@ function updateProfileButtonState() {
   const user = STATE.auth.user;
 
   const baseClasses =
-    'w-[32px] h-[32px] rounded-full border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]';
+    'h-[32px] px-3 whitespace-nowrap rounded-full border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]';
   btn.className = baseClasses + (isAuth ? ' bg-[#4F46E5]' : ' bg-[#2d2d2d]');
 
   if (isAuth && user) {
@@ -850,8 +850,8 @@ function updateProfileButtonState() {
     textEl.textContent = initial || 'M';
     btn.setAttribute('title', safeString(user.email, '로그아웃'));
   } else {
-    textEl.textContent = '로그인';
-    btn.setAttribute('title', '로그인');
+    textEl.textContent = 'Login';
+    btn.setAttribute('title', 'Login');
   }
 }
 
