@@ -1514,12 +1514,18 @@ const syncModalButton = () => {
 };
 
 function getContentUrl(content) {
-  const u =
-    content?.meta?.common?.content_url ||
-    content?.meta?.common?.url ||
-    content?.content_url ||
-    '';
-  return typeof u === 'string' && u.trim() ? u.trim() : '';
+  const candidates = [
+    content?.meta?.common?.content_url,
+    content?.meta?.common?.url,
+    content?.content_url,
+    content?.meta?.content_url,
+  ];
+
+  for (const u of candidates) {
+    if (typeof u === 'string' && u.trim()) return u.trim();
+  }
+
+  return '';
 }
 
 function openModal(content) {
@@ -1527,24 +1533,35 @@ function openModal(content) {
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
 
+  const titleText = String(content?.title || '').trim();
+  const url = getContentUrl(content);
+
+  if (!titleEl && window.ES_DEBUG) {
+    console.error('[subscribeModal] title element missing');
+  }
+
+  if (window.ES_DEBUG) {
+    console.debug('[subscribeModal] url=', url, 'title=', titleText);
+  }
+
   if (titleEl) {
     while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
 
-    const title = content.title || '';
-    const url = getContentUrl(content);
-    const hasUrl = Boolean(url);
-
-    if (hasUrl) {
+    if (url && titleText) {
       const anchor = document.createElement('a');
-      anchor.textContent = title;
+      anchor.textContent = titleText;
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
-      anchor.className = 'inline-block text-gray-200 hover:underline hover:text-white cursor-pointer';
+      anchor.className =
+        'inline-block text-gray-200 hover:underline hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
-      titleEl.textContent = title;
+      titleEl.textContent = titleText;
     }
+  } else if (modalEl) {
+    const fallbackEl = modalEl.querySelector('p');
+    if (fallbackEl) fallbackEl.textContent = titleText;
   }
   if (modalEl) modalEl.classList.remove('hidden');
   syncModalButton();
