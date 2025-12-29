@@ -1525,6 +1525,7 @@ function getContentUrl(content) {
     if (typeof u === 'string' && u.trim()) return u.trim();
   }
 
+  // Fallback: derive canonical URL from known sources if meta url is missing
   const source = String(content?.source || '').toLowerCase();
   const contentId = String(
     content?.content_id ?? content?.contentId ?? content?.id ?? ''
@@ -1551,6 +1552,7 @@ function getContentUrl(content) {
 
 function openModal(content) {
   STATE.currentModalContent = content;
+
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
@@ -1587,7 +1589,8 @@ function openModal(content) {
   }
 
   if (linkContainer) {
-    while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
+    while (linkContainer.firstChild)
+      linkContainer.removeChild(linkContainer.firstChild);
 
     if (url) {
       linkContainer.classList.remove('hidden');
@@ -1600,7 +1603,8 @@ function openModal(content) {
       input.type = 'text';
       input.readOnly = true;
       input.value = url;
-      input.className = 'flex-1 bg-transparent text-sm text-gray-200 outline-none truncate';
+      input.className =
+        'flex-1 bg-transparent text-sm text-gray-200 outline-none truncate';
       input.setAttribute('aria-label', '작품 링크');
       input.addEventListener('click', () => input.select());
 
@@ -1625,6 +1629,7 @@ function openModal(content) {
       linkContainer.classList.add('hidden');
     }
   }
+
   if (modalEl) modalEl.classList.remove('hidden');
   syncModalButton();
 }
