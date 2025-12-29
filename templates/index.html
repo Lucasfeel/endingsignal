@@ -119,9 +119,37 @@
                 </h1>
             </div>
             <div class="flex items-center gap-4">
-                <button id="searchButton" class="spring-bounce">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                </button>
+                <div id="headerSearchWrap" class="relative flex items-center">
+                    <button id="searchButton" class="spring-bounce">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    </button>
+                    <input
+                        id="searchInput"
+                        type="text"
+                        class="ml-0 w-0 opacity-0 pointer-events-none transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                        placeholder="검색"
+                    />
+                    <button
+                        id="searchClearBtn"
+                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white hidden"
+                        aria-label="검색어 지우기"
+                    >✕</button>
+                    <div
+                        id="searchPanel"
+                        class="hidden absolute right-0 top-full mt-2 w-[360px] max-w-[calc(100vw-24px)] bg-[#121212] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[120]"
+                    >
+                        <div id="searchLoadingState" class="hidden grid grid-cols-3 gap-3 p-3">
+                            <div class="h-32 rounded-lg skeleton"></div>
+                            <div class="h-32 rounded-lg skeleton"></div>
+                            <div class="h-32 rounded-lg skeleton"></div>
+                            <div class="h-32 rounded-lg skeleton"></div>
+                            <div class="h-32 rounded-lg skeleton"></div>
+                            <div class="h-32 rounded-lg skeleton"></div>
+                        </div>
+                        <div id="searchEmptyState" class="hidden text-center text-sm text-gray-400 py-6 px-3">검색어를 입력하세요.</div>
+                        <div id="searchResultsGrid" class="grid grid-cols-3 gap-3 p-3 max-h-[480px] overflow-y-auto"></div>
+                    </div>
+                </div>
                 <button id="profileButton" class="w-[32px] h-[32px] rounded-full bg-[#2d2d2d] border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]">
                     <span class="sr-only">프로필</span>
                     <span id="profileButtonText">로그인</span>
