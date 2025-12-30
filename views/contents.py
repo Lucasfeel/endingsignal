@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request, current_app
 from database import get_db, get_cursor
 import math
 import json
+import re
 
 contents_bp = Blueprint('contents', __name__)
 
@@ -77,28 +78,98 @@ def search_contents():
         if not query:
             return jsonify([])
 
+        normalized_query = re.sub(r"\s+", "", query)
+        norm_len = len(normalized_query)
+        # 너무 짧은 검색어(1자 이하)는 노이즈가 많으므로 즉시 반환
+        if norm_len <= 1:
+            return jsonify([])
+
         conn = get_db()
         cursor = get_cursor(conn)
 
-        base_query = """
-            SELECT content_id, title, status, meta, source
-            FROM contents
-            WHERE title %% %s AND content_type = %s
-        """
-        # placeholders:
-        # 1) title %% %s  -> query
-        # 2) content_type = %s -> content_type
-        # 3) ORDER BY similarity(title, %s) -> query
-        params = [query, content_type, query]
+        title_expr = "COALESCE(title, '')"
+        author_expr = "COALESCE(meta->'common'->>'authors', '')"
+        title_norm_expr = "regexp_replace(COALESCE(title, ''), '\\\\s+', '', 'g')"
+        author_norm_expr = "regexp_replace(COALESCE(meta->'common'->>'authors', ''), '\\\\s+', '', 'g')"
+        like_param = f"%{query}%"
+        like_norm_param = f"%{normalized_query}%"
+
+        def compute_thresholds(length):
+            if length <= 2:
+                return None
+            if length == 3:
+                return (0.2, 0.25)
+            if length == 4:
+                return (0.15, 0.2)
+            return (0.12, 0.18)
+
+        thresholds = compute_thresholds(norm_len)
+
+        where_clauses = [
+            "content_type = %s",
+            f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s) OR ({title_norm_expr} ILIKE %s) OR ({author_norm_expr} ILIKE %s))",
+        ]
+        params = [content_type, like_param, like_param, like_norm_param, like_norm_param]
 
         if source != 'all':
-            base_query += " AND source = %s"
-            # insert before the final similarity param
-            params.insert(2, source)
+            where_clauses.append("source = %s")
+            params.append(source)
 
-        base_query += " ORDER BY similarity(title, %s) DESC LIMIT 100"
+        if thresholds:
+            title_threshold, author_threshold = thresholds
+            where_clauses.append(
+                (
+                    f"(similarity({title_norm_expr}, %s) >= %s OR "
+                    f"similarity({author_norm_expr}, %s) >= %s OR "
+                    f"similarity({title_expr}, %s) >= %s OR "
+                    f"similarity({author_expr}, %s) >= %s)"
+                )
+            )
+            params.extend([
+                normalized_query,
+                title_threshold,
+                normalized_query,
+                author_threshold,
+                query,
+                max(title_threshold, 0.2),
+                query,
+                max(author_threshold, 0.2),
+            ])
 
-        cursor.execute(base_query, tuple(params))
+        search_query = f"""
+            SELECT content_id, title, status, meta, source
+            FROM contents
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY
+              CASE
+                WHEN {title_expr} ILIKE %s THEN 0
+                WHEN {title_norm_expr} ILIKE %s THEN 1
+                WHEN {author_expr} ILIKE %s THEN 2
+                WHEN {author_norm_expr} ILIKE %s THEN 3
+                ELSE 4
+              END,
+              GREATEST(
+                similarity({title_norm_expr}, %s),
+                similarity({author_norm_expr}, %s),
+                similarity({title_expr}, %s),
+                similarity({author_expr}, %s)
+              ) DESC,
+              content_id ASC
+            LIMIT 100
+        """
+
+        params.extend([
+            like_param,
+            like_norm_param,
+            like_param,
+            like_norm_param,
+            normalized_query,
+            normalized_query,
+            query,
+            query,
+        ])
+
+        cursor.execute(search_query, tuple(params))
         raw_rows = cursor.fetchall()
 
         results = []
