@@ -157,6 +157,13 @@ def setup_database_standalone():
             ON contents
             USING gin (title gin_trgm_ops);
         """)
+
+        print("LOG: [DB Setup] Creating GIN index on contents meta authors...")
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_contents_authors_trgm
+            ON contents
+            USING gin ((COALESCE(meta->'common'->>'authors', '')) gin_trgm_ops);
+        """)
         print("LOG: [DB Setup] 'pg_trgm' setup complete.")
 
         print("LOG: [DB Setup] Committing changes...")
