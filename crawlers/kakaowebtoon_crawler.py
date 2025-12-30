@@ -30,12 +30,11 @@ class KakaowebtoonCrawler(ContentCrawler):
 
     # (run_all_crawlers.py에서 인스턴스 생성 전에 스킵 판단용)
     DISPLAY_NAME = "Kakao Webtoon"
-    REQUIRED_ENV_VARS = ["KAKAOWEBTOON_WEBID", "KAKAOWEBTOON_T_ANO"]
+    REQUIRED_ENV_VARS = []
 
     @classmethod
     def get_missing_env_vars(cls):
-        required = getattr(cls, "REQUIRED_ENV_VARS", [])
-        return [key for key in required if not os.getenv(key)]
+        return []
 
     def __init__(self):
         super().__init__("kakaowebtoon")
@@ -46,17 +45,39 @@ class KakaowebtoonCrawler(ContentCrawler):
         webid = os.getenv("KAKAOWEBTOON_WEBID")
         t_ano = os.getenv("KAKAOWEBTOON_T_ANO")
 
-        if not webid or not t_ano:
-            raise ValueError(
-                "Kakaowebtoon 크롤러를 위해 KAKAOWEBTOON_WEBID와 KAKAOWEBTOON_T_ANO 환경 변수를 설정해야 합니다."
-            )
+        if webid and t_ano:
+            return {"webid": webid, "_T_ANO": t_ano}
 
-        return {"webid": webid, "_T_ANO": t_ano}
+        return None
+
+    async def _bootstrap_anonymous_cookies(self, session, fetch_meta=None):
+        """로그인 없이 발급되는 쿠키를 한 번의 요청으로 받아옵니다."""
+
+        try:
+            async with session.get("https://webtoon.kakao.com/", headers=HEADERS) as resp:
+                await resp.text()
+
+            cookies = session.cookie_jar.filter_cookies("https://webtoon.kakao.com/")
+            webid = cookies.get("webid")
+            t_ano = cookies.get("_T_ANO")
+
+            if webid and t_ano:
+                self.cookies = {"webid": webid.value, "_T_ANO": t_ano.value}
+                print("부트스트랩된 쿠키: ['webid', '_T_ANO']")
+            else:
+                if fetch_meta is not None:
+                    fetch_meta.setdefault("errors", []).append("cookies:anonymous_bootstrap_missing")
+        except Exception as e:
+            print(f"익명 쿠키 부트스트랩 실패: {e}")
+            if fetch_meta is not None:
+                fetch_meta.setdefault("errors", []).append(f"cookies:anonymous_bootstrap_failed:{e}")
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _fetch_from_api(self, session, url, params=None):
         """주어진 URL과 파라미터로 API에 GET 요청을 보내고 JSON 응답을 반환합니다."""
-        async with session.get(url, headers=HEADERS, cookies=self.cookies, params=params) as response:
+        async with session.get(
+            url, headers=HEADERS, cookies=self.cookies if self.cookies else None, params=params
+        ) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -125,6 +146,9 @@ class KakaowebtoonCrawler(ContentCrawler):
         fetch_meta = {"errors": []}
 
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            if not self.cookies:
+                await self._bootstrap_anonymous_cookies(session, fetch_meta=fetch_meta)
+
             weekday_url = f"{API_BASE_URL}/general-weekdays"
 
             # Run-level watchdog gate before making requests
