@@ -25,7 +25,7 @@ async def run_one_crawler(crawler_class):
     """
     단일 크롤러 인스턴스를 생성하고 실행한 뒤, 그 결과를 DB에 보고합니다.
     """
-    report = {'status': '성공'}
+    report = {'status': '성공', 'fetched_count': 0}
     crawler_start_time = time.time()
 
     db_conn = None
@@ -58,6 +58,7 @@ async def run_one_crawler(crawler_class):
                     'new_contents': new_contents,
                     'newly_completed_items': newly_completed_items,
                     'cdc_info': cdc_info,
+                    'fetched_count': cdc_info.get('health', {}).get('fetched_count', 0),
                 })
 
             except Exception as e:
@@ -68,6 +69,7 @@ async def run_one_crawler(crawler_class):
 
     finally:
         report['duration'] = time.time() - crawler_start_time
+        report['crawler_name'] = crawler_display_name
         if db_conn:
             db_conn.close()
 
@@ -90,6 +92,8 @@ async def run_one_crawler(crawler_class):
         finally:
             if report_conn:
                 report_conn.close()
+
+        return report
 
 
 def run_scheduled_completion_cdc():
@@ -158,6 +162,37 @@ async def main():
     for result in results:
         if isinstance(result, Exception):
             print(f"WARNING: 크롤러 작업 중 일부가 gather 레벨에서 예외를 반환했습니다: {result}", file=sys.stderr)
+
+    naver_unique = 0
+    kakao_unique = 0
+    for result in results:
+        if isinstance(result, dict):
+            name_lower = str(result.get('crawler_name', '')).lower()
+            fetched = result.get('fetched_count') or 0
+            if 'naver' in name_lower:
+                naver_unique = fetched
+            elif 'kakao' in name_lower:
+                kakao_unique = fetched
+
+    actual_total_unique = naver_unique + kakao_unique
+    target_total_unique = 20000
+    warning = "TOTAL_UNIQUE_BELOW_TARGET" if actual_total_unique < target_total_unique else None
+
+    rollup = {
+        "naver_unique": naver_unique,
+        "kakao_unique": kakao_unique,
+        "actual_total_unique": actual_total_unique,
+        "target_total_unique": target_total_unique,
+        "warning": warning,
+    }
+
+    print(
+        f"Rollup uniques -> Naver: {naver_unique}, Kakao: {kakao_unique}, "
+        f"Total: {actual_total_unique} / {target_total_unique}"
+    )
+    if warning:
+        print(f"WARNING: {warning}")
+    print(f"Final rollup payload: {json.dumps(rollup, ensure_ascii=False)}")
 
     run_scheduled_completion_cdc()
 

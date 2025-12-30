@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import json
 import os
+import re
 import time
 import urllib.parse
 
@@ -30,12 +31,11 @@ class KakaowebtoonCrawler(ContentCrawler):
 
     # (run_all_crawlers.py에서 인스턴스 생성 전에 스킵 판단용)
     DISPLAY_NAME = "Kakao Webtoon"
-    REQUIRED_ENV_VARS = ["KAKAOWEBTOON_WEBID", "KAKAOWEBTOON_T_ANO"]
+    REQUIRED_ENV_VARS = []
 
     @classmethod
     def get_missing_env_vars(cls):
-        required = getattr(cls, "REQUIRED_ENV_VARS", [])
-        return [key for key in required if not os.getenv(key)]
+        return []
 
     def __init__(self):
         super().__init__("kakaowebtoon")
@@ -46,17 +46,45 @@ class KakaowebtoonCrawler(ContentCrawler):
         webid = os.getenv("KAKAOWEBTOON_WEBID")
         t_ano = os.getenv("KAKAOWEBTOON_T_ANO")
 
-        if not webid or not t_ano:
-            raise ValueError(
-                "Kakaowebtoon 크롤러를 위해 KAKAOWEBTOON_WEBID와 KAKAOWEBTOON_T_ANO 환경 변수를 설정해야 합니다."
-            )
+        if webid and t_ano:
+            return {"webid": webid, "_T_ANO": t_ano}
 
-        return {"webid": webid, "_T_ANO": t_ano}
+        return None
+
+    async def _bootstrap_anonymous_cookies(self, session, fetch_meta=None):
+        """로그인 없이 발급되는 쿠키를 한 번의 요청으로 받아옵니다."""
+
+        try:
+            async with session.get("https://webtoon.kakao.com/", headers=HEADERS) as resp:
+                await resp.text()
+
+            cookies = session.cookie_jar.filter_cookies("https://webtoon.kakao.com/")
+            webid = cookies.get("webid")
+            t_ano = cookies.get("_T_ANO")
+
+            if webid and t_ano:
+                self.cookies = {"webid": webid.value, "_T_ANO": t_ano.value}
+                print("부트스트랩된 쿠키: ['webid', '_T_ANO']")
+            else:
+                if fetch_meta is not None:
+                    fetch_meta.setdefault("errors", []).append("cookies:anonymous_bootstrap_missing")
+        except Exception as e:
+            print(f"익명 쿠키 부트스트랩 실패: {e}")
+            if fetch_meta is not None:
+                fetch_meta.setdefault("errors", []).append(f"cookies:anonymous_bootstrap_failed:{e}")
+
+    def _iter_cards_from_sections(self, sections):
+        for section in sections or []:
+            for card_group in section.get("cardGroups", []) or []:
+                for card in card_group.get("cards", []) or []:
+                    yield card
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _fetch_from_api(self, session, url, params=None):
         """주어진 URL과 파라미터로 API에 GET 요청을 보내고 JSON 응답을 반환합니다."""
-        async with session.get(url, headers=HEADERS, cookies=self.cookies, params=params) as response:
+        async with session.get(
+            url, headers=HEADERS, cookies=self.cookies if self.cookies else None, params=params
+        ) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -66,6 +94,7 @@ class KakaowebtoonCrawler(ContentCrawler):
         all_completed_content = []
         offset = 0
         limit = 100
+        seen_ids = set()
 
         while True:
             try:
@@ -78,24 +107,21 @@ class KakaowebtoonCrawler(ContentCrawler):
                 url = f"{API_BASE_URL}/completed"
                 data = await self._fetch_from_api(session, url, params={"offset": offset, "limit": limit})
 
-                if not data.get("data", {}).get("sections"):
-                    break
-
-                # Defensive: shape may vary; guard against missing indices
-                sections = data.get("data", {}).get("sections", [])
-                if not sections:
-                    break
-                card_groups = sections[0].get("cardGroups", [])
-                if not card_groups:
-                    break
-                cards = card_groups[0].get("cards", [])
+                cards = list(self._iter_cards_from_sections(data.get("data", {}).get("sections", [])))
                 if not cards:
                     break
 
-                all_completed_content.extend(cards)
+                new_cards = 0
+                for card in cards:
+                    cid = str(card.get("id") or "").strip()
+                    if cid and cid not in seen_ids:
+                        seen_ids.add(cid)
+                        all_completed_content.append(card)
+                        new_cards += 1
+
                 offset += len(cards)
 
-                if len(cards) < limit:
+                if len(cards) < limit or new_cards == 0:
                     break
 
                 await asyncio.sleep(0.1)
@@ -107,6 +133,86 @@ class KakaowebtoonCrawler(ContentCrawler):
                 break
 
         return all_completed_content
+
+    async def _discover_official_slugs(self, session, *, start_time=None, fetch_meta=None):
+        slugs = set()
+        meta = fetch_meta if fetch_meta is not None else {}
+        try:
+            if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
+                meta.setdefault("errors", []).append("discover:WALL_TIMEOUT_EXCEEDED")
+                return slugs
+
+            async with session.get("https://webtoon.kakao.com/", headers=HEADERS) as resp:
+                html = await resp.text()
+
+            bundle_urls = list({url for url in re.findall(r"https://[^'\"]+\\.js", html)})
+            if not bundle_urls:
+                return slugs
+
+            for bundle_url in bundle_urls[: config.KAKAO_DISCOVERY_MAX_BUNDLES]:
+                if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
+                    meta.setdefault("errors", []).append("discover:WALL_TIMEOUT_EXCEEDED")
+                    break
+
+                try:
+                    async with session.get(bundle_url, headers=HEADERS) as resp:
+                        bundle_text = await resp.text()
+                    for slug in re.findall(r"/section/v1/pages/([A-Za-z0-9_-]+)", bundle_text):
+                        slugs.add(slug)
+                except Exception as e:
+                    meta.setdefault("errors", []).append(f"discover:bundle_fetch_failed:{e}")
+
+        except Exception as e:
+            meta.setdefault("errors", []).append(f"discover:bootstrap_failed:{e}")
+
+        return slugs
+
+    async def _fetch_official_section_cards(self, session, slug, *, start_time=None, fetch_meta=None, seen_ids=None):
+        collected = []
+        offset = 0
+        limit = 100
+        page = 0
+        seen_ids = seen_ids or set()
+        meta = fetch_meta if fetch_meta is not None else {}
+
+        while page < config.KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG:
+            try:
+                if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
+                    meta.setdefault("errors", []).append(f"discover:{slug}:WALL_TIMEOUT_EXCEEDED")
+                    break
+
+                url = f"{API_BASE_URL}/{slug}"
+                data = await self._fetch_from_api(session, url, params={"offset": offset, "limit": limit})
+                cards = list(self._iter_cards_from_sections(data.get("data", {}).get("sections", [])))
+
+                if not cards:
+                    break
+
+                new_cards = 0
+                for card in cards:
+                    cid = str(card.get("id") or "").strip()
+                    if cid and cid not in seen_ids:
+                        seen_ids.add(cid)
+                        collected.append(card)
+                        new_cards += 1
+
+                offset += len(cards)
+                page += 1
+
+                if len(cards) < limit or new_cards == 0:
+                    break
+
+                await asyncio.sleep(0.1)
+
+            except Exception as e:
+                meta.setdefault("errors", []).append(f"discover:{slug}:{e}")
+                break
+
+            if len(seen_ids) >= config.KAKAO_DISCOVERY_SOFT_CAP:
+                meta.setdefault("errors", []).append("discover:soft_cap_reached")
+                break
+
+        return collected
 
     async def fetch_all_data(self):
         """카카오웹툰의 '요일별'과 '완결' API에서 모든 웹툰 데이터를 비동기적으로 가져옵니다."""
@@ -125,6 +231,9 @@ class KakaowebtoonCrawler(ContentCrawler):
         fetch_meta = {"errors": []}
 
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            if not self.cookies:
+                await self._bootstrap_anonymous_cookies(session, fetch_meta=fetch_meta)
+
             weekday_url = f"{API_BASE_URL}/general-weekdays"
 
             # Run-level watchdog gate before making requests
@@ -137,6 +246,34 @@ class KakaowebtoonCrawler(ContentCrawler):
                     self._fetch_paginated_completed(session, start_time=start_time, fetch_meta=fetch_meta),
                 ]
                 weekday_data, completed_data = await asyncio.gather(*tasks, return_exceptions=True)
+
+            discovered_cards = []
+            try:
+                discovered_slugs = await self._discover_official_slugs(
+                    session, start_time=start_time, fetch_meta=fetch_meta
+                )
+                seen_ids = set()
+                for card in completed_data if isinstance(completed_data, list) else []:
+                    cid = str(card.get("id") or "").strip()
+                    if cid:
+                        seen_ids.add(cid)
+                if isinstance(weekday_data, dict):
+                    for card in self._iter_cards_from_sections(weekday_data.get("data", {}).get("sections", [])):
+                        cid = str(card.get("id") or "").strip()
+                        if cid:
+                            seen_ids.add(cid)
+
+                for slug in discovered_slugs:
+                    if len(seen_ids) >= config.KAKAO_DISCOVERY_SOFT_CAP:
+                        fetch_meta.setdefault("errors", []).append("discover:soft_cap_reached")
+                        break
+
+                    cards = await self._fetch_official_section_cards(
+                        session, slug, start_time=start_time, fetch_meta=fetch_meta, seen_ids=seen_ids
+                    )
+                    discovered_cards.extend(cards)
+            except Exception as e:
+                fetch_meta.setdefault("errors", []).append(f"discover:failed:{e}")
 
         # Normalize exceptions
         if isinstance(weekday_data, Exception):
@@ -163,25 +300,44 @@ class KakaowebtoonCrawler(ContentCrawler):
                 if not weekday_eng:
                     continue
 
-                for card_group in section.get("cardGroups", []):
-                    for webtoon in card_group.get("cards", []):
-                        content_id = str(webtoon.get("id") or "").strip()
-                        if not content_id:
-                            continue
+                for webtoon in self._iter_cards_from_sections([section]):
+                    content_id = str(webtoon.get("id") or "").strip()
+                    if not content_id:
+                        continue
 
-                        webtoon["weekdayDisplayGroups"] = [weekday_eng]
+                    webtoon.setdefault("weekdayDisplayGroups", []).append(weekday_eng)
 
-                        content_payload = webtoon.get("content", {})
-                        if "title" not in webtoon:
-                            webtoon["title"] = content_payload.get("title")
+                    content_payload = webtoon.get("content", {})
+                    if "title" not in webtoon:
+                        webtoon["title"] = content_payload.get("title")
 
-                        status_text = content_payload.get("onGoingStatus")
-                        status_counts[status_text] = status_counts.get(status_text, 0) + 1
+                    status_text = content_payload.get("onGoingStatus")
+                    status_counts[status_text] = status_counts.get(status_text, 0) + 1
 
-                        if status_text == "PAUSE":
-                            hiatus_today.setdefault(content_id, webtoon)
-                        else:
-                            ongoing_today.setdefault(content_id, webtoon)
+                    if status_text == "PAUSE":
+                        hiatus_today.setdefault(content_id, webtoon)
+                    else:
+                        ongoing_today.setdefault(content_id, webtoon)
+
+        for webtoon in discovered_cards:
+            content_id = str(webtoon.get("id") or "").strip()
+            if not content_id:
+                continue
+
+            content_payload = webtoon.get("content", {})
+            if "title" not in webtoon:
+                webtoon["title"] = content_payload.get("title")
+
+            status_text = content_payload.get("onGoingStatus")
+            status_counts[status_text] = status_counts.get(status_text, 0) + 1
+
+            if content_id in ongoing_today or content_id in hiatus_today:
+                continue
+
+            if status_text == "PAUSE":
+                hiatus_today[content_id] = webtoon
+            else:
+                ongoing_today[content_id] = webtoon
 
         for webtoon in completed_data:
             content_id = str(webtoon.get("id") or "").strip()
