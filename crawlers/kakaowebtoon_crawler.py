@@ -15,7 +15,11 @@ from database import get_cursor
 API_BASE_URL = "https://gateway-kw.kakao.com/section/v1/pages"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/142.0.0.0 Safari/537.36"
+    ),
     "Referer": "https://webtoon.kakao.com/",
     "Accept-Language": "ko",
 }
@@ -77,7 +81,14 @@ class KakaowebtoonCrawler(ContentCrawler):
                 if not data.get("data", {}).get("sections"):
                     break
 
-                cards = data["data"]["sections"][0]["cardGroups"][0]["cards"]
+                # Defensive: shape may vary; guard against missing indices
+                sections = data.get("data", {}).get("sections", [])
+                if not sections:
+                    break
+                card_groups = sections[0].get("cardGroups", [])
+                if not card_groups:
+                    break
+                cards = card_groups[0].get("cards", [])
                 if not cards:
                     break
 
@@ -143,12 +154,12 @@ class KakaowebtoonCrawler(ContentCrawler):
         status_counts = {}
 
         # 요일 한글 -> 영문 변환 맵
-        DAY_MAP = {"월": "mon", "화": "tue", "수": "wed", "목": "thu", "금": "fri", "토": "sat", "일": "sun"}
+        day_map = {"월": "mon", "화": "tue", "수": "wed", "목": "thu", "금": "fri", "토": "sat", "일": "sun"}
 
         if weekday_data.get("data", {}).get("sections"):
             for section in weekday_data["data"]["sections"]:
                 weekday_kor = section.get("title", "").replace("요일", "")  # "월요일" -> "월"
-                weekday_eng = DAY_MAP.get(weekday_kor)
+                weekday_eng = day_map.get(weekday_kor)
                 if not weekday_eng:
                     continue
 
@@ -164,15 +175,13 @@ class KakaowebtoonCrawler(ContentCrawler):
                         if "title" not in webtoon:
                             webtoon["title"] = content_payload.get("title")
 
-                        status_text = webtoon.get("content", {}).get("onGoingStatus")
+                        status_text = content_payload.get("onGoingStatus")
                         status_counts[status_text] = status_counts.get(status_text, 0) + 1
 
                         if status_text == "PAUSE":
-                            if content_id not in hiatus_today:
-                                hiatus_today[content_id] = webtoon
+                            hiatus_today.setdefault(content_id, webtoon)
                         else:
-                            if content_id not in ongoing_today:
-                                ongoing_today[content_id] = webtoon
+                            ongoing_today.setdefault(content_id, webtoon)
 
         for webtoon in completed_data:
             content_id = str(webtoon.get("id") or "").strip()
@@ -207,4 +216,76 @@ class KakaowebtoonCrawler(ContentCrawler):
         db_existing_ids = {row["content_id"] for row in cursor.fetchall()}
         updates, inserts = [], []
 
-        for content_id, webtoon_data in all_content_today.
+        for content_id, webtoon_data in all_content_today.items():
+            status = ""
+            if content_id in finished_today:
+                status = "완결"
+            elif content_id in hiatus_today:
+                status = "휴재"
+            elif content_id in ongoing_today:
+                status = "연재중"
+            else:
+                continue
+
+            content_data = webtoon_data.get("content", {})
+            author_names = [
+                author.get("name") for author in content_data.get("authors", []) if author.get("name")
+            ]
+
+            title = content_data.get("title") or webtoon_data.get("title")
+            if not title:
+                continue
+
+            encoded_title = urllib.parse.quote(str(title), safe="")
+
+            # 우선순위: lookThroughImage (단일) -> featuredCharacterImageA (캐릭터) -> lookThroughImages[0] (슬라이스)
+            thumbnail_url = content_data.get("lookThroughImage")
+            if not thumbnail_url and content_data.get("featuredCharacterImageA"):
+                thumbnail_url = content_data.get("featuredCharacterImageA")
+            if not thumbnail_url and content_data.get("lookThroughImages"):
+                thumbnail_url = content_data["lookThroughImages"][0]
+
+            meta_data = {
+                "common": {
+                    "authors": author_names,
+                    "thumbnail_url": thumbnail_url,
+                    "content_url": f"https://webtoon.kakao.com/content/{encoded_title}/{content_id}",
+                },
+                "attributes": {
+                    "weekdays": webtoon_data.get("weekdayDisplayGroups", []),
+                    "lookThroughImage": content_data.get("lookThroughImage"),
+                    "backgroundImage": content_data.get("backgroundImage"),
+                    "featuredCharacterImageA": content_data.get("featuredCharacterImageA"),
+                    "featuredCharacterImageB": content_data.get("featuredCharacterImageB"),
+                    "titleImageA": content_data.get("titleImageA"),
+                    "titleImageB": content_data.get("titleImageB"),
+                    "lookThroughImages": content_data.get("lookThroughImages"),
+                },
+            }
+
+            if content_id in db_existing_ids:
+                record = ("webtoon", title, status, json.dumps(meta_data), content_id, self.source_name)
+                updates.append(record)
+            else:
+                record = (content_id, self.source_name, "webtoon", title, status, json.dumps(meta_data))
+                inserts.append(record)
+
+        if updates:
+            cursor.executemany(
+                "UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
+                updates,
+            )
+            print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
+
+        if inserts:
+            cursor.executemany(
+                "INSERT INTO contents (content_id, source, content_type, title, status, meta) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (content_id, source) DO NOTHING",
+                inserts,
+            )
+            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
+
+        cursor.close()
+        print("DB 동기화 완료.")
+        return len(inserts)
