@@ -77,28 +77,64 @@ def search_contents():
         if not query:
             return jsonify([])
 
+        q_len = len(query)
+        # 너무 짧은 검색어(1자 이하)는 노이즈가 많으므로 즉시 반환
+        if q_len <= 1:
+            return jsonify([])
+
         conn = get_db()
         cursor = get_cursor(conn)
 
-        base_query = """
-            SELECT content_id, title, status, meta, source
-            FROM contents
-            WHERE title %% %s AND content_type = %s
-        """
-        # placeholders:
-        # 1) title %% %s  -> query
-        # 2) content_type = %s -> content_type
-        # 3) ORDER BY similarity(title, %s) -> query
-        params = [query, content_type, query]
+        title_expr = "COALESCE(title, '')"
+        author_expr = "COALESCE(meta->'common'->>'authors', '')"
+        like_param = f"%{query}%"
+
+        def compute_thresholds(length):
+            if length <= 2:
+                return None
+            if length == 3:
+                return (0.2, 0.25)
+            if length == 4:
+                return (0.15, 0.2)
+            return (0.12, 0.18)
+
+        thresholds = compute_thresholds(q_len)
+
+        where_clauses = [
+            "content_type = %s",
+            f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))",
+        ]
+        params = [content_type, like_param, like_param]
 
         if source != 'all':
-            base_query += " AND source = %s"
-            # insert before the final similarity param
-            params.insert(2, source)
+            where_clauses.append("source = %s")
+            params.append(source)
 
-        base_query += " ORDER BY similarity(title, %s) DESC LIMIT 100"
+        if thresholds:
+            title_threshold, author_threshold = thresholds
+            where_clauses.append(
+                f"(similarity({title_expr}, %s) >= %s OR similarity({author_expr}, %s) >= %s)"
+            )
+            params.extend([query, title_threshold, query, author_threshold])
 
-        cursor.execute(base_query, tuple(params))
+        search_query = f"""
+            SELECT content_id, title, status, meta, source
+            FROM contents
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY
+              CASE
+                WHEN {title_expr} ILIKE %s THEN 0
+                WHEN {author_expr} ILIKE %s THEN 1
+                ELSE 2
+              END,
+              GREATEST(similarity({title_expr}, %s), similarity({author_expr}, %s)) DESC,
+              content_id ASC
+            LIMIT 100
+        """
+
+        params.extend([like_param, like_param, query, query])
+
+        cursor.execute(search_query, tuple(params))
         raw_rows = cursor.fetchall()
 
         results = []
