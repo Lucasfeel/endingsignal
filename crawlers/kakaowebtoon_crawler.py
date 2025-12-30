@@ -4,9 +4,11 @@ import asyncio
 import aiohttp
 import json
 import os
+import time
 import urllib.parse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+import config
 from .base_crawler import ContentCrawler
 from database import get_cursor
 
@@ -23,6 +25,14 @@ class KakaowebtoonCrawler(ContentCrawler):
     """
     webtoon.kakao.com에서 웹툰 정보를 수집하는 크롤러입니다.
     """
+
+    DISPLAY_NAME = "Kakao Webtoon"
+    REQUIRED_ENV_VARS = ["KAKAOWEBTOON_WEBID", "KAKAOWEBTOON_T_ANO"]
+
+    @classmethod
+    def get_missing_env_vars(cls):
+        required = getattr(cls, "REQUIRED_ENV_VARS", [])
+        return [key for key in required if not os.getenv(key)]
 
     def __init__(self):
         super().__init__('kakaowebtoon')
@@ -50,13 +60,17 @@ class KakaowebtoonCrawler(ContentCrawler):
             return await response.json()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def _fetch_paginated_completed(self, session):
+    async def _fetch_paginated_completed(self, session, *, start_time=None, fetch_meta=None):
         """'completed' 엔드포인트의 모든 페이지를 순회하며 데이터를 수집합니다."""
         all_completed_content = []
         offset = 0
         limit = 100
         while True:
             try:
+                if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
+                    if fetch_meta is not None:
+                        fetch_meta.setdefault("errors", []).append("completed:WALL_TIMEOUT_EXCEEDED")
+                    break
                 url = f"{API_BASE_URL}/completed"
                 data = await self._fetch_from_api(session, url, params={"offset": offset, "limit": limit})
 
@@ -76,6 +90,8 @@ class KakaowebtoonCrawler(ContentCrawler):
                 await asyncio.sleep(0.1)
             except Exception as e:
                 print(f"Error fetching completed page at offset {offset}: {e}")
+                if fetch_meta is not None:
+                    fetch_meta.setdefault("errors", []).append(f"completed:{e}")
                 break
         return all_completed_content
 
@@ -84,27 +100,44 @@ class KakaowebtoonCrawler(ContentCrawler):
         카카오웹툰의 '요일별'과 '완결' API에서 모든 웹툰 데이터를 비동기적으로 가져옵니다.
         """
         print("카카오웹툰 서버에서 최신 데이터를 가져옵니다...")
-        async with aiohttp.ClientSession() as session:
+        start_time = time.monotonic()
+        timeout = aiohttp.ClientTimeout(
+            total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
+            connect=config.CRAWLER_HTTP_CONNECT_TIMEOUT_SECONDS,
+            sock_read=config.CRAWLER_HTTP_SOCK_READ_TIMEOUT_SECONDS,
+        )
+        connector = aiohttp.TCPConnector(limit=config.CRAWLER_HTTP_CONCURRENCY_LIMIT, ttl_dns_cache=300)
+
+        fetch_meta = {"errors": []}
+
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
             weekday_url = f"{API_BASE_URL}/general-weekdays"
 
-            tasks = [
-                self._fetch_from_api(session, weekday_url),
-                self._fetch_paginated_completed(session)
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            if (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
+                fetch_meta["errors"].append("weekday:WALL_TIMEOUT_EXCEEDED")
+                weekday_data, completed_data = {}, []
+            else:
+                tasks = [
+                    self._fetch_from_api(session, weekday_url),
+                    self._fetch_paginated_completed(session, start_time=start_time, fetch_meta=fetch_meta)
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            weekday_data, completed_data = results
+                weekday_data, completed_data = results
 
 
         if isinstance(weekday_data, Exception):
             print(f"❌ 요일별 데이터 수집 실패: {weekday_data}")
+            fetch_meta["errors"].append(f"weekday:{weekday_data}")
             weekday_data = {}
         if isinstance(completed_data, Exception):
             print(f"❌ 완결 데이터 수집 실패: {completed_data}")
+            fetch_meta["errors"].append(f"completed:{completed_data}")
             completed_data = []
 
         print("\n--- 데이터 정규화 시작 ---")
         ongoing_today, hiatus_today, finished_today = {}, {}, {}
+        status_counts = {}
 
         # 요일 한글 -> 영문 변환 맵
         DAY_MAP = {"월": "mon", "화": "tue", "수": "wed", "목": "thu", "금": "fri", "토": "sat", "일": "sun"}
@@ -126,6 +159,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                             webtoon['title'] = content_payload.get('title')
 
                         status_text = webtoon.get('content', {}).get('onGoingStatus') # 'onGoingStatus' 사용
+                        status_counts[status_text] = status_counts.get(status_text, 0) + 1
                         if status_text == 'PAUSE': # 휴재 상태 키 확인
                             if content_id not in hiatus_today:
                                 hiatus_today[content_id] = webtoon
@@ -149,7 +183,9 @@ class KakaowebtoonCrawler(ContentCrawler):
                 webtoon['title'] = webtoon.get('content', {}).get('title')
         print(f"오늘자 데이터 수집 완료: 총 {len(all_content_today)}개 고유 웹툰 확인")
         print(f"  - 연재중: {len(ongoing_today)}개, 휴재: {len(hiatus_today)}개, 완결: {len(finished_today)}개")
-        return ongoing_today, hiatus_today, finished_today, all_content_today
+        if status_counts:
+            print(f"  - 수집된 onGoingStatus 집계: {status_counts}")
+        return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
 
     def synchronize_database(self, conn, all_content_today, ongoing_today, hiatus_today, finished_today):
         """

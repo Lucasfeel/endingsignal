@@ -1,7 +1,12 @@
 import asyncio
 from datetime import datetime, timedelta
+from pathlib import Path
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from crawlers.base_crawler import ContentCrawler
+import run_all_crawlers
 
 
 class FakeCursor:
@@ -11,40 +16,11 @@ class FakeCursor:
 
     def execute(self, query, params=None):
         params = params or []
-        if "SELECT content_id, status FROM contents" in query:
-            source = params[0]
-            self.last_result = [
-                {"content_id": cid, "status": status}
-                for (cid, src), status in self.db.contents.items()
-                if src == source
-            ]
-        elif "SELECT content_id, override_status, override_completed_at" in query:
-            source = params[0]
-            self.last_result = [
-                {
-                    "content_id": cid,
-                    "override_status": row["override_status"],
-                    "override_completed_at": row.get("override_completed_at"),
-                }
-                for (cid, src), row in self.db.overrides.items()
-                if src == source
-            ]
-        elif "override_completed_at <=" in query:
-            now = params[1]
-            self.last_result = [
-                {
-                    "content_id": cid,
-                    "source": src,
-                    "override_completed_at": row.get("override_completed_at"),
-                }
-                for (cid, src), row in self.db.overrides.items()
-                if row.get("override_status") == "완결"
-                and row.get("override_completed_at") is not None
-                and row.get("override_completed_at") <= now
-            ]
-        elif "SELECT 1 FROM contents WHERE content_id" in query:
-            key = (params[0], params[1])
-            self.last_result = [(1,)] if key in self.db.contents else []
+        if "INSERT INTO daily_crawler_reports" in query:
+            self.db.state.daily_reports.append(
+                {"crawler_name": params[0], "status": params[1], "report_data": params[2]}
+            )
+            self.last_result = []
         else:
             raise NotImplementedError(query)
 
@@ -60,10 +36,18 @@ class FakeCursor:
         pass
 
 
-class FakeDB:
+class SharedState:
     def __init__(self, contents, overrides=None):
         self.contents = contents
         self.overrides = overrides or {}
+        self.cdc_events = set()
+        self.daily_reports = []
+        self.last_result = {}
+
+
+class FakeDB:
+    def __init__(self, state):
+        self.state = state
         self.committed = False
         self.rolled_back = False
 
@@ -73,10 +57,24 @@ class FakeDB:
     def rollback(self):
         self.rolled_back = True
 
+    def close(self):
+        pass
+
+
+class FakeConnectionFactory:
+    def __init__(self, state):
+        self.state = state
+        self.created = []
+
+    def __call__(self):
+        conn = FakeDB(self.state)
+        self.created.append(conn)
+        return conn
+
 
 class DummyCrawler(ContentCrawler):
     async def fetch_all_data(self):
-        return set(), set(), set(), {}
+        return {}, {}, {}, {}
 
     def synchronize_database(self, conn, all_content_today, ongoing_today, hiatus_today, finished_today):
         return 0
@@ -86,45 +84,51 @@ def test_scheduled_completion_event_is_recorded(monkeypatch):
     now = datetime(2025, 1, 2, 0, 0, 0)
     completed_at = now - timedelta(days=1)
 
-    db = FakeDB(
+    state = SharedState(
         contents={("CID", "SRC"): "연재중"},
         overrides={
             ("CID", "SRC"): {"override_status": "완결", "override_completed_at": completed_at}
         },
     )
 
-    inserted_events = set()
-
-    monkeypatch.setattr("crawlers.base_crawler.get_cursor", lambda conn: FakeCursor(conn))
+    factory = FakeConnectionFactory(state)
+    monkeypatch.setattr(run_all_crawlers, "create_standalone_connection", factory)
+    monkeypatch.setattr(run_all_crawlers, "get_cursor", lambda conn: FakeCursor(conn))
     monkeypatch.setattr("utils.time.now_kst_naive", lambda: now)
 
-    def fake_record_content_completed_event(conn, *, content_id, source, final_completed_at, resolved_by):
-        key = (content_id, source)
-        if key in inserted_events:
-            return False
-        inserted_events.add(key)
-        return True
+    def fake_record_due_scheduled_completions(conn, cursor, now_kst):
+        inserted = 0
+        for (cid, src), row in conn.state.overrides.items():
+            if (
+                row.get("override_status") == "완결"
+                and row.get("override_completed_at") is not None
+                and row.get("override_completed_at") <= now_kst
+            ):
+                if (cid, src) not in conn.state.cdc_events:
+                    conn.state.cdc_events.add((cid, src))
+                    inserted += 1
+        result = {
+            "scheduled_completion_events_inserted_count": inserted,
+            "cdc_events_inserted_count": inserted,
+        }
+        conn.state.last_result = result
+        return result
 
-    monkeypatch.setattr(
-        "services.cdc_event_service.record_content_completed_event",
-        fake_record_content_completed_event,
-    )
-    monkeypatch.setattr(
-        "crawlers.base_crawler.record_content_completed_event",
-        fake_record_content_completed_event,
-    )
+    monkeypatch.setattr(run_all_crawlers, "record_due_scheduled_completions", fake_record_due_scheduled_completions)
 
-    crawler = DummyCrawler("SRC")
+    run_all_crawlers.run_scheduled_completion_cdc()
 
-    _, newly_completed_items, cdc_info = asyncio.run(crawler.run_daily_check(db))
+    # First two connections are for processing and reporting
+    process_conn, report_conn = factory.created[0], factory.created[1]
+    assert process_conn.committed is True
+    assert process_conn.rolled_back is False
+    assert report_conn.committed is True
+    assert report_conn.rolled_back is False
+    assert state.daily_reports and state.daily_reports[-1]["crawler_name"] == "scheduled completion cdc"
+    assert state.last_result["scheduled_completion_events_inserted_count"] == 1
+    assert state.cdc_events == {("CID", "SRC")}
 
-    assert newly_completed_items == []
-    assert cdc_info["cdc_events_inserted_count"] == 1
-    assert cdc_info["scheduled_completion_events_inserted_count"] == 1
-    assert inserted_events == {("CID", "SRC")}
-
-    # Re-run to confirm idempotency (no duplicate events)
-    _, _, cdc_info_second = asyncio.run(crawler.run_daily_check(db))
-    assert cdc_info_second["cdc_events_inserted_count"] == 0
-    assert cdc_info_second["scheduled_completion_events_inserted_count"] == 0
-    assert inserted_events == {("CID", "SRC")}
+    run_all_crawlers.run_scheduled_completion_cdc()
+    assert state.last_result["scheduled_completion_events_inserted_count"] == 0
+    assert len(state.daily_reports) == 2
+    assert state.cdc_events == {("CID", "SRC")}
