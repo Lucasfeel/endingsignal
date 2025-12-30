@@ -116,8 +116,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                     self._fetch_from_api(session, weekday_url),
                     self._fetch_paginated_completed(session, start_time=start_time, fetch_meta=fetch_meta),
                 ]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                weekday_data, completed_data = results
+                weekday_data, completed_data = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Normalize exceptions
         if isinstance(weekday_data, Exception):
@@ -188,6 +187,7 @@ class KakaowebtoonCrawler(ContentCrawler):
         if status_counts:
             print(f"  - 수집된 onGoingStatus 집계: {status_counts}")
 
+        # Return 5-tuple (base_crawler supports 4/5 tuple)
         return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
 
     def synchronize_database(self, conn, all_content_today, ongoing_today, hiatus_today, finished_today):

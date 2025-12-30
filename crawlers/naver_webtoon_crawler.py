@@ -190,7 +190,14 @@ class NaverWebtoonCrawler(ContentCrawler):
         print(f"오늘자 데이터 수집 완료: 총 {len(all_naver_webtoons_today)}개 고유 웹툰 확인")
         return naver_ongoing_today, naver_hiatus_today, naver_finished_today, all_naver_webtoons_today, fetch_meta
 
-    def synchronize_database(self, conn, all_naver_webtoons_today, naver_ongoing_today, naver_hiatus_today, naver_finished_today):
+    def synchronize_database(
+        self,
+        conn,
+        all_naver_webtoons_today,
+        naver_ongoing_today,
+        naver_hiatus_today,
+        naver_finished_today,
+    ):
         print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...")
         cursor = get_cursor(conn)
         cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
@@ -255,7 +262,68 @@ if __name__ == "__main__":
     print("==========================================")
     print("  CRAWLER SCRIPT STARTED (STANDALONE)")
     print("==========================================")
+
     start_time = time.time()
     report = {"status": "성공"}
     db_conn = None
-    CRAWLER_DISPLAY_NAME = "네이버
+    CRAWLER_DISPLAY_NAME = "네이버 웹툰"
+
+    try:
+        print("LOG: Calling create_standalone_connection()...")
+        db_conn = create_standalone_connection()
+        print("LOG: create_standalone_connection() finished.")
+
+        crawler = NaverWebtoonCrawler()
+        print("LOG: NaverWebtoonCrawler instance created.")
+
+        print("LOG: Calling asyncio.run(crawler.run_daily_check())...")
+        new_contents, newly_completed_items, cdc_info = asyncio.run(crawler.run_daily_check(db_conn))
+        print("LOG: asyncio.run(crawler.run_daily_check()) finished.")
+
+        report.update(
+            {
+                "new_webtoons": new_contents,
+                "newly_completed_items": newly_completed_items,
+                "cdc_info": cdc_info,
+            }
+        )
+
+    except Exception as e:
+        print(f"치명적 오류 발생: {e}")
+        report["status"] = "실패"
+        report["error_message"] = traceback.format_exc()
+
+    finally:
+        if db_conn:
+            print("LOG: Closing database connection.")
+            db_conn.close()
+
+        report["duration"] = time.time() - start_time
+
+        report_conn = None
+        try:
+            report_conn = create_standalone_connection()
+            report_cursor = get_cursor(report_conn)
+            print("LOG: Saving report to 'daily_crawler_reports' table...")
+            report_cursor.execute(
+                """
+                INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
+                VALUES (%s, %s, %s)
+                """,
+                (CRAWLER_DISPLAY_NAME, report["status"], json.dumps(report)),
+            )
+            report_conn.commit()
+            report_cursor.close()
+            print("LOG: Report saved successfully.")
+        except Exception as report_e:
+            print(f"FATAL: [실패] 보고서 DB 저장 실패: {report_e}", file=sys.stderr)
+        finally:
+            if report_conn:
+                report_conn.close()
+
+        print("==========================================")
+        print("  CRAWLER SCRIPT FINISHED")
+        print("==========================================")
+
+        if report["status"] == "실패":
+            sys.exit(1)
