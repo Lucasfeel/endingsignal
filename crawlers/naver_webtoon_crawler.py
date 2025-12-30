@@ -113,27 +113,42 @@ class NaverWebtoonCrawler(ContentCrawler):
                 )
                 ongoing_tasks.append(task)
 
-            finished_base_url = f"{config.NAVER_API_URL}/finished?order=UPDATE"
-            finished_task = self._fetch_paginated_data(
-                session, finished_base_url, 150, "완결/장기 휴재 후보", start_time=start_time
-            )
+            finished_tasks = []
+            finished_orders = []
+            for order in config.NAVER_FINISHED_ORDERS:
+                finished_orders.append(order)
+                finished_base_url = f"{config.NAVER_API_URL}/finished?order={order}"
+                finished_tasks.append(
+                    self._fetch_paginated_data(
+                        session,
+                        finished_base_url,
+                        config.NAVER_FINISHED_MAX_PAGES,
+                        f"완결/장기 휴재 후보(order={order})",
+                        start_time=start_time,
+                    )
+                )
 
-            results = await asyncio.gather(*ongoing_tasks, finished_task, return_exceptions=True)
+            results = await asyncio.gather(*ongoing_tasks, *finished_tasks, return_exceptions=True)
 
-            ongoing_results = results[:-1]
+            ongoing_results = results[: len(ongoing_tasks)]
+            finished_results = results[len(ongoing_tasks) :]
 
             finished_candidates = {}
-            finished_meta = {}
-            if isinstance(results[-1], Exception):
-                print(f"❌ 완결/장기 휴재 데이터 수집 실패: {results[-1]}")
-                fetch_meta["errors"].append(f"finished:{results[-1]}")
-            else:
-                finished_candidates, finished_meta = results[-1]
-                fetch_meta["finished"] = finished_meta
+            fetch_meta["finished"] = {}
+            for idx, result in enumerate(finished_results):
+                order = finished_orders[idx]
+                if isinstance(result, Exception):
+                    print(f"❌ 완결/장기 휴재 데이터 수집 실패(order={order}): {result}")
+                    fetch_meta["errors"].append(f"finished:{order}:{result}")
+                    continue
 
-                # CRITICAL: propagate nested finished errors to top-level
-                for err in finished_meta.get("errors", []):
-                    fetch_meta["errors"].append(f"finished:{err}")
+                order_candidates, order_meta = result
+                fetch_meta["finished"][order] = order_meta
+
+                for err in order_meta.get("errors", []):
+                    fetch_meta["errors"].append(f"finished:{order}:{err}")
+
+                finished_candidates.update(order_candidates)
 
         print("\n--- 데이터 수집 결과 ---")
         naver_ongoing_today, naver_hiatus_today, naver_finished_today = {}, {}, {}

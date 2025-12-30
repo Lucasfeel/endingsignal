@@ -28,6 +28,15 @@ WEEKDAYS = {
     'dailyPlus': 'daily'
 }
 
+# --- Naver Webtoon Crawl Controls ---
+NAVER_FINISHED_MAX_PAGES = int(os.getenv("NAVER_FINISHED_MAX_PAGES", 400))
+NAVER_FINISHED_ORDERS = [order.strip() for order in os.getenv("NAVER_FINISHED_ORDERS", "UPDATE,VIEW,STAR").split(",") if order.strip()]
+
+# --- Kakao Webtoon Discovery Controls ---
+KAKAO_DISCOVERY_MAX_BUNDLES = int(os.getenv("KAKAO_DISCOVERY_MAX_BUNDLES", 3))
+KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG = int(os.getenv("KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG", 10))
+KAKAO_DISCOVERY_SOFT_CAP = int(os.getenv("KAKAO_DISCOVERY_SOFT_CAP", 12000))
+
 # --- Email ---
 # 🚨 [신규] 어떤 이메일 서비스를 사용할지 결정 (smtp 또는 sendgrid)
 EMAIL_PROVIDER = os.getenv('EMAIL_PROVIDER', 'smtp').lower()
