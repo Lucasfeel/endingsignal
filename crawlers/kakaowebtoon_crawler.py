@@ -7,6 +7,7 @@ import os
 import urllib.parse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+import config
 from .base_crawler import ContentCrawler
 from database import get_cursor
 
@@ -84,7 +85,14 @@ class KakaowebtoonCrawler(ContentCrawler):
         카카오웹툰의 '요일별'과 '완결' API에서 모든 웹툰 데이터를 비동기적으로 가져옵니다.
         """
         print("카카오웹툰 서버에서 최신 데이터를 가져옵니다...")
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(
+            total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
+            connect=config.CRAWLER_HTTP_CONNECT_TIMEOUT_SECONDS,
+            sock_read=config.CRAWLER_HTTP_SOCK_READ_TIMEOUT_SECONDS,
+        )
+        connector = aiohttp.TCPConnector(limit=config.CRAWLER_HTTP_CONCURRENCY_LIMIT, ttl_dns_cache=300)
+
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
             weekday_url = f"{API_BASE_URL}/general-weekdays"
 
             tasks = [
@@ -105,6 +113,7 @@ class KakaowebtoonCrawler(ContentCrawler):
 
         print("\n--- 데이터 정규화 시작 ---")
         ongoing_today, hiatus_today, finished_today = {}, {}, {}
+        status_counts = {}
 
         # 요일 한글 -> 영문 변환 맵
         DAY_MAP = {"월": "mon", "화": "tue", "수": "wed", "목": "thu", "금": "fri", "토": "sat", "일": "sun"}
@@ -126,6 +135,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                             webtoon['title'] = content_payload.get('title')
 
                         status_text = webtoon.get('content', {}).get('onGoingStatus') # 'onGoingStatus' 사용
+                        status_counts[status_text] = status_counts.get(status_text, 0) + 1
                         if status_text == 'PAUSE': # 휴재 상태 키 확인
                             if content_id not in hiatus_today:
                                 hiatus_today[content_id] = webtoon
@@ -149,6 +159,8 @@ class KakaowebtoonCrawler(ContentCrawler):
                 webtoon['title'] = webtoon.get('content', {}).get('title')
         print(f"오늘자 데이터 수집 완료: 총 {len(all_content_today)}개 고유 웹툰 확인")
         print(f"  - 연재중: {len(ongoing_today)}개, 휴재: {len(hiatus_today)}개, 완결: {len(finished_today)}개")
+        if status_counts:
+            print(f"  - 수집된 onGoingStatus 집계: {status_counts}")
         return ongoing_today, hiatus_today, finished_today, all_content_today
 
     def synchronize_database(self, conn, all_content_today, ongoing_today, hiatus_today, finished_today):

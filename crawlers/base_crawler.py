@@ -2,12 +2,9 @@
 from abc import ABC, abstractmethod
 
 from database import get_cursor
-from services.cdc_event_service import (
-    record_content_completed_event,
-    record_due_scheduled_completions,
-)
+from services.cdc_event_service import record_content_completed_event
 from services.final_state_resolver import resolve_final_state
-from utils.time import now_kst_naive
+import config
 
 
 class ContentCrawler(ABC):
@@ -52,11 +49,9 @@ class ContentCrawler(ABC):
         try:
             cursor = get_cursor(conn)
 
-            now = now_kst_naive()
-
             # 1) Load previous crawler status snapshot (raw)
             cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
-            db_status_map = {row["content_id"]: row["status"] for row in cursor.fetchall()}
+            db_status_map = {str(row["content_id"]): row["status"] for row in cursor.fetchall()}
 
             # 2) Load overrides (overlay)
             cursor.execute(
@@ -64,7 +59,7 @@ class ContentCrawler(ABC):
                 "FROM admin_content_overrides WHERE source = %s",
                 (self.source_name,),
             )
-            override_map = {row["content_id"]: row for row in cursor.fetchall()}
+            override_map = {str(row["content_id"]): row for row in cursor.fetchall()}
 
             # 3) Resolve previous final states
             db_state_before_sync = {}
@@ -74,17 +69,34 @@ class ContentCrawler(ABC):
                 )
 
             # 4) Fetch today's data
-            ongoing_today, hiatus_today, finished_today, all_content_today = await self.fetch_all_data()
+            fetch_result = await self.fetch_all_data()
+            if len(fetch_result) == 5:
+                ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta = fetch_result
+            else:
+                ongoing_today, hiatus_today, finished_today, all_content_today = fetch_result
+                fetch_meta = {}
+
+            if not isinstance(fetch_meta, dict):
+                fetch_meta = {"raw_meta": fetch_meta}
+
+            def _normalize_key_map(map_data):
+                return {str(k): v for k, v in map_data.items()}
+
+            ongoing_today = _normalize_key_map(ongoing_today)
+            hiatus_today = _normalize_key_map(hiatus_today)
+            finished_today = _normalize_key_map(finished_today)
+            all_content_today = _normalize_key_map(all_content_today)
 
             # 5) Build current raw status map (from today's fetch)
             current_status_map = {}
             for content_id in all_content_today.keys():
-                if content_id in finished_today:
-                    current_status_map[content_id] = "완결"
-                elif content_id in hiatus_today:
-                    current_status_map[content_id] = "휴재"
-                elif content_id in ongoing_today:
-                    current_status_map[content_id] = "연재중"
+                cid = str(content_id)
+                if cid in finished_today:
+                    current_status_map[cid] = "완결"
+                elif cid in hiatus_today:
+                    current_status_map[cid] = "휴재"
+                elif cid in ongoing_today:
+                    current_status_map[cid] = "연재중"
 
             # Fill missing ids with previous known final status (stability for partial fetch)
             for content_id, previous_state in db_state_before_sync.items():
@@ -101,6 +113,7 @@ class ContentCrawler(ABC):
             newly_completed_items = []
             cdc_events_inserted_count = 0
             cdc_events_inserted_items = []
+            pending_cdc_records = []
 
             for content_id, current_final_state in current_final_state_map.items():
                 previous_final_state = db_state_before_sync.get(content_id, {"final_status": None})
@@ -122,20 +135,50 @@ class ContentCrawler(ABC):
                         )
                     )
 
+                    pending_cdc_records.append(
+                        (content_id, final_completed_at, current_final_state.get("resolved_by"))
+                    )
+
+            resolved_by_counts = {}
+            for _, _, _, resolved_by in newly_completed_items:
+                resolved_by_counts[resolved_by] = resolved_by_counts.get(resolved_by, 0) + 1
+
+            db_count = len(db_status_map)
+            fetched_count = len(all_content_today)
+            ratio = fetched_count / max(db_count, 1)
+            health_info = {
+                "db_count": db_count,
+                "fetched_count": fetched_count,
+                "fetch_ratio": ratio,
+                "min_ratio_threshold": config.CRAWLER_FETCH_HEALTH_MIN_RATIO,
+            }
+            is_degraded_fetch = False
+            skip_reason = None
+            fetch_errors = fetch_meta.get("errors") if isinstance(fetch_meta, dict) else None
+            if fetch_errors is not None:
+                health_info["fetch_errors"] = fetch_errors
+            if fetch_errors:
+                is_degraded_fetch = True
+                skip_reason = "fetch_errors"
+            if ratio < config.CRAWLER_FETCH_HEALTH_MIN_RATIO:
+                is_degraded_fetch = True
+                skip_reason = skip_reason or "fetch_ratio_below_threshold"
+
+            fetch_meta["is_degraded_fetch"] = is_degraded_fetch
+            fetch_meta["fetch_health"] = health_info
+
+            if not is_degraded_fetch:
+                for content_id, final_completed_at, resolved_by in pending_cdc_records:
                     inserted = record_content_completed_event(
                         conn,
                         content_id=content_id,
                         source=self.source_name,
                         final_completed_at=final_completed_at,
-                        resolved_by=current_final_state.get("resolved_by"),
+                        resolved_by=resolved_by,
                     )
                     if inserted:
                         cdc_events_inserted_count += 1
                         cdc_events_inserted_items.append(content_id)
-
-            resolved_by_counts = {}
-            for _, _, _, resolved_by in newly_completed_items:
-                resolved_by_counts[resolved_by] = resolved_by_counts.get(resolved_by, 0) + 1
 
             cdc_info = {
                 "cdc_mode": "final_state",
@@ -143,14 +186,11 @@ class ContentCrawler(ABC):
                 "resolved_by_counts": resolved_by_counts,
                 "cdc_events_inserted_count": cdc_events_inserted_count,
                 "cdc_events_inserted_items": cdc_events_inserted_items,
+                "cdc_skipped": is_degraded_fetch,
+                "skip_reason": skip_reason,
+                "health": health_info,
+                "fetch_meta": fetch_meta,
             }
-
-            scheduled_completion_cdc = record_due_scheduled_completions(conn, cursor, now)
-            cdc_info["scheduled_completion_due_count"] = scheduled_completion_cdc["due_count"]
-            cdc_info["scheduled_completion_events_inserted_count"] = scheduled_completion_cdc[
-                "inserted_count"
-            ]
-            cdc_info["cdc_events_inserted_count"] += scheduled_completion_cdc["inserted_count"]
 
             # 8) DB sync (commit is enforced here, not in crawler implementations)
             added = self.synchronize_database(conn, all_content_today, ongoing_today, hiatus_today, finished_today)
