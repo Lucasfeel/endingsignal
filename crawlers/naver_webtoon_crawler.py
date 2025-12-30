@@ -65,7 +65,9 @@ class NaverWebtoonCrawler(ContentCrawler):
                         new_ids_in_page += 1
 
                 meta["pages_fetched"] += 1
-                print(f"  -> {page} 페이지 수집 완료. (현재 후보군: {len(all_candidates)}개, 신규: {new_ids_in_page}개)")
+                print(
+                    f"  -> {page} 페이지 수집 완료. (현재 후보군: {len(all_candidates)}개, 신규: {new_ids_in_page}개)"
+                )
 
                 if new_ids_in_page == 0:
                     meta["stopped_reason"] = "no_new_ids"
@@ -106,11 +108,15 @@ class NaverWebtoonCrawler(ContentCrawler):
             ongoing_tasks = []
             for api_day in WEEKDAYS.keys():
                 base_url = f"{config.NAVER_API_URL}/weekday?week={api_day}"
-                task = self._fetch_paginated_data(session, base_url, 50, f"'{api_day}'요일 웹툰", start_time=start_time)
+                task = self._fetch_paginated_data(
+                    session, base_url, 50, f"'{api_day}'요일 웹툰", start_time=start_time
+                )
                 ongoing_tasks.append(task)
 
             finished_base_url = f"{config.NAVER_API_URL}/finished?order=UPDATE"
-            finished_task = self._fetch_paginated_data(session, finished_base_url, 150, "완결/장기 휴재 후보", start_time=start_time)
+            finished_task = self._fetch_paginated_data(
+                session, finished_base_url, 150, "완결/장기 휴재 후보", start_time=start_time
+            )
 
             results = await asyncio.gather(*ongoing_tasks, finished_task, return_exceptions=True)
 

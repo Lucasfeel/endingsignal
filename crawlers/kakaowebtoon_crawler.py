@@ -24,6 +24,15 @@ HEADERS = {
 class KakaowebtoonCrawler(ContentCrawler):
     """webtoon.kakao.com에서 웹툰 정보를 수집하는 크롤러입니다."""
 
+    # (run_all_crawlers.py에서 인스턴스 생성 전에 스킵 판단용)
+    DISPLAY_NAME = "Kakao Webtoon"
+    REQUIRED_ENV_VARS = ["KAKAOWEBTOON_WEBID", "KAKAOWEBTOON_T_ANO"]
+
+    @classmethod
+    def get_missing_env_vars(cls):
+        required = getattr(cls, "REQUIRED_ENV_VARS", [])
+        return [key for key in required if not os.getenv(key)]
+
     def __init__(self):
         super().__init__("kakaowebtoon")
         self.cookies = self._get_cookies_from_env()
@@ -198,72 +207,4 @@ class KakaowebtoonCrawler(ContentCrawler):
         db_existing_ids = {row["content_id"] for row in cursor.fetchall()}
         updates, inserts = [], []
 
-        for content_id, webtoon_data in all_content_today.items():
-            status = ""
-            if content_id in finished_today:
-                status = "완결"
-            elif content_id in hiatus_today:
-                status = "휴재"
-            elif content_id in ongoing_today:
-                status = "연재중"
-            else:
-                continue
-
-            content_data = webtoon_data.get("content", {})
-            author_names = [author.get("name") for author in content_data.get("authors", []) if author.get("name")]
-
-            title = content_data.get("title")
-            if not title:
-                continue
-
-            encoded_title = urllib.parse.quote(title, safe="")
-
-            # 우선순위: lookThroughImage (단일) -> featuredCharacterImageA (캐릭터) -> lookThroughImages[0] (슬라이스)
-            thumbnail_url = content_data.get("lookThroughImage")
-            if not thumbnail_url and content_data.get("featuredCharacterImageA"):
-                thumbnail_url = content_data.get("featuredCharacterImageA")
-            if not thumbnail_url and content_data.get("lookThroughImages"):
-                thumbnail_url = content_data["lookThroughImages"][0]
-
-            meta_data = {
-                "common": {
-                    "authors": author_names,
-                    "thumbnail_url": thumbnail_url,
-                    "content_url": f"https://webtoon.kakao.com/content/{encoded_title}/{content_id}",
-                },
-                "attributes": {
-                    "weekdays": webtoon_data.get("weekdayDisplayGroups", []),
-                    "lookThroughImage": content_data.get("lookThroughImage"),
-                    "backgroundImage": content_data.get("backgroundImage"),
-                    "featuredCharacterImageA": content_data.get("featuredCharacterImageA"),
-                    "featuredCharacterImageB": content_data.get("featuredCharacterImageB"),
-                    "titleImageA": content_data.get("titleImageA"),
-                    "titleImageB": content_data.get("titleImageB"),
-                    "lookThroughImages": content_data.get("lookThroughImages"),
-                },
-            }
-
-            if content_id in db_existing_ids:
-                record = ("webtoon", title, status, json.dumps(meta_data), content_id, self.source_name)
-                updates.append(record)
-            else:
-                record = (content_id, self.source_name, "webtoon", title, status, json.dumps(meta_data))
-                inserts.append(record)
-
-        if updates:
-            cursor.executemany(
-                "UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
-                updates,
-            )
-            print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
-
-        if inserts:
-            cursor.executemany(
-                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (content_id, source) DO NOTHING",
-                inserts,
-            )
-            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
-
-        cursor.close()
-        print("DB 동기화 완료.")
-        return len(inserts)
+        for content_id, webtoon_data in all_content_today.

@@ -1,5 +1,6 @@
 # run_all_crawlers.py
 import asyncio
+import os
 import time
 import traceback
 import json
@@ -28,28 +29,42 @@ async def run_one_crawler(crawler_class):
     crawler_start_time = time.time()
 
     db_conn = None
-    crawler_display_name = crawler_class.__name__
+    crawler_display_name = getattr(crawler_class, "DISPLAY_NAME", crawler_class.__name__)
+    required_env_vars = getattr(crawler_class, "REQUIRED_ENV_VARS", [])
+    missing_env_vars = [key for key in required_env_vars if not os.getenv(key)]
+
     try:
-        crawler_instance = crawler_class()
-        crawler_display_name = getattr(crawler_instance, 'source_name', crawler_class.__name__)
-        crawler_display_name = crawler_display_name.replace('_', ' ').title()
+        if missing_env_vars:
+            crawler_display_name = crawler_display_name.replace('_', ' ').title()
+            print(f"WARNING: [{crawler_display_name}] skipped (missing env vars): {missing_env_vars}")
+            report.update({
+                'status': '스킵',
+                'skip_reason': 'missing_required_env_vars',
+                'missing_env_vars': missing_env_vars,
+                'note': 'Set KAKAOWEBTOON_WEBID / KAKAOWEBTOON_T_ANO in Render env to enable this crawler.'
+            })
+        else:
+            try:
+                crawler_instance = crawler_class()
+                crawler_display_name = getattr(crawler_instance, 'source_name', crawler_class.__name__)
+                crawler_display_name = crawler_display_name.replace('_', ' ').title()
 
-        print(f"\n--- [{crawler_display_name}] 크롤러 작업 시작 ---")
+                print(f"\n--- [{crawler_display_name}] 크롤러 작업 시작 ---")
 
-        db_conn = create_standalone_connection()
-        new_contents, newly_completed_items, cdc_info = await crawler_instance.run_daily_check(db_conn)
+                db_conn = create_standalone_connection()
+                new_contents, newly_completed_items, cdc_info = await crawler_instance.run_daily_check(db_conn)
 
-        report.update({
-            'new_contents': new_contents,
-            'newly_completed_items': newly_completed_items,
-            'cdc_info': cdc_info,
-        })
+                report.update({
+                    'new_contents': new_contents,
+                    'newly_completed_items': newly_completed_items,
+                    'cdc_info': cdc_info,
+                })
 
-    except Exception as e:
-        crawler_display_name = crawler_display_name.replace('_', ' ').title()
-        print(f"FATAL: [{crawler_display_name}] 크롤러 실행 중 치명적 오류 발생: {e}", file=sys.stderr)
-        report['status'] = '실패'
-        report['error_message'] = traceback.format_exc()
+            except Exception as e:
+                crawler_display_name = crawler_display_name.replace('_', ' ').title()
+                print(f"FATAL: [{crawler_display_name}] 크롤러 실행 중 치명적 오류 발생: {e}", file=sys.stderr)
+                report['status'] = '실패'
+                report['error_message'] = traceback.format_exc()
 
     finally:
         report['duration'] = time.time() - crawler_start_time
