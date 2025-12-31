@@ -34,8 +34,11 @@ NAVER_FINISHED_ORDERS = [order.strip() for order in os.getenv("NAVER_FINISHED_OR
 
 # --- Kakao Webtoon Discovery Controls ---
 KAKAO_DISCOVERY_MAX_BUNDLES = int(os.getenv("KAKAO_DISCOVERY_MAX_BUNDLES", 3))
-KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG = int(os.getenv("KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG", 10))
-KAKAO_DISCOVERY_SOFT_CAP = int(os.getenv("KAKAO_DISCOVERY_SOFT_CAP", 12000))
+KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG = int(os.getenv("KAKAO_DISCOVERY_MAX_PAGES_PER_SLUG", 200))
+KAKAO_DISCOVERY_SOFT_CAP = int(os.getenv("KAKAO_DISCOVERY_SOFT_CAP", 20000))
+KAKAO_DISCOVERY_EXCLUDE_SLUG_REGEX = os.getenv(
+    "KAKAO_DISCOVERY_EXCLUDE_SLUG_REGEX", "best-challenge|bestchallenge"
+)
 
 # --- Email ---
 # 🚨 [신규] 어떤 이메일 서비스를 사용할지 결정 (smtp 또는 sendgrid)

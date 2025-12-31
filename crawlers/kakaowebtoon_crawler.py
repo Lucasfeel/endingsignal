@@ -58,7 +58,6 @@ class KakaowebtoonCrawler(ContentCrawler):
                 headers=HEADERS,
                 allow_redirects=True,
             ) as resp:
-                # consume body to complete request and allow cookie jar update
                 await resp.text()
 
             cookies = session.cookie_jar.filter_cookies("https://webtoon.kakao.com/")
@@ -129,7 +128,6 @@ class KakaowebtoonCrawler(ContentCrawler):
 
                 offset += len(cards)
 
-                # Stop if last page or no progress
                 if len(cards) < limit or new_cards == 0:
                     break
 
@@ -151,7 +149,6 @@ class KakaowebtoonCrawler(ContentCrawler):
         slugs = set()
         meta = fetch_meta if fetch_meta is not None else {}
 
-        # Safe config defaults
         max_bundles = int(
             getattr(
                 config,
@@ -159,6 +156,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                 getattr(config, "KAKAOWEBTOON_MAX_JS_BUNDLES", 10),
             )
         )
+        exclude_regex = getattr(config, "KAKAO_DISCOVERY_EXCLUDE_SLUG_REGEX", "") or None
 
         try:
             if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
@@ -168,22 +166,19 @@ class KakaowebtoonCrawler(ContentCrawler):
             async with session.get("https://webtoon.kakao.com/", headers=HEADERS, allow_redirects=True) as resp:
                 html = await resp.text()
 
-            # script src 추출 (상대/절대 모두)
             script_srcs = re.findall(r'<script[^>]+src="([^"]+)"', html)
             bundle_urls = []
             for src in script_srcs:
                 if not src:
                     continue
-                # normalize to absolute
                 abs_url = urllib.parse.urljoin("https://webtoon.kakao.com/", src)
                 if abs_url.endswith(".js"):
                     bundle_urls.append(abs_url)
 
-            # fallback: 기존 방식(절대 js 링크)
             if not bundle_urls:
                 bundle_urls = list({url for url in re.findall(r"https://[^'\"]+\.js", html)})
 
-            bundle_urls = list(dict.fromkeys(bundle_urls))  # preserve order, dedupe
+            bundle_urls = list(dict.fromkeys(bundle_urls))
 
             for bundle_url in bundle_urls[:max_bundles]:
                 if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
@@ -195,8 +190,11 @@ class KakaowebtoonCrawler(ContentCrawler):
                         bundle_text = await resp.text()
 
                     for slug in re.findall(r"/section/v1/pages/([A-Za-z0-9_-]+)", bundle_text):
-                        if slug:
-                            slugs.add(slug)
+                        if not slug:
+                            continue
+                        if exclude_regex and re.search(exclude_regex, slug):
+                            continue
+                        slugs.add(slug)
 
                 except Exception as e:
                     meta.setdefault("errors", []).append(f"discover:bundle_fetch_failed:{e}")
@@ -277,6 +275,58 @@ class KakaowebtoonCrawler(ContentCrawler):
 
         return collected
 
+    def _merge_weekday(self, card, weekday_eng):
+        if weekday_eng:
+            groups = card.get("weekdayDisplayGroups")
+            if not isinstance(groups, list):
+                card["weekdayDisplayGroups"] = []
+            if weekday_eng not in card["weekdayDisplayGroups"]:
+                card["weekdayDisplayGroups"].append(weekday_eng)
+
+    def _determine_status(self, card, *, from_completed=False):
+        content_payload = card.get("content", {}) or {}
+        status_text = content_payload.get("onGoingStatus") or card.get("onGoingStatus")
+
+        if from_completed or status_text == "COMPLETED":
+            return "완결"
+        if status_text == "PAUSE":
+            return "휴재"
+        return "연재중"
+
+    def _normalize_authors(self, card):
+        content_payload = card.get("content", {}) or {}
+        authors_field = content_payload.get("authors") or card.get("authors")
+        authors = []
+
+        if isinstance(authors_field, list):
+            for author in authors_field:
+                if isinstance(author, dict):
+                    name = author.get("name") or author.get("displayName")
+                    if name:
+                        authors.append(name)
+                elif isinstance(author, str) and author.strip():
+                    authors.append(author.strip())
+        elif isinstance(authors_field, str) and authors_field.strip():
+            authors.append(authors_field.strip())
+
+        display_authors = content_payload.get("displayAuthors")
+        if isinstance(display_authors, list):
+            for name in display_authors:
+                if isinstance(name, str) and name.strip():
+                    authors.append(name.strip())
+
+        return authors
+
+    def _select_thumbnail_url(self, card):
+        content_payload = card.get("content", {}) or {}
+        thumb = (
+            content_payload.get("squareThumbnailUrl")
+            or content_payload.get("thumbnailUrl")
+            or card.get("squareThumbnailUrl")
+            or card.get("thumbnailUrl")
+        )
+        return thumb
+
     async def fetch_all_data(self):
         """카카오웹툰의 '요일별'과 '완결' API에서 모든 웹툰 데이터를 비동기적으로 가져옵니다."""
         print("카카오웹툰 서버에서 최신 데이터를 가져옵니다...")
@@ -314,7 +364,6 @@ class KakaowebtoonCrawler(ContentCrawler):
                     session, start_time=start_time, fetch_meta=fetch_meta
                 )
 
-                # Build initial seen_ids from baseline surfaces
                 seen_ids = set()
                 if isinstance(completed_data, list):
                     for card in completed_data:
@@ -349,7 +398,6 @@ class KakaowebtoonCrawler(ContentCrawler):
             except Exception as e:
                 fetch_meta.setdefault("errors", []).append(f"discover:failed:{e}")
 
-        # Normalize exceptions
         if isinstance(weekday_data, Exception):
             print(f"❌ 요일별 데이터 수집 실패: {weekday_data}")
             fetch_meta["errors"].append(f"weekday:{weekday_data}")
@@ -362,38 +410,204 @@ class KakaowebtoonCrawler(ContentCrawler):
 
         print("\n--- 데이터 정규화 시작 ---")
         ongoing_today, hiatus_today, finished_today = {}, {}, {}
-        status_counts = {}
+        all_content_today = {}
 
         day_map = {"월": "mon", "화": "tue", "수": "wed", "목": "thu", "금": "fri", "토": "sat", "일": "sun"}
 
-        # Weekday sections
         if weekday_data.get("data", {}).get("sections"):
             for section in weekday_data["data"]["sections"]:
                 weekday_kor = section.get("title", "").replace("요일", "")
                 weekday_eng = day_map.get(weekday_kor)
-                if not weekday_eng:
-                    continue
-
                 for webtoon in self._iter_cards_from_sections([section]):
                     content_id = str(webtoon.get("id") or "").strip()
                     if not content_id:
                         continue
 
-                    # ensure weekdays are accumulated
-                    groups = webtoon.get("weekdayDisplayGroups")
-                    if not isinstance(groups, list):
-                        webtoon["weekdayDisplayGroups"] = []
-                    if weekday_eng not in webtoon["weekdayDisplayGroups"]:
-                        webtoon["weekdayDisplayGroups"].append(weekday_eng)
+                    self._merge_weekday(webtoon, weekday_eng)
 
-                    content_payload = webtoon.get("content", {}) or {}
                     if "title" not in webtoon:
+                        content_payload = webtoon.get("content", {}) or {}
                         webtoon["title"] = content_payload.get("title")
 
-                    status_text = content_payload.get("onGoingStatus")
-                    status_counts[status_text] = status_counts.get(status_text, 0) + 1
+                    status = self._determine_status(webtoon)
+                    all_content_today.setdefault(content_id, webtoon)
 
-                    if status_text == "PAUSE":
-                        hiatus_today.setdefault(content_id, webtoon)
+                    if status == "휴재":
+                        hiatus_today[content_id] = all_content_today[content_id]
                     else:
-                        ongoing_today.setdefau_
+                        ongoing_today[content_id] = all_content_today[content_id]
+
+        for webtoon in completed_data or []:
+            content_id = str(webtoon.get("id") or "").strip()
+            if not content_id:
+                continue
+
+            all_content_today.setdefault(content_id, webtoon)
+            finished_today[content_id] = all_content_today[content_id]
+
+        for webtoon in discovered_cards:
+            content_id = str(webtoon.get("id") or "").strip()
+            if not content_id:
+                continue
+
+            status = self._determine_status(webtoon)
+            all_content_today.setdefault(content_id, webtoon)
+
+            if status == "완결":
+                finished_today[content_id] = all_content_today[content_id]
+            elif status == "휴재":
+                hiatus_today[content_id] = all_content_today[content_id]
+            else:
+                ongoing_today[content_id] = all_content_today[content_id]
+
+        print("데이터 정규화 완료.")
+        return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
+
+    def synchronize_database(
+        self,
+        conn,
+        all_content_today,
+        ongoing_today,
+        hiatus_today,
+        finished_today,
+    ):
+        print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...")
+        cursor = get_cursor(conn)
+        cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
+        db_existing_ids = {row["content_id"] for row in cursor.fetchall()}
+        updates, inserts = [], []
+
+        for content_id, webtoon_data in all_content_today.items():
+            status = ""
+            if content_id in finished_today:
+                status = "완결"
+            elif content_id in hiatus_today:
+                status = "휴재"
+            elif content_id in ongoing_today:
+                status = "연재중"
+            else:
+                continue
+
+            content_payload = webtoon_data.get("content", {}) or {}
+            title = webtoon_data.get("title") or content_payload.get("title")
+            if not title:
+                continue
+
+            authors = self._normalize_authors(webtoon_data)
+            thumbnail_url = self._select_thumbnail_url(webtoon_data)
+            content_url = f"https://webtoon.kakao.com/content/{urllib.parse.quote(str(content_id))}"
+
+            meta_data = {
+                "common": {
+                    "authors": authors,
+                    "thumbnail_url": thumbnail_url,
+                    "content_url": content_url,
+                },
+                "attributes": {
+                    "weekdays": webtoon_data.get("weekdayDisplayGroups", []),
+                },
+            }
+
+            if content_id in db_existing_ids:
+                record = ("webtoon", title, status, json.dumps(meta_data), content_id, self.source_name)
+                updates.append(record)
+            else:
+                record = (content_id, self.source_name, "webtoon", title, status, json.dumps(meta_data))
+                inserts.append(record)
+
+        if updates:
+            cursor.executemany(
+                "UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
+                updates,
+            )
+            print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
+
+        if inserts:
+            cursor.executemany(
+                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (content_id, source) DO NOTHING",
+                inserts,
+            )
+            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
+
+        cursor.close()
+        print("DB 동기화 완료.")
+        return len(inserts)
+
+
+if __name__ == "__main__":
+    import traceback
+    import sys
+    from dotenv import load_dotenv
+    from database import create_standalone_connection
+
+    load_dotenv()
+
+    print("==========================================")
+    print("  CRAWLER SCRIPT STARTED (STANDALONE)")
+    print("==========================================")
+
+    start_time = time.time()
+    report = {"status": "성공"}
+    db_conn = None
+    CRAWLER_DISPLAY_NAME = "카카오 웹툰"
+
+    try:
+        print("LOG: Calling create_standalone_connection()...")
+        db_conn = create_standalone_connection()
+        print("LOG: create_standalone_connection() finished.")
+
+        crawler = KakaowebtoonCrawler()
+        print("LOG: KakaowebtoonCrawler instance created.")
+
+        print("LOG: Calling asyncio.run(crawler.run_daily_check())...")
+        new_contents, newly_completed_items, cdc_info = asyncio.run(crawler.run_daily_check(db_conn))
+        print("LOG: asyncio.run(crawler.run_daily_check()) finished.")
+
+        report.update(
+            {
+                "new_webtoons": new_contents,
+                "newly_completed_items": newly_completed_items,
+                "cdc_info": cdc_info,
+            }
+        )
+
+    except Exception as e:
+        print(f"치명적 오류 발생: {e}")
+        report["status"] = "실패"
+        report["error_message"] = traceback.format_exc()
+
+    finally:
+        if db_conn:
+            print("LOG: Closing database connection.")
+            db_conn.close()
+
+        report["duration"] = time.time() - start_time
+
+        report_conn = None
+        try:
+            report_conn = create_standalone_connection()
+            report_cursor = get_cursor(report_conn)
+            print("LOG: Saving report to 'daily_crawler_reports' table...")
+            report_cursor.execute(
+                """
+                INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
+                VALUES (%s, %s, %s)
+                """,
+                (CRAWLER_DISPLAY_NAME, report["status"], json.dumps(report)),
+            )
+            report_conn.commit()
+            report_cursor.close()
+            print("LOG: Report saved successfully.")
+        except Exception as report_e:
+            print(f"FATAL: [실패] 보고서 DB 저장 실패: {report_e}", file=sys.stderr)
+        finally:
+            if report_conn:
+                report_conn.close()
+
+        print("==========================================")
+        print("  CRAWLER SCRIPT FINISHED")
+        print("==========================================")
+
+        if report["status"] == "실패":
+            sys.exit(1)
