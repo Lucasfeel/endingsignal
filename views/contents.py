@@ -2,8 +2,9 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from database import get_db, get_cursor
-import math
+import base64
 import json
+import math
 
 contents_bp = Blueprint('contents', __name__)
 
@@ -63,6 +64,29 @@ def coerce_row_dict(row):
         return dict(row)
     except Exception:
         return {}
+
+
+def encode_cursor(title, content_id):
+    try:
+        payload = {"t": title or '', "id": content_id or ''}
+        raw = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        return base64.urlsafe_b64encode(raw).decode('utf-8').rstrip('=')
+    except Exception:
+        return None
+
+
+def decode_cursor(cursor):
+    if not cursor:
+        return None, None
+    try:
+        padded = cursor + '=' * (-len(cursor) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8')
+        payload = json.loads(decoded)
+        if not isinstance(payload, dict):
+            return None, None
+        return payload.get('t'), payload.get('id')
+    except Exception:
+        return None, None
 
 
 @contents_bp.route('/api/contents/search', methods=['GET'])
@@ -237,10 +261,19 @@ def get_hiatus_contents():
     """[페이지네이션] 휴재중인 콘텐츠 전체 목록을 페이지별로 반환합니다."""
     cursor = None
     try:
+        raw_cursor = request.args.get('cursor')
         last_title = request.args.get('last_title')
-        per_page = 100
         content_type = request.args.get('type', 'webtoon')
         source = request.args.get('source', 'all')
+
+        try:
+            per_page = int(request.args.get('per_page', 300))
+        except (TypeError, ValueError):
+            per_page = 300
+
+        per_page = max(1, min(per_page, 500))
+
+        cursor_title, cursor_content_id = decode_cursor(raw_cursor)
 
         conn = get_db()
         cursor = get_cursor(conn)
@@ -252,7 +285,10 @@ def get_hiatus_contents():
             where_clause += " AND source = %s"
             query_params.append(source)
 
-        if last_title:
+        if cursor_title is not None and cursor_content_id is not None:
+            where_clause += " AND (title, content_id) > (%s, %s)"
+            query_params.extend([cursor_title, cursor_content_id])
+        elif last_title:
             where_clause += " AND title > %s"
             query_params.append(last_title)
 
@@ -261,7 +297,7 @@ def get_hiatus_contents():
             SELECT content_id, title, status, meta, source
             FROM contents
             {where_clause}
-            ORDER BY title ASC
+            ORDER BY title ASC, content_id ASC
             LIMIT %s
             """,
             (*query_params, per_page),
@@ -275,11 +311,32 @@ def get_hiatus_contents():
             coerced['meta'] = normalize_meta(coerced.get('meta'))
             results.append(coerced)
 
+        last_row = results[-1] if results else None
         next_cursor = None
-        if len(results) == per_page:
-            next_cursor = results[-1].get('title')
+        if len(results) == per_page and last_row:
+            next_cursor = encode_cursor(last_row.get('title'), last_row.get('content_id'))
 
-        return jsonify({'contents': results, 'next_cursor': next_cursor})
+        response_payload = {
+            'contents': results,
+            'next_cursor': next_cursor,
+            'last_title': last_row.get('title') if last_row else None,
+            'last_content_id': last_row.get('content_id') if last_row else None,
+            'page_size': per_page,
+            'returned': len(results),
+        }
+
+        current_app.logger.info(
+            "[contents.hiatus] type=%s source=%s per_page=%s cursor=%s last_title=%s returned=%s next_cursor=%s",
+            content_type,
+            source,
+            per_page,
+            bool(raw_cursor),
+            bool(last_title),
+            len(results),
+            bool(next_cursor),
+        )
+
+        return jsonify(response_payload)
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_hiatus_contents")
@@ -300,10 +357,19 @@ def get_completed_contents():
     """[페이지네이션] 완결된 콘텐츠 전체 목록을 페이지별로 반환합니다."""
     cursor = None
     try:
+        raw_cursor = request.args.get('cursor')
         last_title = request.args.get('last_title')
-        per_page = 100
         content_type = request.args.get('type', 'webtoon')
         source = request.args.get('source', 'all')
+
+        try:
+            per_page = int(request.args.get('per_page', 300))
+        except (TypeError, ValueError):
+            per_page = 300
+
+        per_page = max(1, min(per_page, 500))
+
+        cursor_title, cursor_content_id = decode_cursor(raw_cursor)
 
         conn = get_db()
         cursor = get_cursor(conn)
@@ -315,7 +381,10 @@ def get_completed_contents():
             where_clause += " AND source = %s"
             query_params.append(source)
 
-        if last_title:
+        if cursor_title is not None and cursor_content_id is not None:
+            where_clause += " AND (title, content_id) > (%s, %s)"
+            query_params.extend([cursor_title, cursor_content_id])
+        elif last_title:
             where_clause += " AND title > %s"
             query_params.append(last_title)
 
@@ -324,7 +393,7 @@ def get_completed_contents():
             SELECT content_id, title, status, meta, source
             FROM contents
             {where_clause}
-            ORDER BY title ASC
+            ORDER BY title ASC, content_id ASC
             LIMIT %s
             """,
             (*query_params, per_page),
@@ -338,11 +407,32 @@ def get_completed_contents():
             coerced['meta'] = normalize_meta(coerced.get('meta'))
             results.append(coerced)
 
+        last_row = results[-1] if results else None
         next_cursor = None
-        if len(results) == per_page:
-            next_cursor = results[-1].get('title')
+        if len(results) == per_page and last_row:
+            next_cursor = encode_cursor(last_row.get('title'), last_row.get('content_id'))
 
-        return jsonify({'contents': results, 'next_cursor': next_cursor})
+        response_payload = {
+            'contents': results,
+            'next_cursor': next_cursor,
+            'last_title': last_row.get('title') if last_row else None,
+            'last_content_id': last_row.get('content_id') if last_row else None,
+            'page_size': per_page,
+            'returned': len(results),
+        }
+
+        current_app.logger.info(
+            "[contents.completed] type=%s source=%s per_page=%s cursor=%s last_title=%s returned=%s next_cursor=%s",
+            content_type,
+            source,
+            per_page,
+            bool(raw_cursor),
+            bool(last_title),
+            len(results),
+            bool(next_cursor),
+        )
+
+        return jsonify(response_payload)
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_completed_contents")

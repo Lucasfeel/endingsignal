@@ -55,11 +55,51 @@ const STATE = {
   subscriptionsSet: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
+
+  pagination: {
+    completed: {
+      cursor: null,
+      legacyCursor: null,
+      done: false,
+      loading: false,
+      items: [],
+      totalLoaded: 0,
+      requestSeq: 0,
+      tabId: null,
+      source: 'all',
+      aspectClass: 'aspect-[3/4]',
+    },
+    hiatus: {
+      cursor: null,
+      legacyCursor: null,
+      done: false,
+      loading: false,
+      items: [],
+      totalLoaded: 0,
+      requestSeq: 0,
+      tabId: null,
+      source: 'all',
+      aspectClass: 'aspect-[3/4]',
+    },
+  },
+  activePaginationCategory: null,
+  rendering: {
+    list: [],
+    index: 0,
+    batchSize: 60,
+    scheduled: false,
+    requestSeq: 0,
+    aspectClass: 'aspect-[3/4]',
+    tabId: 'webtoon',
+  },
 };
 
 const UI = {
   bottomNav: document.getElementById('bottomNav'),
   contentGrid: document.getElementById('contentGridContainer'),
+  contentCountIndicator: document.getElementById('contentCountIndicator'),
+  contentLoadMoreBtn: document.getElementById('contentLoadMoreBtn'),
+  contentGridSentinel: document.getElementById('contentGridSentinel'),
   l1Filter: document.getElementById('l1FilterContainer'),
   l2Filter: document.getElementById('l2FilterContainer'),
   filtersWrapper: document.getElementById('filtersWrapper'),
@@ -78,6 +118,107 @@ const UI = {
   searchResultsGrid: document.getElementById('searchResultsGrid'),
   searchEmptyState: document.getElementById('searchEmptyState'),
   searchLoadingState: document.getElementById('searchLoadingState'),
+};
+
+let contentGridObserver = null;
+
+const contentKey = (c) => {
+  const cid = String(c?.content_id ?? c?.contentId ?? c?.id ?? '')?.trim();
+  const src = String(c?.source ?? '').trim();
+  if (!cid && !src) return '';
+  return `${src}::${cid}`;
+};
+
+const resetPaginationState = (category, { tabId, source, aspectClass, requestSeq }) => {
+  const target = STATE.pagination?.[category];
+  if (!target) return;
+
+  target.cursor = null;
+  target.legacyCursor = null;
+  target.done = false;
+  target.loading = false;
+  target.items = [];
+  target.totalLoaded = 0;
+  target.tabId = tabId;
+  target.source = source;
+  target.aspectClass = aspectClass;
+  target.requestSeq = requestSeq;
+};
+
+const setActivePaginationCategory = (category) => {
+  STATE.activePaginationCategory = category;
+};
+
+const getActivePaginationCategory = () => STATE.activePaginationCategory;
+
+const setCountIndicatorText = (text = '') => {
+  if (UI.contentCountIndicator) {
+    UI.contentCountIndicator.textContent = text || '';
+  }
+};
+
+const updateCountIndicator = (category) => {
+  const pg = STATE.pagination?.[category];
+  if (!pg) {
+    setCountIndicatorText('');
+    return;
+  }
+
+  const loadingSuffix = pg.loading ? ' (불러오는 중...)' : '';
+  setCountIndicatorText(`불러온 콘텐츠 ${pg.totalLoaded}${loadingSuffix}`);
+};
+
+const updateCountIndicatorForBatched = () => {
+  const { list, index } = STATE.rendering;
+  if (!list || !list.length) {
+    setCountIndicatorText('');
+    return;
+  }
+  const rendered = Math.min(index, list.length);
+  setCountIndicatorText(`불러온 콘텐츠 ${rendered} / ${list.length}`);
+};
+
+const hideLoadMoreUI = () => {
+  if (UI.contentLoadMoreBtn) UI.contentLoadMoreBtn.classList.add('hidden');
+};
+
+const updateLoadMoreUI = (category) => {
+  const btn = UI.contentLoadMoreBtn;
+  if (!btn) return;
+
+  const pg = STATE.pagination?.[category];
+  if (!pg || pg.done) {
+    btn.classList.add('hidden');
+    return;
+  }
+
+  btn.classList.remove('hidden');
+  btn.disabled = Boolean(pg.loading);
+  btn.textContent = pg.loading ? '불러오는 중...' : '더 불러오기';
+};
+
+const disconnectInfiniteObserver = () => {
+  if (contentGridObserver) {
+    contentGridObserver.disconnect();
+    contentGridObserver = null;
+  }
+};
+
+const setupInfiniteObserver = (category) => {
+  disconnectInfiniteObserver();
+  if (!UI.contentGridSentinel || !('IntersectionObserver' in window)) return;
+
+  contentGridObserver = new IntersectionObserver((entries) => {
+    const active = getActivePaginationCategory();
+    if (!active || active !== category) return;
+
+    if (entries.some((e) => e.isIntersecting)) {
+      loadNextPage(active).catch((err) => console.warn('Pagination load failed', err));
+    }
+  },
+  { root: null, rootMargin: '200px 0px' });
+
+  contentGridObserver.observe(UI.contentGridSentinel);
 };
 
 /* =========================
@@ -563,6 +704,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupProfileButton();
   updateProfileButtonState();
   setupSearchHandlers();
+
+  if (UI.contentLoadMoreBtn) {
+    UI.contentLoadMoreBtn.addEventListener('click', () => {
+      const active = getActivePaginationCategory();
+      if (active) loadNextPage(active);
+    });
+  }
 
   try {
     // preload subscriptions so stars render correctly (if token exists)
@@ -1220,8 +1368,168 @@ function updateMySubTab(mode) {
    Data fetching + rendering
    ========================= */
 
+const appendCardsToGrid = (
+  items,
+  { tabId = 'webtoon', aspectClass = 'aspect-[3/4]', clearBeforeAppend = false } = {}
+) => {
+  if (!UI.contentGrid || !Array.isArray(items) || !items.length) return;
+  if (clearBeforeAppend) UI.contentGrid.innerHTML = '';
+
+  const fragment = document.createDocumentFragment();
+  items.forEach((item) => {
+    fragment.appendChild(createCard(item, tabId, aspectClass));
+  });
+
+  UI.contentGrid.appendChild(fragment);
+};
+
+const renderNextBatch = () => {
+  if (STATE.rendering.scheduled) return;
+
+  STATE.rendering.scheduled = true;
+  const expectedSeq = STATE.rendering.requestSeq;
+
+  requestAnimationFrame(() => {
+    STATE.rendering.scheduled = false;
+    if (STATE.rendering.requestSeq !== expectedSeq || STATE.contentRequestSeq !== expectedSeq)
+      return;
+
+    const { list, index, batchSize, aspectClass, tabId } = STATE.rendering;
+    if (!UI.contentGrid || !list || !list.length) return;
+
+    const end = Math.min(index + batchSize, list.length);
+    const fragment = document.createDocumentFragment();
+
+    for (let i = index; i < end; i++) {
+      fragment.appendChild(createCard(list[i], tabId, aspectClass));
+    }
+
+    UI.contentGrid.appendChild(fragment);
+    STATE.rendering.index = end;
+    updateCountIndicatorForBatched();
+
+    if (end < list.length) {
+      renderNextBatch();
+    }
+  });
+};
+
+const startBatchedRender = (items, tabId, aspectClass) => {
+  const list = Array.isArray(items) ? items : [];
+  STATE.rendering.list = list;
+  STATE.rendering.index = 0;
+  STATE.rendering.scheduled = false;
+  STATE.rendering.requestSeq = STATE.contentRequestSeq;
+  STATE.rendering.aspectClass = aspectClass;
+  STATE.rendering.tabId = tabId;
+
+  if (UI.contentGrid) UI.contentGrid.innerHTML = '';
+
+  if (!list.length) {
+    setCountIndicatorText('');
+    return;
+  }
+
+  updateCountIndicatorForBatched();
+  renderNextBatch();
+};
+
+async function loadNextPage(category) {
+  const pg = STATE.pagination?.[category];
+  if (!pg || pg.loading || pg.done) return;
+  if (pg.requestSeq !== STATE.contentRequestSeq) return;
+
+  pg.loading = true;
+  updateLoadMoreUI(category);
+  updateCountIndicator(category);
+
+  const perPage = 300;
+  const query = {
+    type: pg.tabId,
+    source: pg.source || 'all',
+    per_page: perPage,
+  };
+
+  if (pg.cursor !== null && pg.cursor !== undefined) query.cursor = pg.cursor;
+  else if (pg.legacyCursor) query.last_title = pg.legacyCursor;
+
+  const url = buildUrl(`/api/contents/${category}`, query);
+
+  try {
+    const json = await apiRequest('GET', url);
+    if (pg.requestSeq !== STATE.contentRequestSeq) return;
+
+    const incoming = Array.isArray(json?.contents)
+      ? json.contents.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
+      : [];
+
+    const next = json?.next_cursor ?? null;
+    const legacyNext = !next ? json?.last_title ?? null : null;
+    const parsedPageSize = Number(json?.page_size);
+    const responsePageSize = Number.isFinite(parsedPageSize) ? parsedPageSize : perPage;
+
+    const existingKeys = new Set(pg.items.map(contentKey));
+    const toAppend = [];
+
+    for (const c of incoming) {
+      const key = contentKey(c);
+      if (!key || existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      pg.items.push(c);
+      toAppend.push(c);
+    }
+
+    if (next) {
+      pg.cursor = next;
+      pg.legacyCursor = null;
+    } else if (legacyNext) {
+      pg.cursor = null;
+      pg.legacyCursor = legacyNext;
+    } else {
+      pg.cursor = null;
+      pg.legacyCursor = null;
+    }
+
+    const noNewItems = toAppend.length === 0;
+    const hasPaginationToken = Boolean(next || legacyNext);
+    const returnedCount = incoming.length;
+    const missingCursor = !hasPaginationToken;
+    const reachedEndByCount = returnedCount < responsePageSize;
+
+    if (noNewItems) {
+      console.warn('No new items returned; marking pagination as done to avoid stalls');
+    }
+
+    pg.done = noNewItems || (missingCursor && (reachedEndByCount || pg.items.length > 0));
+    pg.totalLoaded = pg.items.length;
+
+    appendCardsToGrid(toAppend, {
+      tabId: pg.tabId,
+      aspectClass: pg.aspectClass,
+      clearBeforeAppend: pg.items.length === toAppend.length,
+    });
+
+    updateCountIndicator(category);
+    updateLoadMoreUI(category);
+
+    if (pg.done && getActivePaginationCategory() === category) {
+      disconnectInfiniteObserver();
+    }
+  } catch (e) {
+    showToast(e?.message || '콘텐츠를 불러오지 못했습니다.', { type: 'error' });
+  } finally {
+    pg.loading = false;
+    updateLoadMoreUI(category);
+  }
+}
+
 async function fetchAndRenderContent(tabId) {
   if (!UI.contentGrid) return;
+
+  disconnectInfiniteObserver();
+  setActivePaginationCategory(null);
+  hideLoadMoreUI();
+  setCountIndicatorText('');
 
   const requestSeq = ++STATE.contentRequestSeq;
   const isStale = () => STATE.contentRequestSeq !== requestSeq;
@@ -1305,6 +1613,16 @@ async function fetchAndRenderContent(tabId) {
         const source = STATE.filters[tabId].source;
         const query = { type: tabId, source };
 
+        if (day === 'completed' || day === 'hiatus') {
+          resetPaginationState(day, { tabId, source, aspectClass, requestSeq });
+          setActivePaginationCategory(day);
+          updateLoadMoreUI(day);
+          updateCountIndicator(day);
+          setupInfiniteObserver(day);
+          await loadNextPage(day);
+          return;
+        }
+
         if (day === 'completed') url = buildUrl('/api/contents/completed', query);
         else if (day === 'hiatus') url = buildUrl('/api/contents/hiatus', query);
         else url = buildUrl('/api/contents/ongoing', query);
@@ -1358,10 +1676,13 @@ async function fetchAndRenderContent(tabId) {
     return;
   }
 
-  data.forEach((item) => {
-    const card = createCard(item, tabId, aspectClass);
-    UI.contentGrid.appendChild(card);
-  });
+  if (tabId === 'webtoon' || tabId === 'novel') {
+    startBatchedRender(data, tabId, aspectClass);
+    return;
+  }
+
+  appendCardsToGrid(data, { tabId, aspectClass, clearBeforeAppend: true });
+  setCountIndicatorText(`총 ${data.length}건`);
 }
 
 function createCard(content, tabId, aspectClass) {
