@@ -1935,71 +1935,6 @@ function createCard(content, tabId, aspectClass) {
     'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
   cardContainer.appendChild(gradient);
 
-  // Star overlay (subscribe toggle)
-  const starButton = document.createElement('button');
-  starButton.type = 'button';
-  starButton.className =
-    'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors';
-
-  const setStarVisual = (on) => {
-    starButton.innerHTML = on
-      ? '<span class="text-[12px]">★</span><span class="text-[10px]">구독중</span>'
-      : '<span class="text-[12px]">☆</span><span class="text-[10px]">구독</span>';
-
-    starButton.className =
-      'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors ' +
-      (on ? 'bg-black/60 text-[#4F46E5]' : 'bg-black/40 text-gray-400');
-    starButton.setAttribute('aria-pressed', on ? 'true' : 'false');
-    starButton.setAttribute('aria-label', on ? '구독 해제' : '구독하기');
-  };
-
-  setStarVisual(isSubscribed(content));
-
-  starButton.onclick = async (evt) => {
-    evt.stopPropagation();
-    if (!requireAuthOrPrompt('subscription-toggle')) return;
-
-    const key = buildSubscriptionKey(content);
-    if (!key) {
-      showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
-      return;
-    }
-
-    if (STATE.pendingSubOps.has(key)) return;
-    STATE.pendingSubOps.add(key);
-
-    const setPending = (isPending) => {
-      starButton.disabled = isPending;
-      starButton.classList.toggle('opacity-60', isPending);
-      starButton.classList.toggle('cursor-not-allowed', isPending);
-    };
-
-    const currentlySubscribed = isSubscribed(content);
-    const nextState = !currentlySubscribed;
-
-    // optimistic update
-    setStarVisual(nextState);
-    if (nextState) STATE.subscriptionsSet.add(key);
-    else STATE.subscriptionsSet.delete(key);
-    setPending(true);
-
-    try {
-      if (nextState) await subscribeContent(content);
-      else await unsubscribeContent(content);
-
-      if (STATE.activeTab === 'my') fetchAndRenderContent('my');
-    } catch (e) {
-      // rollback
-      if (currentlySubscribed) STATE.subscriptionsSet.add(key);
-      else STATE.subscriptionsSet.delete(key);
-      setStarVisual(currentlySubscribed);
-    } finally {
-      STATE.pendingSubOps.delete(key);
-      setPending(false);
-    }
-  };
-
-  cardContainer.appendChild(starButton);
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
@@ -2227,4 +2162,4 @@ window.closeSubscribeModal = closeSubscribeModal;
 // Quick sanity test steps (manual):
 // 1) localStorage.setItem('es_access_token', '<token>')
 // 2) Reload and open the "My Sub" tab
-// 3) Toggle the star on content cards and watch POST/DELETE /api/me/subscriptions
+// 3) Open a card to trigger the subscribe modal and use the modal button to watch POST/DELETE /api/me/subscriptions
