@@ -48,6 +48,14 @@ KAKAO_DISCOVERY_SOFT_CAP = int(os.getenv("KAKAO_DISCOVERY_SOFT_CAP", 20000))
 KAKAO_DISCOVERY_EXCLUDE_SLUG_REGEX = os.getenv(
     "KAKAO_DISCOVERY_EXCLUDE_SLUG_REGEX", "best-challenge|bestchallenge"
 )
+KAKAO_DISCOVERY_FALLBACK_SLUGS = [
+    slug.strip()
+    for slug in os.getenv(
+        "KAKAO_DISCOVERY_FALLBACK_SLUGS",
+        "ranking,complete,top,new,genre-romance,genre-fantasy",
+    ).split(",")
+    if slug.strip()
+]
 
 # --- Email ---
 # [신규] 어떤 이메일 서비스를 사용할지 결정 (smtp 또는 sendgrid)
