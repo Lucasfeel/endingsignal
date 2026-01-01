@@ -59,6 +59,7 @@ const STATE = {
   pagination: {
     completed: {
       cursor: null,
+      legacyCursor: null,
       done: false,
       loading: false,
       items: [],
@@ -70,6 +71,7 @@ const STATE = {
     },
     hiatus: {
       cursor: null,
+      legacyCursor: null,
       done: false,
       loading: false,
       items: [],
@@ -132,6 +134,7 @@ const resetPaginationState = (category, { tabId, source, aspectClass, requestSeq
   if (!target) return;
 
   target.cursor = null;
+  target.legacyCursor = null;
   target.done = false;
   target.loading = false;
   target.items = [];
@@ -1448,6 +1451,7 @@ async function loadNextPage(category) {
   };
 
   if (pg.cursor !== null && pg.cursor !== undefined) query.cursor = pg.cursor;
+  else if (pg.legacyCursor) query.last_title = pg.legacyCursor;
 
   const url = buildUrl(`/api/contents/${category}`, query);
 
@@ -1460,6 +1464,9 @@ async function loadNextPage(category) {
       : [];
 
     const next = json?.next_cursor ?? null;
+    const legacyNext = !next ? json?.last_title ?? null : null;
+    const parsedPageSize = Number(json?.page_size);
+    const responsePageSize = Number.isFinite(parsedPageSize) ? parsedPageSize : perPage;
 
     const existingKeys = new Set(pg.items.map(contentKey));
     const toAppend = [];
@@ -1472,8 +1479,28 @@ async function loadNextPage(category) {
       toAppend.push(c);
     }
 
-    pg.cursor = next;
-    pg.done = next == null || incoming.length === 0;
+    if (next) {
+      pg.cursor = next;
+      pg.legacyCursor = null;
+    } else if (legacyNext) {
+      pg.cursor = null;
+      pg.legacyCursor = legacyNext;
+    } else {
+      pg.cursor = null;
+      pg.legacyCursor = null;
+    }
+
+    const noNewItems = toAppend.length === 0;
+    const hasPaginationToken = Boolean(next || legacyNext);
+    const returnedCount = incoming.length;
+    const missingCursor = !hasPaginationToken;
+    const reachedEndByCount = returnedCount < responsePageSize;
+
+    if (noNewItems) {
+      console.warn('No new items returned; marking pagination as done to avoid stalls');
+    }
+
+    pg.done = noNewItems || (missingCursor && (reachedEndByCount || pg.items.length > 0));
     pg.totalLoaded = pg.items.length;
 
     appendCardsToGrid(toAppend, {
