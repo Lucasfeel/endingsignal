@@ -6,6 +6,7 @@ import random
 import re
 import time
 import urllib.parse
+import uuid
 from http.cookies import SimpleCookie
 
 from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
@@ -45,6 +46,7 @@ class KakaowebtoonCrawler(ContentCrawler):
     def __init__(self):
         super().__init__("kakaowebtoon")
         self.cookies = self._get_cookies_from_env()
+        self.cookie_source = "env" if self.cookies else "none"
 
     def _get_cookies_from_env(self):
         """환경 변수에서 쿠키 값을 로드합니다. 없으면 None 반환(익명 부트스트랩 시도)."""
@@ -101,6 +103,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                     if pair:
                         session.cookie_jar.update_cookies(pair, response_url=resp.url)
                         self.cookies = self._capture_cookie_dict(session, resp.url)
+                        self.cookie_source = "bootstrap"
                         print("부트스트랩된 쿠키 키: ['webid', '_T_ANO']")
                         self._log_cookie_state(session, prefix="kakao.cookies:bootstrap")
                         return
@@ -121,17 +124,29 @@ class KakaowebtoonCrawler(ContentCrawler):
             self.cookies = self._capture_cookie_dict(
                 session, "https://webtoon.kakao.com/"
             )
-        self._log_cookie_state(session)
 
-    def _log_cookie_state(self, session, prefix="kakao.cookies"):
         filtered = session.cookie_jar.filter_cookies("https://webtoon.kakao.com/")
-        jar_size = len(filtered)
         has_webid = "webid" in filtered
         has_t_ano = "_T_ANO" in filtered
-        keys = list(filtered.keys())
-        print(
-            f"{prefix}: jar_size={jar_size} has_webid={has_webid} has_T_ANO={has_t_ano} keys={keys}"
-        )
+
+        if not (has_webid and has_t_ano):
+            synth = {
+                "webid": uuid.uuid4().hex,
+                "_T_ANO": uuid.uuid4().hex,
+            }
+            session.cookie_jar.update_cookies(
+                synth, response_url="https://webtoon.kakao.com/"
+            )
+            self.cookies = synth
+            self.cookie_source = "synth"
+        else:
+            self.cookies = self._capture_cookie_dict(
+                session, "https://webtoon.kakao.com/"
+            )
+            if self.cookie_source == "none":
+                self.cookie_source = "bootstrap"
+
+        self._log_cookie_state(session)
 
     def _capture_cookie_dict(self, session, response_url):
         filtered = session.cookie_jar.filter_cookies(str(response_url))
@@ -142,8 +157,10 @@ class KakaowebtoonCrawler(ContentCrawler):
         jar_size = len(filtered)
         has_webid = "webid" in filtered
         has_t_ano = "_T_ANO" in filtered
+        keys = list(filtered.keys())
         print(
-            f"{prefix}: jar_size={jar_size} has_webid={has_webid} has_T_ANO={has_t_ano}"
+            f"{prefix}: jar_size={jar_size} has_webid={has_webid} has_T_ANO={has_t_ano} "
+            f"keys={keys} source={self.cookie_source}"
         )
 
     def _iter_cards_from_sections(self, sections):
@@ -252,150 +269,59 @@ class KakaowebtoonCrawler(ContentCrawler):
                 )
             raise
 
-    async def _fetch_paginated_completed(self, session, slug, *, start_time=None, fetch_meta=None):
-        """특정 완결 slug를 offset/limit 페이지네이션으로 순회합니다."""
-        all_completed_content = []
-        offset = 0
-        limit = 100
-        seen_ids = set()
-        candidate_slugs = ["complete", "completed"]
-        slug_index = 0
-        current_slug = candidate_slugs[slug_index]
-        auth_retried = False
-
-        await self._ensure_cookies(session, fetch_meta=fetch_meta)
-
-        while True:
-            try:
-                if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
-                    if fetch_meta is not None:
-                        fetch_meta.setdefault("errors", []).append(
-                            "completed:WALL_TIMEOUT_EXCEEDED"
-                        )
-                    break
-
-                url = f"{API_BASE_URL}/{slug}"
-                data = await self._fetch_from_api(
-                    session,
-                    url,
-                    params={"offset": offset, "limit": limit},
-                    fetch_meta=fetch_meta,
-                    tag=f"completed:{slug}",
-                )
-
-                payload = data.get("data", {}) if isinstance(data, dict) else {}
-                paging = payload.get("paging", {}) if isinstance(payload, dict) else {}
-
-                cards = list(
-                    self._iter_cards_from_sections(payload.get("sections", []))
-                )
-                if not cards:
-                    break
-
-                new_cards = 0
-                for card in cards:
-                    cid = str(card.get("id") or "").strip()
-                    if cid and cid not in seen_ids:
-                        seen_ids.add(cid)
-                        all_completed_content.append(card)
-                        new_cards += 1
-
-                next_offset = paging.get("nextOffset")
-                has_next = paging.get("hasNext")
-
-                if isinstance(next_offset, int):
-                    offset = next_offset
-                else:
-                    offset += len(cards)
-
-                if (has_next is False) or len(cards) < limit or new_cards == 0:
-                    break
-
-                await asyncio.sleep(0.1)
-
-                soft_cap = int(getattr(config, "KAKAO_DISCOVERY_SOFT_CAP", 20000))
-                if len(seen_ids) >= soft_cap:
-                    if fetch_meta is not None:
-                        fetch_meta.setdefault("errors", []).append(
-                            "completed:soft_cap_reached"
-                        )
-                    break
-
-            except RetryError as e:
-                root_exc = e.last_attempt.exception() if e.last_attempt else None
-                status = getattr(root_exc, "status", None)
-                if status:
-                    print(
-                        f"❌ [kakao] completed retry failed status={status} slug={slug} offset={offset}"
-                    )
-                if status in {401, 403}:
-                    await asyncio.sleep(random.uniform(0.5, 1.5))
-                    continue
-                if status == 429:
-                    await asyncio.sleep(random.uniform(0.5, 1.5))
-                    continue
-
-                if fetch_meta is not None:
-                    fetch_meta.setdefault("errors", []).append(f"completed:{e}")
-                break
-            except aiohttp.ClientResponseError as e:
-                status = getattr(e, "status", None)
-                if status in {401, 403, 429}:
-                    await asyncio.sleep(random.uniform(0.5, 1.5))
-                    continue
-
-                if offset == 0:
-                    print(
-                        f"❌ [kakao] completed fetch failed at offset=0 status={status} error={e}"
-                    )
-                else:
-                    print(
-                        f"Error fetching completed page at offset {offset} status={status} error={e}"
-                    )
-                if fetch_meta is not None:
-                    fetch_meta.setdefault("errors", []).append(f"completed:{e}")
-                break
-            except Exception as e:
-                if offset == 0:
-                    print(f"❌ [kakao] completed fetch failed at offset=0 ({e})")
-                else:
-                    print(f"Error fetching completed page at offset {offset}: {e}")
-                if fetch_meta is not None:
-                    fetch_meta.setdefault("errors", []).append(f"completed:{e}")
-                break
-
-        return all_completed_content
-
-    async def _fetch_completed_cards(self, session, start_time, fetch_meta):
-        candidates = []
+    async def _fetch_completed_cards(
+        self, session, discovered_slugs, start_time, fetch_meta, seen_ids
+    ):
+        completion_keywords = ("complete", "completed", "finish", "end")
         fallback_slugs = getattr(config, "KAKAO_DISCOVERY_FALLBACK_SLUGS", [])
+        completion_slugs = []
+
+        for slug in sorted(discovered_slugs):
+            low = slug.lower()
+            if any(key in low for key in completion_keywords):
+                completion_slugs.append(slug)
+
         for slug in fallback_slugs:
-            if "complete" in slug:
-                candidates.append(slug)
-        candidates.extend(["completed", "complete"])
-        seen_candidate = []
-        ordered_candidates = []
-        for slug in candidates:
-            if slug not in seen_candidate:
-                seen_candidate.append(slug)
-                ordered_candidates.append(slug)
+            low = str(slug).lower()
+            if slug not in completion_slugs and any(
+                key in low for key in completion_keywords
+            ):
+                completion_slugs.append(slug)
+
+        if not completion_slugs:
+            completion_slugs = list(discovered_slugs)
+            max_general = int(
+                getattr(config, "KAKAO_COMPLETED_FALLBACK_LIMIT", 5)
+            )
+            completion_slugs = completion_slugs[:max_general]
 
         collected = []
-        for slug in ordered_candidates:
+        used_slugs = []
+        for slug in completion_slugs:
+            if start_time and (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
+                fetch_meta.setdefault("errors", []).append("completed:WALL_TIMEOUT_EXCEEDED")
+                break
             try:
-                collected = await self._fetch_paginated_completed(
-                    session, slug, start_time=start_time, fetch_meta=fetch_meta
+                cards = await self._fetch_official_section_cards(
+                    session,
+                    slug,
+                    start_time=start_time,
+                    fetch_meta=fetch_meta,
+                    seen_ids=seen_ids,
                 )
-                if collected:
-                    fetch_meta["completed_slug"] = slug
-                    break
+                if cards:
+                    collected.extend(cards)
+                    used_slugs.append(slug)
             except Exception as e:
                 fetch_meta.setdefault("errors", []).append(f"completed:{slug}:{e}")
                 continue
 
-        if not collected:
+        if used_slugs:
+            fetch_meta["completed_slugs"] = used_slugs
+        else:
             fetch_meta.setdefault("errors", []).append("completed:none_collected")
-        return collected
+
+        return collected, set(used_slugs)
 
     async def _discover_official_slugs(self, session, *, start_time=None, fetch_meta=None):
         """
@@ -407,6 +333,10 @@ class KakaowebtoonCrawler(ContentCrawler):
         bundle_urls = []
         fetched_bundles = 0
         excluded_exact = {"general-weekdays", "completed", "complete"}
+        slug_patterns = [
+            r"/section/v1/pages/([A-Za-z0-9_-]+)",
+            r"\\/section\\/v1\\/pages\\/([A-Za-z0-9_-]+)",
+        ]
 
         max_bundles = int(
             getattr(
@@ -430,14 +360,15 @@ class KakaowebtoonCrawler(ContentCrawler):
                 html = await resp.text()
 
             # 신기능 우선: HTML 자체에 노출된 slug도 우선 수집
-            for slug in re.findall(r"/section/v1/pages/([A-Za-z0-9_-]+)", html):
-                if not slug:
-                    continue
-                if slug in excluded_exact:
-                    continue
-                if exclude_regex and re.search(exclude_regex, slug):
-                    continue
-                slugs.add(slug)
+            for pattern in slug_patterns:
+                for slug in re.findall(pattern, html):
+                    if not slug:
+                        continue
+                    if slug in excluded_exact:
+                        continue
+                    if exclude_regex and re.search(exclude_regex, slug):
+                        continue
+                    slugs.add(slug)
 
             script_srcs = re.findall(
                 r'src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']', html
@@ -476,14 +407,15 @@ class KakaowebtoonCrawler(ContentCrawler):
                         bundle_text = await resp.text()
                     fetched_bundles += 1
 
-                    for slug in re.findall(r"/section/v1/pages/([A-Za-z0-9_-]+)", bundle_text):
-                        if not slug:
-                            continue
-                        if slug in excluded_exact:
-                            continue
-                        if exclude_regex and re.search(exclude_regex, slug):
-                            continue
-                        slugs.add(slug)
+                    for pattern in slug_patterns:
+                        for slug in re.findall(pattern, bundle_text):
+                            if not slug:
+                                continue
+                            if slug in excluded_exact:
+                                continue
+                            if exclude_regex and re.search(exclude_regex, slug):
+                                continue
+                            slugs.add(slug)
 
                 except Exception as e:
                     meta.setdefault("errors", []).append(
@@ -495,8 +427,8 @@ class KakaowebtoonCrawler(ContentCrawler):
 
         summary_sample = list(sorted(slugs))[:10]
         print(
-            f"[kakao] discovery summary bundles_found={len(bundle_urls)} fetched={fetched_bundles} "
-            f"slugs={len(slugs)} sample={summary_sample}"
+            f"[kakao] discovery summary scripts_found={len(script_srcs)} bundles_found={len(bundle_urls)} "
+            f"fetched={fetched_bundles} slugs={len(slugs)} sample={summary_sample}"
         )
 
         return slugs
@@ -660,6 +592,7 @@ class KakaowebtoonCrawler(ContentCrawler):
         discovered_cards = []
         weekday_cards = []
         completed_data = []
+        discovered_slugs = set()
 
         async with aiohttp.ClientSession(
             timeout=timeout,
@@ -671,16 +604,16 @@ class KakaowebtoonCrawler(ContentCrawler):
 
             if (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
                 fetch_meta["errors"].append("weekday:WALL_TIMEOUT_EXCEEDED")
-                weekday_data, completed_data = {}, []
+                weekday_data, discovered_slugs = {}, set()
             else:
-                weekday_data, completed_data = await asyncio.gather(
+                weekday_data, discovered_slugs = await asyncio.gather(
                     self._fetch_from_api(
                         session,
                         weekday_url,
                         fetch_meta=fetch_meta,
                         tag="weekday",
                     ),
-                    self._fetch_completed_cards(
+                    self._discover_official_slugs(
                         session, start_time=start_time, fetch_meta=fetch_meta
                     ),
                     return_exceptions=True,
@@ -690,14 +623,6 @@ class KakaowebtoonCrawler(ContentCrawler):
             seen_ids = set()
             weekday_cards = []
             errors_count = len(fetch_meta.get("errors", []))
-
-            if isinstance(completed_data, list):
-                for card in completed_data:
-                    cid = str(card.get("id") or "").strip()
-                    if cid:
-                        seen_ids.add(cid)
-            completed_raw_count = len(completed_data) if isinstance(completed_data, list) else 0
-            print(f"kakao.completed: cards={completed_raw_count} errors={errors_count}")
 
             if isinstance(weekday_data, dict):
                 for card in self._iter_cards_from_sections(
@@ -710,33 +635,56 @@ class KakaowebtoonCrawler(ContentCrawler):
             errors_count = len(fetch_meta.get("errors", []))
             print(f"kakao.weekday: cards={len(weekday_cards)} errors={errors_count}")
 
+            if isinstance(discovered_slugs, Exception):
+                fetch_meta.setdefault("errors", []).append(
+                    f"discover:failed:{discovered_slugs}"
+                )
+                discovered_slugs = set()
+
+            if not discovered_slugs:
+                fallback_slugs = getattr(config, "KAKAO_DISCOVERY_FALLBACK_SLUGS", [])
+                if fallback_slugs:
+                    print(
+                        f"[kakao] discovery empty, using fallbacks: {fallback_slugs}"
+                    )
+                    discovered_slugs = set(fallback_slugs)
+
+            try:
+                completed_data, used_completion_slugs = await self._fetch_completed_cards(
+                    session,
+                    discovered_slugs,
+                    start_time=start_time,
+                    fetch_meta=fetch_meta,
+                    seen_ids=seen_ids,
+                )
+            except Exception as e:
+                fetch_meta.setdefault("errors", []).append(f"completed:failed:{e}")
+                completed_data, used_completion_slugs = [], set()
+            if isinstance(completed_data, list):
+                for card in completed_data:
+                    cid = str(card.get("id") or "").strip()
+                    if cid:
+                        seen_ids.add(cid)
+            completed_raw_count = len(completed_data) if isinstance(completed_data, list) else 0
+            errors_count = len(fetch_meta.get("errors", []))
+            print(
+                f"kakao.completed: slugs_used={len(used_completion_slugs)} cards={completed_raw_count} errors={errors_count}"
+            )
+
             if (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
                 fetch_meta.setdefault("errors", []).append("discover:WALL_TIMEOUT_EXCEEDED")
             else:
                 try:
-                    discovered_slugs = await self._discover_official_slugs(
-                        session, start_time=start_time, fetch_meta=fetch_meta
-                    )
-
-                    if not discovered_slugs:
-                        fallback_slugs = getattr(
-                            config, "KAKAO_DISCOVERY_FALLBACK_SLUGS", []
-                        )
-                        if fallback_slugs:
-                            print(
-                                f"[kakao] discovery empty, using fallbacks: {fallback_slugs}"
-                            )
-                            discovered_slugs = set(fallback_slugs)
-
+                    remaining_slugs = set(discovered_slugs) - set(used_completion_slugs)
                     soft_cap = int(
                         getattr(
                             config,
                             "KAKAO_DISCOVERY_SOFT_CAP",
                             getattr(config, "KAKAOWEBTOON_TARGET_UNIQUE_TITLES", 20000),
                         )
-                        )
+                    )
 
-                    for slug in discovered_slugs:
+                    for slug in remaining_slugs:
                         if len(seen_ids) >= soft_cap:
                             fetch_meta.setdefault("errors", []).append(
                                 "discover:soft_cap_reached"
@@ -753,7 +701,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                         discovered_cards.extend(cards)
                     errors_count = len(fetch_meta.get("errors", []))
                     print(
-                        f"kakao.discover: slugs={len(discovered_slugs)} cards={len(discovered_cards)} errors={errors_count}"
+                        f"kakao.discover: slugs={len(remaining_slugs)} cards={len(discovered_cards)} errors={errors_count}"
                     )
 
                 except Exception as e:
@@ -836,9 +784,12 @@ class KakaowebtoonCrawler(ContentCrawler):
         weekday_count = len(weekday_cards)
         completed_count = len(completed_data) if isinstance(completed_data, list) else 0
         discovered_count = len(discovered_cards)
+        has_webid = bool(self.cookies and self.cookies.get("webid"))
+        has_t_ano = bool(self.cookies and self.cookies.get("_T_ANO"))
         print(
-            f"Kakao totals -> weekday:{weekday_count} completed:{completed_count} "
-            f"discovered:{discovered_count} unique_total:{total_unique}"
+            f"kakao.totals -> weekday:{weekday_count} completed:{completed_count} "
+            f"discovered:{discovered_count} unique_total:{total_unique} "
+            f"cookie_source:{self.cookie_source} has_webid:{has_webid} has_T_ANO:{has_t_ano}"
         )
         print(
             f"Kakao breakdown -> ongoing:{len(ongoing_today)} hiatus:{len(hiatus_today)} "
