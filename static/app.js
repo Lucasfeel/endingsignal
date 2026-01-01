@@ -22,6 +22,10 @@ const ICONS = {
   my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
 };
 
+const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><rect width="300" height="400" fill="#1E1E1E"/><path d="M30 320h240v30H30z" fill="#2d2d2d"/><rect x="60" y="60" width="180" height="200" rx="12" fill="#2f2f2f"/><text x="150" y="175" text-anchor="middle" fill="#6b7280" font-family="sans-serif" font-size="20">No Image</text></svg>'
+)}`;
+
 const STATE = {
   activeTab: 'webtoon',
   lastBrowseTab: 'webtoon',
@@ -53,6 +57,7 @@ const STATE = {
 
   // subscriptions
   subscriptionsSet: new Set(),
+  pendingSubOps: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
 
@@ -110,6 +115,9 @@ const UI = {
   header: document.getElementById('mainHeader'),
   profileButton: document.getElementById('profileButton'),
   profileButtonText: document.getElementById('profileButtonText'),
+  profileMenu: document.getElementById('profileMenu'),
+  profileMenuMy: document.getElementById('profileMenuMy'),
+  profileMenuLogout: document.getElementById('profileMenuLogout'),
   headerSearchWrap: document.getElementById('headerSearchWrap'),
   searchButton: document.getElementById('searchButton'),
   searchInput: document.getElementById('searchInput'),
@@ -121,6 +129,127 @@ const UI = {
 };
 
 let contentGridObserver = null;
+
+// Modal management
+const modalStack = [];
+const modalMeta = new Map();
+let bodyOverflowBackup = '';
+
+const isAnyModalOpen = () => modalStack.length > 0;
+const getTopModal = () => modalStack[modalStack.length - 1] || null;
+
+const getFocusableElements = (modalEl) => {
+  if (!modalEl) return [];
+  const selectors =
+    'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(modalEl.querySelectorAll(selectors)).filter((el) => {
+    const isHidden = el.getAttribute('aria-hidden') === 'true';
+    return !isHidden && el.offsetParent !== null && el.tabIndex >= 0;
+  });
+};
+
+const focusFirstElement = (modalEl, initialFocusEl) => {
+  const focusables = getFocusableElements(modalEl);
+  const target =
+    (initialFocusEl && modalEl.contains(initialFocusEl) && initialFocusEl) ||
+    focusables[0] ||
+    modalEl;
+  requestAnimationFrame(() => {
+    if (target && typeof target.focus === 'function') target.focus();
+  });
+};
+
+const setupModalRoot = (modalEl) => {
+  if (!modalEl || modalEl.dataset.modalSetup === '1') return;
+  modalEl.dataset.modalSetup = '1';
+
+  modalEl.addEventListener('click', (evt) => {
+    if (!isAnyModalOpen()) return;
+    const isOverlayClick =
+      evt.target === modalEl || evt.target?.dataset?.modalOverlay === 'true';
+    if (isOverlayClick && getTopModal() === modalEl) {
+      closeModal(modalEl);
+    }
+  });
+};
+
+function openModal(modalEl, { initialFocusEl } = {}) {
+  if (!modalEl) return;
+  setupModalRoot(modalEl);
+  if (modalStack.includes(modalEl)) return;
+
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  if (!isAnyModalOpen()) {
+    bodyOverflowBackup = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  modalStack.push(modalEl);
+  modalMeta.set(modalEl, { opener });
+
+  modalEl.classList.remove('hidden');
+  modalEl.setAttribute('aria-hidden', 'false');
+  focusFirstElement(modalEl, initialFocusEl);
+}
+
+function closeModal(modalEl) {
+  if (!modalEl) return;
+  const idx = modalStack.indexOf(modalEl);
+  if (idx === -1) return;
+
+  modalStack.splice(idx, 1);
+  const meta = modalMeta.get(modalEl) || {};
+  modalMeta.delete(modalEl);
+
+  modalEl.classList.add('hidden');
+  modalEl.setAttribute('aria-hidden', 'true');
+
+  if (!isAnyModalOpen()) {
+    document.body.style.overflow = bodyOverflowBackup || '';
+  }
+
+  const opener = meta.opener;
+  if (opener && document.contains(opener) && typeof opener.focus === 'function') {
+    opener.focus();
+  }
+}
+
+document.addEventListener(
+  'keydown',
+  (evt) => {
+    if (!isAnyModalOpen()) return;
+    const topModal = getTopModal();
+    if (!topModal) return;
+
+    if (evt.key === 'Escape') {
+      evt.preventDefault();
+      closeModal(topModal);
+      return;
+    }
+
+    if (evt.key === 'Tab') {
+      const focusables = getFocusableElements(topModal);
+      if (!focusables.length) {
+        evt.preventDefault();
+        topModal.focus();
+        return;
+      }
+
+      const current = document.activeElement;
+      const currentIndex = focusables.indexOf(current);
+      const lastIndex = focusables.length - 1;
+      let nextIndex = currentIndex;
+
+      if (evt.shiftKey) nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1;
+      else nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+
+      evt.preventDefault();
+      focusables[nextIndex].focus();
+    }
+  },
+  true
+);
 
 const contentKey = (c) => {
   const cid = String(c?.content_id ?? c?.contentId ?? c?.id ?? '')?.trim();
@@ -879,7 +1008,7 @@ function renderSearchResults(items, effectiveType) {
     const card = createCard(normalized, effectiveType, aspectClass);
     card.onclick = () => {
       closeInlineSearch();
-      openModal(normalized);
+      openSubscribeModal(normalized);
     };
     grid.appendChild(card);
   });
@@ -939,6 +1068,7 @@ function setupSearchHandlers() {
     };
 
   document.addEventListener('keydown', (evt) => {
+    if (isAnyModalOpen()) return;
     if (evt.key === 'Escape' && STATE.search.isOpen) {
       closeInlineSearch();
     } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
@@ -979,10 +1109,32 @@ function setupSearchHandlers() {
    Auth modal + profile
    ========================= */
 
+const isProfileMenuOpen = () => UI.profileMenu && !UI.profileMenu.classList.contains('hidden');
+
+function closeProfileMenu() {
+  if (UI.profileMenu) UI.profileMenu.classList.add('hidden');
+  if (UI.profileButton) UI.profileButton.setAttribute('aria-expanded', 'false');
+}
+
+function openProfileMenu() {
+  if (!UI.profileMenu || !UI.profileButton) return;
+  UI.profileMenu.classList.remove('hidden');
+  UI.profileButton.setAttribute('aria-expanded', 'true');
+  const firstItem = UI.profileMenu.querySelector('[role="menuitem"]');
+  if (firstItem) firstItem.focus();
+}
+
+function toggleProfileMenu() {
+  if (isProfileMenuOpen()) closeProfileMenu();
+  else openProfileMenu();
+}
+
 function updateProfileButtonState() {
   const btn = UI.profileButton;
   const textEl = UI.profileButtonText;
   if (!btn || !textEl) return;
+
+  btn.setAttribute('aria-expanded', isProfileMenuOpen() ? 'true' : 'false');
 
   const isAuth = STATE.auth.isAuthenticated;
   const user = STATE.auth.user;
@@ -1000,6 +1152,7 @@ function updateProfileButtonState() {
   } else {
     textEl.textContent = 'Login';
     btn.setAttribute('title', 'Login');
+    closeProfileMenu();
   }
 }
 
@@ -1009,11 +1162,37 @@ function setupProfileButton() {
 
   btn.onclick = () => {
     if (STATE.auth.isAuthenticated) {
-      logout();
+      toggleProfileMenu();
     } else {
       openAuthModal({ reason: 'profile' });
     }
   };
+
+  document.addEventListener('click', (evt) => {
+    if (!isProfileMenuOpen()) return;
+    if (UI.profileButton?.contains(evt.target) || UI.profileMenu?.contains(evt.target)) return;
+    closeProfileMenu();
+  });
+
+  document.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Escape' && isProfileMenuOpen()) {
+      closeProfileMenu();
+    }
+  });
+
+  if (UI.profileMenuMy) {
+    UI.profileMenuMy.onclick = () => {
+      closeProfileMenu();
+      updateTab('my');
+    };
+  }
+
+  if (UI.profileMenuLogout) {
+    UI.profileMenuLogout.onclick = () => {
+      closeProfileMenu();
+      logout();
+    };
+  }
 }
 
 function applyAuthMode(mode = 'login') {
@@ -1051,22 +1230,23 @@ function openAuthModal(_opts = {}) {
   const pwdEl = document.getElementById('authPassword');
   const confirmEl = document.getElementById('authPasswordConfirm');
   const errorEl = document.getElementById('authError');
+  const closeBtn = document.getElementById('authCloseBtn');
   if (!modal) return;
 
   const mode = typeof _opts === 'string' ? _opts : _opts?.mode || 'login';
 
-  modal.classList.remove('hidden');
+  closeProfileMenu();
   if (errorEl) errorEl.textContent = '';
   if (emailEl) emailEl.value = '';
   if (pwdEl) pwdEl.value = '';
   if (confirmEl) confirmEl.value = '';
   applyAuthMode(mode);
-  if (emailEl) emailEl.focus();
+  openModal(modal, { initialFocusEl: closeBtn || emailEl || modal });
 }
 
 function closeAuthModal() {
   const modal = document.getElementById('authModal');
-  if (modal) modal.classList.add('hidden');
+  if (modal) closeModal(modal);
 }
 
 function setupAuthModalListeners() {
@@ -1690,9 +1870,7 @@ function createCard(content, tabId, aspectClass) {
   el.className = 'relative group cursor-pointer fade-in';
 
   const meta = normalizeMeta(content?.meta);
-  const thumb =
-    meta?.common?.thumbnail_url ||
-    'https://via.placeholder.com/300x400/333/999?text=No+Img';
+  const thumb = meta?.common?.thumbnail_url || FALLBACK_THUMB;
   const authors = Array.isArray(meta?.common?.authors)
     ? meta.common.authors.join(', ')
     : '';
@@ -1702,6 +1880,13 @@ function createCard(content, tabId, aspectClass) {
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
+  imgEl.loading = 'lazy';
+  imgEl.decoding = 'async';
+  imgEl.onerror = () => {
+    if (imgEl.dataset.fallbackApplied === '1') return;
+    imgEl.dataset.fallbackApplied = '1';
+    imgEl.src = FALLBACK_THUMB;
+  };
   imgEl.className =
     'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
   cardContainer.appendChild(imgEl);
@@ -1764,6 +1949,8 @@ function createCard(content, tabId, aspectClass) {
     starButton.className =
       'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors ' +
       (on ? 'bg-black/60 text-[#4F46E5]' : 'bg-black/40 text-gray-400');
+    starButton.setAttribute('aria-pressed', on ? 'true' : 'false');
+    starButton.setAttribute('aria-label', on ? '구독 해제' : '구독하기');
   };
 
   setStarVisual(isSubscribed(content));
@@ -1778,6 +1965,15 @@ function createCard(content, tabId, aspectClass) {
       return;
     }
 
+    if (STATE.pendingSubOps.has(key)) return;
+    STATE.pendingSubOps.add(key);
+
+    const setPending = (isPending) => {
+      starButton.disabled = isPending;
+      starButton.classList.toggle('opacity-60', isPending);
+      starButton.classList.toggle('cursor-not-allowed', isPending);
+    };
+
     const currentlySubscribed = isSubscribed(content);
     const nextState = !currentlySubscribed;
 
@@ -1785,6 +1981,7 @@ function createCard(content, tabId, aspectClass) {
     setStarVisual(nextState);
     if (nextState) STATE.subscriptionsSet.add(key);
     else STATE.subscriptionsSet.delete(key);
+    setPending(true);
 
     try {
       if (nextState) await subscribeContent(content);
@@ -1796,6 +1993,9 @@ function createCard(content, tabId, aspectClass) {
       if (currentlySubscribed) STATE.subscriptionsSet.add(key);
       else STATE.subscriptionsSet.delete(key);
       setStarVisual(currentlySubscribed);
+    } finally {
+      STATE.pendingSubOps.delete(key);
+      setPending(false);
     }
   };
 
@@ -1818,7 +2018,7 @@ function createCard(content, tabId, aspectClass) {
   textContainer.appendChild(authorEl);
   el.appendChild(textContainer);
 
-  el.onclick = () => openModal(content);
+  el.onclick = () => openSubscribeModal(content);
   return el;
 }
 
@@ -1898,11 +2098,12 @@ function getContentUrl(content) {
   return '';
 }
 
-function openModal(content) {
+function openSubscribeModal(content) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
+  closeProfileMenu();
 
   const titleText = String(content?.title || '').trim();
   const url = getContentUrl(content);
@@ -1939,13 +2140,17 @@ function openModal(content) {
     while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
     linkContainer.classList.add('hidden');
   }
-  if (modalEl) modalEl.classList.remove('hidden');
+  if (modalEl) {
+    openModal(modalEl, {
+      initialFocusEl: document.getElementById('subscribeButton') || modalEl,
+    });
+  }
   syncModalButton();
 }
 
-function closeModal() {
+function closeSubscribeModal() {
   const modalEl = document.getElementById('subscribeModal');
-  if (modalEl) modalEl.classList.add('hidden');
+  if (modalEl) closeModal(modalEl);
   STATE.currentModalContent = null;
 }
 
@@ -1953,6 +2158,15 @@ window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
   if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
+
+  const key = buildSubscriptionKey(content);
+  const btn = document.getElementById('subscribeButton');
+  if (key && STATE.pendingSubOps.has(key)) return;
+  if (key) STATE.pendingSubOps.add(key);
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-80', 'cursor-not-allowed');
+  }
 
   const currently = isSubscribed(content);
   try {
@@ -1966,6 +2180,12 @@ window.toggleSubscriptionFromModal = async function () {
     }
   } catch (e) {
     // errors already toasted in subscribe/unsubscribe
+  } finally {
+    if (key) STATE.pendingSubOps.delete(key);
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-80', 'cursor-not-allowed');
+    }
   }
 };
 
@@ -2002,7 +2222,7 @@ if (DEBUG_TOOLS) {
 }
 
 window.updateMySubTab = updateMySubTab;
-window.closeModal = closeModal;
+window.closeSubscribeModal = closeSubscribeModal;
 
 // Quick sanity test steps (manual):
 // 1) localStorage.setItem('es_access_token', '<token>')
