@@ -1935,6 +1935,16 @@ function createCard(content, tabId, aspectClass) {
     'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
   cardContainer.appendChild(gradient);
 
+  const subscribed = isSubscribed(content);
+  if (subscribed) {
+    const badgeEl = document.createElement('div');
+    badgeEl.className =
+      'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none';
+    badgeEl.setAttribute('aria-hidden', 'true');
+    badgeEl.textContent = '★ 구독중';
+    cardContainer.appendChild(badgeEl);
+  }
+
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
