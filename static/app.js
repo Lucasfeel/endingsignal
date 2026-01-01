@@ -2142,7 +2142,7 @@ function openSubscribeModal(content) {
   }
   if (modalEl) {
     openModal(modalEl, {
-      initialFocusEl: document.getElementById('cancelButton') || modalEl,
+      initialFocusEl: document.getElementById('subscribeButton') || modalEl,
     });
   }
   syncModalButton();
@@ -2223,7 +2223,6 @@ if (DEBUG_TOOLS) {
 
 window.updateMySubTab = updateMySubTab;
 window.closeSubscribeModal = closeSubscribeModal;
-window.closeModal = closeSubscribeModal;
 
 // Quick sanity test steps (manual):
 // 1) localStorage.setItem('es_access_token', '<token>')
