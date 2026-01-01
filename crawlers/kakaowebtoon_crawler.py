@@ -137,6 +137,15 @@ class KakaowebtoonCrawler(ContentCrawler):
         filtered = session.cookie_jar.filter_cookies(str(response_url))
         return {k: v.value for k, v in filtered.items() if getattr(v, "value", None)}
 
+    def _log_cookie_state(self, session, prefix="kakao.cookies"):
+        filtered = session.cookie_jar.filter_cookies("https://webtoon.kakao.com/")
+        jar_size = len(filtered)
+        has_webid = "webid" in filtered
+        has_t_ano = "_T_ANO" in filtered
+        print(
+            f"{prefix}: jar_size={jar_size} has_webid={has_webid} has_T_ANO={has_t_ano}"
+        )
+
     def _iter_cards_from_sections(self, sections):
         """gateway-kw 응답의 sections/cardGroups/cards 전체를 안전하게 순회."""
         for section in sections or []:
@@ -177,6 +186,10 @@ class KakaowebtoonCrawler(ContentCrawler):
                     return {}
 
             if fetch_meta is not None:
+                parsed = urllib.parse.urlparse(str(response.url))
+                path = parsed.path
+                code = f"kakao:http_{response.status}:{path}"
+                fetch_meta.setdefault("errors", []).append(code)
                 fetch_meta.setdefault("errors", []).append(
                     f"{tag}:http_{status}:{snippet}"
                 )
@@ -245,6 +258,10 @@ class KakaowebtoonCrawler(ContentCrawler):
         offset = 0
         limit = 100
         seen_ids = set()
+        candidate_slugs = ["complete", "completed"]
+        slug_index = 0
+        current_slug = candidate_slugs[slug_index]
+        auth_retried = False
 
         await self._ensure_cookies(session, fetch_meta=fetch_meta)
 
