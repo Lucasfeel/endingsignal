@@ -339,6 +339,7 @@ class KakaowebtoonCrawler(ContentCrawler):
         fetched_bundles = 0
         excluded_exact = {"general-weekdays", "completed", "complete"}
 
+
         max_bundles = int(
             getattr(
                 config,
@@ -622,6 +623,7 @@ class KakaowebtoonCrawler(ContentCrawler):
             weekday_cards = []
             errors_count = len(fetch_meta.get("errors", []))
 
+
             if isinstance(completed_data, list):
                 for card in completed_data:
                     cid = str(card.get("id") or "").strip()
@@ -638,8 +640,10 @@ class KakaowebtoonCrawler(ContentCrawler):
                     cid = str(card.get("id") or "").strip()
                     if cid:
                         seen_ids.add(cid)
+
             errors_count = len(fetch_meta.get("errors", []))
             print(f"kakao.weekday: cards={len(weekday_cards)} errors={errors_count}")
+
 
             if (time.monotonic() - start_time) > config.CRAWLER_RUN_WALL_TIMEOUT_SECONDS:
                 fetch_meta.setdefault("errors", []).append("discover:WALL_TIMEOUT_EXCEEDED")
@@ -648,6 +652,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                     discovered_slugs = await self._discover_official_slugs(
                         session, start_time=start_time, fetch_meta=fetch_meta
                     )
+
 
                     if not discovered_slugs:
                         fallback_slugs = getattr(
@@ -658,6 +663,7 @@ class KakaowebtoonCrawler(ContentCrawler):
                                 f"[kakao] discovery empty, using fallbacks: {fallback_slugs}"
                             )
                             discovered_slugs = set(fallback_slugs)
+
 
                     soft_cap = int(
                         getattr(
