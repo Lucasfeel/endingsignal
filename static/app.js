@@ -30,8 +30,8 @@ const STATE = {
   activeTab: 'webtoon',
   lastBrowseTab: 'webtoon',
   filters: {
-    webtoon: { source: 'all', day: 'mon' },
-    novel: { source: 'all', day: 'mon' },
+    webtoon: { source: 'all', day: 'all' },
+    novel: { source: 'all', day: 'all' },
     ott: { source: 'all', genre: 'drama' },
     series: { sort: 'latest' },
     my: { viewMode: 'subscribing' },
