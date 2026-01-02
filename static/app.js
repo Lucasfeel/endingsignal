@@ -42,6 +42,7 @@ const STATE = {
     isLoading: false,
     debounceTimer: null,
     requestSeq: 0,
+    activeIndex: -1,
   },
   contents: {},
   isLoading: false,
@@ -894,12 +895,61 @@ const getAspectByType = (type) => {
 };
 
 function showSearchEmpty(message) {
+  STATE.search.activeIndex = -1;
+  setActiveSearchIndex(-1);
   if (UI.searchEmptyState) {
     UI.searchEmptyState.textContent = message;
     UI.searchEmptyState.classList.remove('hidden');
   }
   if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+}
+
+const SEARCH_ACTIVE_CLASSES = ['ring-2', 'ring-white/50', 'bg-white/5'];
+
+const getSearchResultElements = () => {
+  if (!UI.searchResultsGrid) return [];
+  return Array.from(UI.searchResultsGrid.querySelectorAll('[data-search-index]'));
+};
+
+function setActiveSearchIndex(nextIndex) {
+  const elements = getSearchResultElements();
+  const hasItems = elements.length > 0;
+
+  if (!hasItems || nextIndex < 0) {
+    elements.forEach((el) => {
+      SEARCH_ACTIVE_CLASSES.forEach((cls) => el.classList.remove(cls));
+      el.setAttribute('aria-selected', 'false');
+    });
+    STATE.search.activeIndex = -1;
+    return;
+  }
+
+  const clampedIndex = Math.max(0, Math.min(nextIndex, elements.length - 1));
+
+  elements.forEach((el, idx) => {
+    const isActive = idx === clampedIndex;
+    SEARCH_ACTIVE_CLASSES.forEach((cls) =>
+      el.classList[isActive ? 'add' : 'remove'](cls)
+    );
+    el.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    if (isActive) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  });
+
+  STATE.search.activeIndex = clampedIndex;
+}
+
+function openActiveSearchResult() {
+  const elements = getSearchResultElements();
+  const idx = STATE.search.activeIndex;
+  if (!elements.length || idx < 0 || idx >= elements.length) return;
+  const el = elements[idx];
+  const content = el.__content;
+  if (!content) return;
+  closeInlineSearch();
+  openSubscribeModal(content);
 }
 
 function renderSearchLoading(type) {
@@ -919,6 +969,7 @@ function resetSearchUI({ preserveInput = false } = {}) {
   if (!preserveInput && UI.searchInput) UI.searchInput.value = '';
   STATE.search.q = UI.searchInput ? UI.searchInput.value.trim() : '';
   STATE.search.requestSeq += 1; // invalidate inflight requests
+  STATE.search.activeIndex = -1;
   if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
   if (STATE.search.q) {
@@ -956,6 +1007,8 @@ function closeInlineSearch({ clearInput = false } = {}) {
     STATE.search.debounceTimer = null;
   }
 
+  STATE.search.activeIndex = -1;
+
   if (UI.searchPanel) UI.searchPanel.classList.add('hidden');
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
   if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
@@ -986,7 +1039,10 @@ function renderSearchResults(items, effectiveType) {
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
   if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
 
+  STATE.search.activeIndex = -1;
   grid.innerHTML = '';
+  grid.setAttribute('role', 'listbox');
+  grid.setAttribute('aria-label', '검색 결과');
   const aspectClass = getAspectByType(effectiveType);
 
   const normalizedItems = Array.isArray(items) ? items : [];
@@ -995,7 +1051,7 @@ function renderSearchResults(items, effectiveType) {
     return;
   }
 
-  normalizedItems.forEach((raw) => {
+  normalizedItems.forEach((raw, idx) => {
     const normalized = {
       ...raw,
       meta: normalizeMeta(raw?.meta),
@@ -1006,12 +1062,19 @@ function renderSearchResults(items, effectiveType) {
     };
 
     const card = createCard(normalized, effectiveType, aspectClass);
+    card.dataset.searchIndex = String(idx);
+    card.setAttribute('role', 'option');
+    card.setAttribute('aria-selected', 'false');
+    card.__content = normalized;
+    card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
     card.onclick = () => {
       closeInlineSearch();
       openSubscribeModal(normalized);
     };
     grid.appendChild(card);
   });
+
+  setActiveSearchIndex(normalizedItems.length ? 0 : -1);
 }
 
 function performSearch(q) {
@@ -1020,6 +1083,8 @@ function performSearch(q) {
   const source = getSearchSource(effectiveType);
 
   STATE.search.q = query;
+  STATE.search.activeIndex = -1;
+  setActiveSearchIndex(-1);
 
   if (!query) {
     showSearchEmpty('검색어를 입력하세요.');
@@ -1087,10 +1152,40 @@ function setupSearchHandlers() {
   if (UI.searchInput) {
     UI.searchInput.addEventListener('input', (evt) => {
       updateSearchInputVisibility(true);
+      STATE.search.activeIndex = -1;
+      setActiveSearchIndex(-1);
       debouncedSearch(evt.target.value);
     });
     UI.searchInput.addEventListener('keydown', (evt) => {
-      if (evt.key === 'Enter') performSearch(evt.target.value);
+      if (isAnyModalOpen()) return;
+      const elements = getSearchResultElements();
+      const hasResults = elements.length > 0;
+
+      if (evt.key === 'ArrowDown') {
+        if (!STATE.search.isOpen) openInlineSearch();
+        if (hasResults) {
+          evt.preventDefault();
+          const nextIndex =
+            STATE.search.activeIndex < 0
+              ? 0
+              : Math.min(STATE.search.activeIndex + 1, elements.length - 1);
+          setActiveSearchIndex(nextIndex);
+        }
+      } else if (evt.key === 'ArrowUp') {
+        if (hasResults) {
+          evt.preventDefault();
+          const current = STATE.search.activeIndex < 0 ? 0 : STATE.search.activeIndex;
+          const nextIndex = Math.max(current - 1, 0);
+          setActiveSearchIndex(nextIndex);
+        }
+      } else if (evt.key === 'Enter') {
+        if (STATE.search.activeIndex >= 0 && STATE.search.activeIndex < elements.length) {
+          evt.preventDefault();
+          openActiveSearchResult();
+        } else {
+          performSearch(evt.target.value);
+        }
+      }
     });
   }
 
