@@ -31,10 +31,6 @@ const UI_CLASSES = {
     'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
     'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
-  btnGhost:
-    'h-10 px-4 rounded-xl bg-transparent text-white/80 text-sm hover:bg-white/5 active:bg-white/8',
-  btnDanger:
-    'h-10 px-4 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-500/90 active:bg-red-500/80 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
@@ -43,7 +39,6 @@ const UI_CLASSES = {
     'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
 
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
-  chipActive: 'h-9 px-3 inline-flex items-center rounded-full bg-white/15 text-sm text-white',
 
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
@@ -84,7 +79,6 @@ const UI_CLASSES = {
   modalTitle: 'text-xl font-bold mb-1 text-white',
   modalBodyText: 'text-gray-400 text-sm',
 
-  grid3: 'grid grid-cols-3 gap-3',
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
 
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -92,7 +86,6 @@ const UI_CLASSES = {
     'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
   menuItemDanger:
     'w-full text-left px-4 py-3 text-sm text-red-300 hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
-  divider: 'h-px bg-white/10',
 
   loadMoreBtn:
     'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
@@ -250,7 +243,6 @@ const DATA_UI_CLASS_MAP = {
   'search-empty-msg': UI_CLASSES.emptyMsg,
   'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
   'header-btn': UI_CLASSES.headerBtn,
-  'grid-3': UI_CLASSES.grid3,
   'grid-2to3': UI_CLASSES.grid2to3,
   'modal-wrap': UI_CLASSES.modalWrap,
   'modal-card': UI_CLASSES.modalCard,
@@ -258,14 +250,12 @@ const DATA_UI_CLASS_MAP = {
   'modal-body': UI_CLASSES.modalBodyText,
   'modal-primary': cx(UI_CLASSES.btnPrimary, 'spring-bounce neon-glow'),
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
-  'modal-danger': cx(UI_CLASSES.btnDanger, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
   'pill-hint': UI_CLASSES.pillHint,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
-  divider: UI_CLASSES.divider,
   'btn-secondary': UI_CLASSES.btnSecondary,
   'load-more': UI_CLASSES.loadMoreBtn,
 };
@@ -275,11 +265,13 @@ function applyDataUiClasses(root = document) {
   if (!elements) return;
 
   elements.forEach((el) => {
+    if (el.dataset.uiApplied === '1') return;
     const key = el.getAttribute('data-ui');
     const tokenClass = DATA_UI_CLASS_MAP[key];
     if (!tokenClass) return;
     const classParts = tokenClass.split(/\s+/).filter(Boolean);
     if (classParts.length) el.classList.add(...classParts);
+    el.dataset.uiApplied = '1';
   });
 }
 
@@ -468,17 +460,35 @@ const setupModalRoot = (modalEl) => {
   });
 };
 
-function openModal(modalEl, { initialFocusEl } = {}) {
+const isFocusableInDocument = (el) =>
+  Boolean(el) && document.contains(el) && typeof el.focus === 'function';
+
+const focusSearchInput = () => {
+  const input = UI.searchPageInput;
+  if (
+    STATE?.search?.pageOpen &&
+    input &&
+    document.contains(input) &&
+    typeof input.focus === 'function'
+  ) {
+    input.focus();
+    return true;
+  }
+  return false;
+};
+
+function openModal(modalEl, { initialFocusEl, returnFocusEl } = {}) {
   if (!modalEl) return;
   setupModalRoot(modalEl);
   if (modalStack.includes(modalEl)) return;
 
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusReturnEl = returnFocusEl instanceof HTMLElement ? returnFocusEl : null;
 
   lockBodyScroll();
 
   modalStack.push(modalEl);
-  modalMeta.set(modalEl, { opener });
+  modalMeta.set(modalEl, { opener, returnFocusEl: focusReturnEl });
 
   modalEl.classList.remove('hidden');
   modalEl.setAttribute('aria-hidden', 'false');
@@ -499,9 +509,26 @@ function closeModal(modalEl) {
 
   unlockBodyScroll();
 
-  const opener = meta.opener;
-  if (opener && document.contains(opener) && typeof opener.focus === 'function') {
-    opener.focus();
+  const hadReturnEl = Boolean(meta.returnFocusEl);
+  const focusTarget =
+    (isFocusableInDocument(meta.returnFocusEl) ? meta.returnFocusEl : null) ||
+    (isFocusableInDocument(meta.opener) ? meta.opener : null);
+
+  if (focusTarget) {
+    if (focusTarget.dataset?.searchIndex !== undefined) {
+      const idx = Number(focusTarget.dataset.searchIndex);
+      if (!Number.isNaN(idx)) setActiveSearchIndex(idx);
+      focusTarget.setAttribute('aria-selected', 'true');
+    }
+    focusTarget.focus();
+    return;
+  }
+
+  if (hadReturnEl && focusSearchInput()) return;
+  if (focusSearchInput()) return;
+
+  if (UI.profileButton && typeof UI.profileButton.focus === 'function') {
+    UI.profileButton.focus();
   }
 }
 
@@ -1576,14 +1603,19 @@ function setActiveSearchIndex(nextIndex) {
   STATE.search.activeIndex = clampedIndex;
 }
 
-function openActiveSearchResult() {
+const getActiveSearchOptionEl = () => {
   const elements = getSearchResultElements();
   const idx = STATE.search.activeIndex;
-  if (!elements.length || idx < 0 || idx >= elements.length) return;
-  const el = elements[idx];
+  if (!elements.length || idx < 0 || idx >= elements.length) return null;
+  return elements[idx];
+};
+
+function openActiveSearchResult() {
+  const el = getActiveSearchOptionEl();
+  if (!el) return;
   const content = el.__content;
   if (!content) return;
-  openSubscribeModal(content);
+  openSubscribeModal(content, { returnFocusEl: el });
 }
 
 function renderSearchLoading(type) {
@@ -1676,7 +1708,10 @@ async function renderSearchResults(items, effectiveType) {
       card.setAttribute('aria-selected', 'false');
       card.__content = normalized;
       card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
-      card.onclick = () => openSubscribeModal(normalized);
+      card.onclick = () => {
+        setActiveSearchIndex(idx);
+        openSubscribeModal(normalized, { returnFocusEl: card });
+      };
       return card;
     },
   });
@@ -2823,7 +2858,15 @@ function createCard(content, tabId, aspectClass) {
   el.onpointercancel = hidePress;
   el.onpointerleave = hidePress;
 
-  el.onclick = () => openSubscribeModal(content);
+  el.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Enter' || evt.key === ' ') {
+      evt.preventDefault();
+      if (isAnyModalOpen()) return;
+      openSubscribeModal(content, { returnFocusEl: el });
+    }
+  });
+
+  el.onclick = () => openSubscribeModal(content, { returnFocusEl: el });
   return el;
 }
 
@@ -2903,12 +2946,13 @@ function getContentUrl(content) {
   return '';
 }
 
-function openSubscribeModal(content) {
+function openSubscribeModal(content, opts = {}) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
   const ctaBtn = document.getElementById('subscribeButton');
+  const returnFocusEl = opts?.returnFocusEl instanceof HTMLElement ? opts.returnFocusEl : null;
   closeProfileMenu();
 
   recordRecentlyOpened(content);
@@ -2951,6 +2995,7 @@ function openSubscribeModal(content) {
   if (modalEl) {
     openModal(modalEl, {
       initialFocusEl: document.getElementById('subscribeButton') || modalEl,
+      returnFocusEl,
     });
   }
   syncModalButton();
