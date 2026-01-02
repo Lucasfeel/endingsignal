@@ -39,6 +39,8 @@ const UI_CLASSES = {
 
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
   iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
+  headerBtn:
+    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
 
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
   chipActive: 'h-9 px-3 inline-flex items-center rounded-full bg-white/15 text-sm text-white',
@@ -72,6 +74,8 @@ const UI_CLASSES = {
   inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
   inputSm:
     'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
+  searchTrigger:
+    'transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]',
   inputLabel: 'block text-sm font-medium text-gray-300',
 
   modalWrap: 'flex items-center justify-center',
@@ -82,6 +86,16 @@ const UI_CLASSES = {
 
   grid3: 'grid grid-cols-3 gap-3',
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
+
+  menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
+  menuItem:
+    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
+  menuItemDanger:
+    'w-full text-left px-4 py-3 text-sm text-red-300 hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
+  divider: 'h-px bg-white/10',
+
+  loadMoreBtn:
+    'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
 
   toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
   toastSuccess:
@@ -227,6 +241,7 @@ const DATA_UI_CLASS_MAP = {
   'search-back': UI_CLASSES.iconBtn,
   'search-clear': cx(UI_CLASSES.iconBtnSm, 'hidden'),
   'search-input': UI_CLASSES.inputBase,
+  'search-trigger': UI_CLASSES.searchTrigger,
   'search-recent-clear': UI_CLASSES.sectionSubtle,
   'search-popular-title': UI_CLASSES.sectionTitle,
   'search-popular-subtitle': UI_CLASSES.sectionSubtle,
@@ -234,6 +249,7 @@ const DATA_UI_CLASS_MAP = {
   'search-empty-title': UI_CLASSES.emptyTitle,
   'search-empty-msg': UI_CLASSES.emptyMsg,
   'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
+  'header-btn': UI_CLASSES.headerBtn,
   'grid-3': UI_CLASSES.grid3,
   'grid-2to3': UI_CLASSES.grid2to3,
   'modal-wrap': UI_CLASSES.modalWrap,
@@ -246,6 +262,12 @@ const DATA_UI_CLASS_MAP = {
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
   'pill-hint': UI_CLASSES.pillHint,
+  'menu-wrap': UI_CLASSES.menuWrap,
+  'menu-item': UI_CLASSES.menuItem,
+  'menu-item-danger': UI_CLASSES.menuItemDanger,
+  divider: UI_CLASSES.divider,
+  'btn-secondary': UI_CLASSES.btnSecondary,
+  'load-more': UI_CLASSES.loadMoreBtn,
 };
 
 function applyDataUiClasses(root = document) {
@@ -256,8 +278,8 @@ function applyDataUiClasses(root = document) {
     const key = el.getAttribute('data-ui');
     const tokenClass = DATA_UI_CLASS_MAP[key];
     if (!tokenClass) return;
-    const existing = el.className || '';
-    setClasses(el, cx(tokenClass, existing));
+    const classParts = tokenClass.split(/\s+/).filter(Boolean);
+    if (classParts.length) el.classList.add(...classParts);
   });
 }
 
@@ -1908,9 +1930,8 @@ function updateProfileButtonState() {
   const isAuth = STATE.auth.isAuthenticated;
   const user = STATE.auth.user;
 
-  const baseClasses =
-    'h-[32px] px-3 whitespace-nowrap rounded-full border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]';
-  btn.className = baseClasses + (isAuth ? ' bg-[#4F46E5]' : ' bg-[#2d2d2d]');
+  const baseClasses = cx(UI_CLASSES.headerBtn, 'h-[32px] px-3 whitespace-nowrap');
+  btn.className = cx(baseClasses, isAuth ? 'bg-[#4F46E5]' : '');
 
   if (isAuth && user) {
     const initial = safeString(user.email || user.id || 'M', 'M')

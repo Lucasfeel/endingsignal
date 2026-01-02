@@ -120,24 +120,25 @@
             </div>
             <div class="flex items-center gap-4">
                 <div id="headerSearchWrap" class="relative flex items-center">
-                    <button id="searchButton" class="spring-bounce">
+                    <button id="searchButton" data-ui="header-btn" class="h-10 w-10">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                     </button>
                     <input
                         id="searchInput"
                         type="text"
-                        class="ml-2 w-[180px] transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                        data-ui="search-trigger"
+                        class="ml-2 w-[180px]"
                         placeholder="검색"
                         readonly
                     />
                 </div>
-                <button id="profileButton" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap rounded-full bg-[#2d2d2d] border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]">
+                <button id="profileButton" data-ui="header-btn" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap">
                     <span class="sr-only">프로필</span>
                     <span id="profileButtonText">Login</span>
                 </button>
-                <div id="profileMenu" class="hidden absolute right-4 top-[48px] w-40 rounded-xl bg-[#1E1E1E] border border-white/10 shadow-2xl z-[130] py-2 text-sm" role="menu" aria-label="프로필 메뉴">
-                    <button id="profileMenuMy" role="menuitem" class="w-full text-left px-4 py-2 text-white hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]">내 구독</button>
-                    <button id="profileMenuLogout" role="menuitem" class="w-full text-left px-4 py-2 text-red-300 hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]">로그아웃</button>
+                <div id="profileMenu" data-ui="menu-wrap" class="hidden absolute right-4 top-[48px] z-[130] w-40" role="menu" aria-label="프로필 메뉴">
+                    <button id="profileMenuMy" data-ui="menu-item" role="menuitem">내 구독</button>
+                    <button id="profileMenuLogout" data-ui="menu-item-danger" role="menuitem">로그아웃</button>
                 </div>
             </div>
         </header>
@@ -177,10 +178,7 @@
 
             <div id="contentGridFooter" class="px-4 pb-4 space-y-2">
                 <div id="contentCountIndicator" class="text-center text-[11px] text-gray-400"></div>
-                <button
-                    id="contentLoadMoreBtn"
-                    class="hidden w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors"
-                >더 불러오기</button>
+                <button id="contentLoadMoreBtn" data-ui="load-more" class="hidden">더 불러오기</button>
                 <div id="contentGridSentinel" class="h-6 w-full"></div>
             </div>
 
@@ -288,7 +286,6 @@
                 </div>
             </div>
         </div>
-        <div id="toast" class="fixed bottom-24 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-full bg-gray-800 text-white text-sm opacity-0 transition-opacity duration-300 pointer-events-none z-[110]"></div>
     </div>
 
     <script src="/static/app.js" defer></script>
