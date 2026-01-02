@@ -126,29 +126,10 @@
                     <input
                         id="searchInput"
                         type="text"
-                        class="ml-0 w-0 opacity-0 pointer-events-none transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                        class="ml-2 w-[180px] transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
                         placeholder="검색"
+                        readonly
                     />
-                    <button
-                        id="searchClearBtn"
-                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white hidden"
-                        aria-label="검색어 지우기"
-                    >✕</button>
-                    <div
-                        id="searchPanel"
-                        class="hidden absolute right-0 top-full mt-2 w-[360px] max-w-[calc(100vw-24px)] bg-[#121212] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[120]"
-                    >
-                        <div id="searchLoadingState" class="hidden grid grid-cols-3 gap-3 p-3">
-                            <div class="h-32 rounded-lg skeleton"></div>
-                            <div class="h-32 rounded-lg skeleton"></div>
-                            <div class="h-32 rounded-lg skeleton"></div>
-                            <div class="h-32 rounded-lg skeleton"></div>
-                            <div class="h-32 rounded-lg skeleton"></div>
-                            <div class="h-32 rounded-lg skeleton"></div>
-                        </div>
-                        <div id="searchEmptyState" class="hidden text-center text-sm text-gray-400 py-6 px-3">검색어를 입력하세요.</div>
-                        <div id="searchResultsGrid" class="grid grid-cols-3 gap-3 p-3 max-h-[480px] overflow-y-auto"></div>
-                    </div>
                 </div>
                 <button id="profileButton" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap rounded-full bg-[#2d2d2d] border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]">
                     <span class="sr-only">프로필</span>
@@ -230,27 +211,50 @@
                 </div>
             </div>
         </div>
-        <div id="searchModal" class="fixed inset-0 flex items-center justify-center z-[115] hidden">
-            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" id="searchOverlay"></div>
-            <div class="relative z-10 bg-[#1E1E1E] border border-white/5 p-5 rounded-2xl w-[92%] max-w-xl mx-auto shadow-2xl transform transition-all" id="searchModalPanel">
-                <div class="flex items-center justify-between mb-3">
-                    <h2 class="text-lg font-bold text-white">검색</h2>
-                    <button id="searchCloseBtn" class="text-gray-400 hover:text-white spring-bounce" aria-label="검색 닫기">✕</button>
-                </div>
-                <div class="flex items-center gap-2 mb-3">
-                    <div class="relative flex-1">
-                        <input id="searchModalInput" type="text" class="w-full px-4 py-3 bg-[#2a2a2a] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#4F46E5]" placeholder="작품명을 입력해주세요" />
-                        <button id="searchModalClearBtn" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white" aria-label="검색어 지우기">✕</button>
+        <div id="searchPage" class="fixed inset-0 z-[90] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
+            <div class="absolute inset-0 bg-black"></div>
+
+            <div class="relative z-10 flex h-full flex-col min-h-0">
+                <div class="flex items-center gap-2 px-4 pt-4 pb-3">
+                    <button id="searchBackButton" class="h-10 w-10 flex items-center justify-center rounded-xl bg-white/5" aria-label="뒤로">
+                        ←
+                    </button>
+
+                    <div class="flex-1 relative">
+                        <input id="searchPageInput" type="text" inputmode="search" autocomplete="off" placeholder="작품을 검색해 보세요" class="w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white text-base outline-none" />
+                        <button id="searchClearButton" class="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg bg-white/5 hidden" aria-label="검색어 지우기">×</button>
                     </div>
-                    <button id="searchSubmitBtn" class="px-4 py-3 rounded-xl bg-[#4F46E5] text-white text-sm font-bold spring-bounce">검색</button>
                 </div>
-                <div id="searchModalEmptyState" class="text-center text-sm text-gray-400 py-8">검색어를 입력하세요.</div>
-                <div id="searchModalLoadingState" class="grid grid-cols-3 gap-3 hidden">
-                    <div class="h-32 rounded-lg skeleton"></div>
-                    <div class="h-32 rounded-lg skeleton"></div>
-                    <div class="h-32 rounded-lg skeleton"></div>
+
+                <div id="searchPageBody" class="flex-1 min-h-0 overflow-y-auto px-4 pb-[calc(96px+env(safe-area-inset-bottom))]">
+                    <div id="searchIdle" class="space-y-6">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-base font-semibold">최근 검색어</h2>
+                            <button id="searchRecentClearAll" class="text-sm text-white/60">전체삭제</button>
+                        </div>
+                        <div id="searchRecentChips" class="flex flex-wrap gap-2"></div>
+
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-base font-semibold">인기 작품</h2>
+                        </div>
+                        <div id="searchPopularGrid" class="grid grid-cols-3 gap-3"></div>
+                    </div>
+
+                    <div id="searchResultsView" class="hidden space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="text-sm text-white/70"><span id="searchResultCount">0</span>개 결과</div>
+                        </div>
+
+                        <div id="searchPageLoading" class="hidden grid grid-cols-3 gap-3"></div>
+                        <div id="searchPageResults" class="grid grid-cols-3 gap-3"></div>
+
+                        <div id="searchPageEmpty" class="hidden py-12 text-center">
+                            <div class="text-lg font-semibold">검색 결과가 없습니다</div>
+                            <div class="mt-2 text-sm text-white/70">다른 키워드로 검색해보세요.</div>
+                            <button id="searchPageClearQuery" class="mt-6 h-10 px-4 rounded-xl bg-white/10">검색어 지우기</button>
+                        </div>
+                    </div>
                 </div>
-                <div id="searchModalResultsGrid" class="grid grid-cols-3 gap-3"></div>
             </div>
         </div>
         <div id="authModal" class="fixed inset-0 flex items-center justify-center z-[120] hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" tabindex="-1">
