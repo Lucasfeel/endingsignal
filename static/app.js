@@ -468,17 +468,35 @@ const setupModalRoot = (modalEl) => {
   });
 };
 
-function openModal(modalEl, { initialFocusEl } = {}) {
+const isFocusableInDocument = (el) =>
+  Boolean(el) && document.contains(el) && typeof el.focus === 'function';
+
+const focusSearchInput = () => {
+  const input = UI.searchPageInput;
+  if (
+    STATE?.search?.pageOpen &&
+    input &&
+    document.contains(input) &&
+    typeof input.focus === 'function'
+  ) {
+    input.focus();
+    return true;
+  }
+  return false;
+};
+
+function openModal(modalEl, { initialFocusEl, returnFocusEl } = {}) {
   if (!modalEl) return;
   setupModalRoot(modalEl);
   if (modalStack.includes(modalEl)) return;
 
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusReturnEl = returnFocusEl instanceof HTMLElement ? returnFocusEl : null;
 
   lockBodyScroll();
 
   modalStack.push(modalEl);
-  modalMeta.set(modalEl, { opener });
+  modalMeta.set(modalEl, { opener, returnFocusEl: focusReturnEl });
 
   modalEl.classList.remove('hidden');
   modalEl.setAttribute('aria-hidden', 'false');
@@ -499,9 +517,26 @@ function closeModal(modalEl) {
 
   unlockBodyScroll();
 
-  const opener = meta.opener;
-  if (opener && document.contains(opener) && typeof opener.focus === 'function') {
-    opener.focus();
+  const hadReturnEl = Boolean(meta.returnFocusEl);
+  const focusTarget =
+    (isFocusableInDocument(meta.returnFocusEl) ? meta.returnFocusEl : null) ||
+    (isFocusableInDocument(meta.opener) ? meta.opener : null);
+
+  if (focusTarget) {
+    if (focusTarget.dataset?.searchIndex !== undefined) {
+      const idx = Number(focusTarget.dataset.searchIndex);
+      if (!Number.isNaN(idx)) setActiveSearchIndex(idx);
+      focusTarget.setAttribute('aria-selected', 'true');
+    }
+    focusTarget.focus();
+    return;
+  }
+
+  if (hadReturnEl && focusSearchInput()) return;
+  if (focusSearchInput()) return;
+
+  if (UI.profileButton && typeof UI.profileButton.focus === 'function') {
+    UI.profileButton.focus();
   }
 }
 
@@ -1576,14 +1611,19 @@ function setActiveSearchIndex(nextIndex) {
   STATE.search.activeIndex = clampedIndex;
 }
 
-function openActiveSearchResult() {
+const getActiveSearchOptionEl = () => {
   const elements = getSearchResultElements();
   const idx = STATE.search.activeIndex;
-  if (!elements.length || idx < 0 || idx >= elements.length) return;
-  const el = elements[idx];
+  if (!elements.length || idx < 0 || idx >= elements.length) return null;
+  return elements[idx];
+};
+
+function openActiveSearchResult() {
+  const el = getActiveSearchOptionEl();
+  if (!el) return;
   const content = el.__content;
   if (!content) return;
-  openSubscribeModal(content);
+  openSubscribeModal(content, { returnFocusEl: el });
 }
 
 function renderSearchLoading(type) {
@@ -1676,7 +1716,10 @@ async function renderSearchResults(items, effectiveType) {
       card.setAttribute('aria-selected', 'false');
       card.__content = normalized;
       card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
-      card.onclick = () => openSubscribeModal(normalized);
+      card.onclick = () => {
+        setActiveSearchIndex(idx);
+        openSubscribeModal(normalized, { returnFocusEl: card });
+      };
       return card;
     },
   });
@@ -2823,7 +2866,15 @@ function createCard(content, tabId, aspectClass) {
   el.onpointercancel = hidePress;
   el.onpointerleave = hidePress;
 
-  el.onclick = () => openSubscribeModal(content);
+  el.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Enter' || evt.key === ' ') {
+      evt.preventDefault();
+      if (isAnyModalOpen()) return;
+      openSubscribeModal(content, { returnFocusEl: el });
+    }
+  });
+
+  el.onclick = () => openSubscribeModal(content, { returnFocusEl: el });
   return el;
 }
 
@@ -2903,12 +2954,13 @@ function getContentUrl(content) {
   return '';
 }
 
-function openSubscribeModal(content) {
+function openSubscribeModal(content, opts = {}) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
   const ctaBtn = document.getElementById('subscribeButton');
+  const returnFocusEl = opts?.returnFocusEl instanceof HTMLElement ? opts.returnFocusEl : null;
   closeProfileMenu();
 
   recordRecentlyOpened(content);
@@ -2951,6 +3003,7 @@ function openSubscribeModal(content) {
   if (modalEl) {
     openModal(modalEl, {
       initialFocusEl: document.getElementById('subscribeButton') || modalEl,
+      returnFocusEl,
     });
   }
   syncModalButton();
