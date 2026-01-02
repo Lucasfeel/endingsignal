@@ -22,6 +22,10 @@ const ICONS = {
   my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
 };
 
+const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><rect width="300" height="400" fill="#1E1E1E"/><path d="M30 320h240v30H30z" fill="#2d2d2d"/><rect x="60" y="60" width="180" height="200" rx="12" fill="#2f2f2f"/><text x="150" y="175" text-anchor="middle" fill="#6b7280" font-family="sans-serif" font-size="20">No Image</text></svg>'
+)}`;
+
 const STATE = {
   activeTab: 'webtoon',
   lastBrowseTab: 'webtoon',
@@ -38,6 +42,7 @@ const STATE = {
     isLoading: false,
     debounceTimer: null,
     requestSeq: 0,
+    activeIndex: -1,
   },
   contents: {},
   isLoading: false,
@@ -53,6 +58,7 @@ const STATE = {
 
   // subscriptions
   subscriptionsSet: new Set(),
+  pendingSubOps: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
 
@@ -110,6 +116,9 @@ const UI = {
   header: document.getElementById('mainHeader'),
   profileButton: document.getElementById('profileButton'),
   profileButtonText: document.getElementById('profileButtonText'),
+  profileMenu: document.getElementById('profileMenu'),
+  profileMenuMy: document.getElementById('profileMenuMy'),
+  profileMenuLogout: document.getElementById('profileMenuLogout'),
   headerSearchWrap: document.getElementById('headerSearchWrap'),
   searchButton: document.getElementById('searchButton'),
   searchInput: document.getElementById('searchInput'),
@@ -120,7 +129,210 @@ const UI = {
   searchLoadingState: document.getElementById('searchLoadingState'),
 };
 
+function renderEmptyState(containerEl, { title = '', message = '', actions = [] } = {}) {
+  if (!containerEl) return;
+  containerEl.innerHTML = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.className =
+    'w-full col-span-full flex flex-col items-center justify-center text-center py-12 px-4';
+
+  if (title) {
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'text-lg font-semibold text-white';
+    titleEl.textContent = title;
+    wrapper.appendChild(titleEl);
+  }
+
+  if (message) {
+    const msgEl = document.createElement('p');
+    msgEl.className = 'text-sm text-white/70 mt-2 max-w-md';
+    msgEl.textContent = message;
+    wrapper.appendChild(msgEl);
+  }
+
+  if (Array.isArray(actions) && actions.length) {
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'mt-6 flex flex-wrap items-center justify-center gap-3';
+
+    actions.forEach((action) => {
+      if (!action?.label || typeof action.onClick !== 'function') return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className =
+        'px-4 py-2 rounded-full text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#121212] spring-bounce';
+      if (action.variant === 'primary')
+        btn.className += ' bg-[#4F46E5] text-white hover:bg-[#4338CA] focus:ring-[#4F46E5]';
+      else btn.className += ' bg-white/5 text-white hover:bg-white/10 border border-white/10 focus:ring-white/40';
+
+      btn.textContent = action.label;
+      btn.onclick = action.onClick;
+      actionsWrap.appendChild(btn);
+    });
+
+    wrapper.appendChild(actionsWrap);
+  }
+
+  containerEl.appendChild(wrapper);
+}
+
 let contentGridObserver = null;
+
+// Modal management
+const modalStack = [];
+const modalMeta = new Map();
+let bodyOverflowBackup = '';
+
+const isAnyModalOpen = () => modalStack.length > 0;
+const getTopModal = () => modalStack[modalStack.length - 1] || null;
+
+const getFocusableElements = (modalEl) => {
+  if (!modalEl) return [];
+  const selectors =
+    'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(modalEl.querySelectorAll(selectors)).filter((el) => {
+    const isHidden = el.getAttribute('aria-hidden') === 'true';
+    return !isHidden && el.offsetParent !== null && el.tabIndex >= 0;
+  });
+};
+
+const focusFirstElement = (modalEl, initialFocusEl) => {
+  const focusables = getFocusableElements(modalEl);
+  const target =
+    (initialFocusEl && modalEl.contains(initialFocusEl) && initialFocusEl) ||
+    focusables[0] ||
+    modalEl;
+  requestAnimationFrame(() => {
+    if (target && typeof target.focus === 'function') target.focus();
+  });
+};
+
+const setupModalRoot = (modalEl) => {
+  if (!modalEl || modalEl.dataset.modalSetup === '1') return;
+  modalEl.dataset.modalSetup = '1';
+
+  modalEl.addEventListener('click', (evt) => {
+    if (!isAnyModalOpen()) return;
+    const isOverlayClick =
+      evt.target === modalEl || evt.target?.dataset?.modalOverlay === 'true';
+    if (isOverlayClick && getTopModal() === modalEl) {
+      closeModal(modalEl);
+    }
+  });
+};
+
+function openModal(modalEl, { initialFocusEl } = {}) {
+  if (!modalEl) return;
+  setupModalRoot(modalEl);
+  if (modalStack.includes(modalEl)) return;
+
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  if (!isAnyModalOpen()) {
+    bodyOverflowBackup = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  modalStack.push(modalEl);
+  modalMeta.set(modalEl, { opener });
+
+  modalEl.classList.remove('hidden');
+  modalEl.setAttribute('aria-hidden', 'false');
+  focusFirstElement(modalEl, initialFocusEl);
+}
+
+function closeModal(modalEl) {
+  if (!modalEl) return;
+  const idx = modalStack.indexOf(modalEl);
+  if (idx === -1) return;
+
+  modalStack.splice(idx, 1);
+  const meta = modalMeta.get(modalEl) || {};
+  modalMeta.delete(modalEl);
+
+  modalEl.classList.add('hidden');
+  modalEl.setAttribute('aria-hidden', 'true');
+
+  if (!isAnyModalOpen()) {
+    document.body.style.overflow = bodyOverflowBackup || '';
+  }
+
+  const opener = meta.opener;
+  if (opener && document.contains(opener) && typeof opener.focus === 'function') {
+    opener.focus();
+  }
+}
+
+function createStarBadgeEl() {
+  const badgeEl = document.createElement('div');
+  badgeEl.className =
+    'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none';
+  badgeEl.setAttribute('aria-hidden', 'true');
+  badgeEl.setAttribute('data-star-badge', 'true');
+  badgeEl.textContent = '★';
+  return badgeEl;
+}
+
+function syncStarBadgeForCard(cardEl) {
+  if (!cardEl) return;
+  const key = cardEl.getAttribute('data-sub-key');
+  if (!key) return;
+
+  const thumb = cardEl.querySelector('[data-card-thumb="true"]');
+  if (!thumb) return;
+
+  const shouldShow = STATE.subscriptionsSet.has(key);
+  const existing = thumb.querySelector('[data-star-badge="true"]');
+
+  if (shouldShow && !existing) {
+    thumb.appendChild(createStarBadgeEl());
+  } else if (!shouldShow && existing) {
+    existing.remove();
+  }
+}
+
+function refreshStarBadges({ key } = {}) {
+  const cards = Array.from(document.querySelectorAll('[data-sub-key]'));
+  const targets = key ? cards.filter((card) => card.getAttribute('data-sub-key') === key) : cards;
+
+  targets.forEach((card) => syncStarBadgeForCard(card));
+}
+
+document.addEventListener(
+  'keydown',
+  (evt) => {
+    if (!isAnyModalOpen()) return;
+    const topModal = getTopModal();
+    if (!topModal) return;
+
+    if (evt.key === 'Escape') {
+      evt.preventDefault();
+      closeModal(topModal);
+      return;
+    }
+
+    if (evt.key === 'Tab') {
+      const focusables = getFocusableElements(topModal);
+      if (!focusables.length) {
+        evt.preventDefault();
+        topModal.focus();
+        return;
+      }
+
+      const current = document.activeElement;
+      const currentIndex = focusables.indexOf(current);
+      const lastIndex = focusables.length - 1;
+      let nextIndex = currentIndex;
+
+      if (evt.shiftKey) nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1;
+      else nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+
+      evt.preventDefault();
+      focusables[nextIndex].focus();
+    }
+  },
+  true
+);
 
 const contentKey = (c) => {
   const cid = String(c?.content_id ?? c?.contentId ?? c?.id ?? '')?.trim();
@@ -620,6 +832,7 @@ async function subscribeContent(content) {
     });
 
     if (key) STATE.subscriptionsSet.add(key);
+    STATE.subscriptionsLoadedAt = null;
 
     // best-effort refresh (does not block UX)
     loadSubscriptions({ force: true }).catch((err) =>
@@ -657,6 +870,7 @@ async function unsubscribeContent(content) {
     });
 
     if (key) STATE.subscriptionsSet.delete(key);
+    STATE.subscriptionsLoadedAt = null;
 
     loadSubscriptions({ force: true }).catch((err) =>
       console.warn('Failed to refresh subscriptions after unsubscribe', err)
@@ -764,13 +978,66 @@ const getAspectByType = (type) => {
   return 'aspect-[3/4]';
 };
 
-function showSearchEmpty(message) {
+function showSearchEmpty(title, { message = '', actions = [] } = {}) {
+  STATE.search.activeIndex = -1;
+  setActiveSearchIndex(-1);
   if (UI.searchEmptyState) {
-    UI.searchEmptyState.textContent = message;
     UI.searchEmptyState.classList.remove('hidden');
+    renderEmptyState(UI.searchEmptyState, {
+      title,
+      message,
+      actions,
+    });
   }
   if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+}
+
+const SEARCH_ACTIVE_CLASSES = ['ring-2', 'ring-white/50', 'bg-white/5'];
+
+const getSearchResultElements = () => {
+  if (!UI.searchResultsGrid) return [];
+  return Array.from(UI.searchResultsGrid.querySelectorAll('[data-search-index]'));
+};
+
+function setActiveSearchIndex(nextIndex) {
+  const elements = getSearchResultElements();
+  const hasItems = elements.length > 0;
+
+  if (!hasItems || nextIndex < 0) {
+    elements.forEach((el) => {
+      SEARCH_ACTIVE_CLASSES.forEach((cls) => el.classList.remove(cls));
+      el.setAttribute('aria-selected', 'false');
+    });
+    STATE.search.activeIndex = -1;
+    return;
+  }
+
+  const clampedIndex = Math.max(0, Math.min(nextIndex, elements.length - 1));
+
+  elements.forEach((el, idx) => {
+    const isActive = idx === clampedIndex;
+    SEARCH_ACTIVE_CLASSES.forEach((cls) =>
+      el.classList[isActive ? 'add' : 'remove'](cls)
+    );
+    el.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    if (isActive) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  });
+
+  STATE.search.activeIndex = clampedIndex;
+}
+
+function openActiveSearchResult() {
+  const elements = getSearchResultElements();
+  const idx = STATE.search.activeIndex;
+  if (!elements.length || idx < 0 || idx >= elements.length) return;
+  const el = elements[idx];
+  const content = el.__content;
+  if (!content) return;
+  closeInlineSearch();
+  openSubscribeModal(content);
 }
 
 function renderSearchLoading(type) {
@@ -790,6 +1057,7 @@ function resetSearchUI({ preserveInput = false } = {}) {
   if (!preserveInput && UI.searchInput) UI.searchInput.value = '';
   STATE.search.q = UI.searchInput ? UI.searchInput.value.trim() : '';
   STATE.search.requestSeq += 1; // invalidate inflight requests
+  STATE.search.activeIndex = -1;
   if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
   if (STATE.search.q) {
@@ -827,6 +1095,8 @@ function closeInlineSearch({ clearInput = false } = {}) {
     STATE.search.debounceTimer = null;
   }
 
+  STATE.search.activeIndex = -1;
+
   if (UI.searchPanel) UI.searchPanel.classList.add('hidden');
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
   if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
@@ -850,6 +1120,19 @@ function openInlineSearch() {
   }
 }
 
+function openSearchAndFocus() {
+  if (!UI.searchInput) return;
+  if (!STATE.search.isOpen) openInlineSearch();
+  else {
+    if (UI.searchPanel) UI.searchPanel.classList.remove('hidden');
+    updateSearchInputVisibility(true);
+  }
+
+  requestAnimationFrame(() => {
+    if (UI.searchInput) UI.searchInput.focus();
+  });
+}
+
 function renderSearchResults(items, effectiveType) {
   const grid = UI.searchResultsGrid;
   if (!grid) return;
@@ -857,16 +1140,34 @@ function renderSearchResults(items, effectiveType) {
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
   if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
 
+  STATE.search.activeIndex = -1;
   grid.innerHTML = '';
+  grid.setAttribute('role', 'listbox');
+  grid.setAttribute('aria-label', '검색 결과');
   const aspectClass = getAspectByType(effectiveType);
 
   const normalizedItems = Array.isArray(items) ? items : [];
   if (!normalizedItems.length) {
-    showSearchEmpty('검색 결과가 없습니다.');
+    const clearAction = {
+      label: '검색어 지우기',
+      variant: 'primary',
+      onClick: () => {
+        if (UI.searchInput) {
+          UI.searchInput.value = '';
+          resetSearchUI();
+          UI.searchInput.focus();
+          updateSearchInputVisibility(true);
+        }
+      },
+    };
+    showSearchEmpty('검색 결과가 없습니다', {
+      message: '다른 키워드로 검색해보세요.',
+      actions: [clearAction],
+    });
     return;
   }
 
-  normalizedItems.forEach((raw) => {
+  normalizedItems.forEach((raw, idx) => {
     const normalized = {
       ...raw,
       meta: normalizeMeta(raw?.meta),
@@ -877,12 +1178,19 @@ function renderSearchResults(items, effectiveType) {
     };
 
     const card = createCard(normalized, effectiveType, aspectClass);
+    card.dataset.searchIndex = String(idx);
+    card.setAttribute('role', 'option');
+    card.setAttribute('aria-selected', 'false');
+    card.__content = normalized;
+    card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
     card.onclick = () => {
       closeInlineSearch();
-      openModal(normalized);
+      openSubscribeModal(normalized);
     };
     grid.appendChild(card);
   });
+
+  setActiveSearchIndex(normalizedItems.length ? 0 : -1);
 }
 
 function performSearch(q) {
@@ -891,6 +1199,8 @@ function performSearch(q) {
   const source = getSearchSource(effectiveType);
 
   STATE.search.q = query;
+  STATE.search.activeIndex = -1;
+  setActiveSearchIndex(-1);
 
   if (!query) {
     showSearchEmpty('검색어를 입력하세요.');
@@ -917,7 +1227,22 @@ function performSearch(q) {
     .catch((e) => {
       if (seq !== STATE.search.requestSeq) return;
       showToast(e?.message || '검색에 실패했습니다.', { type: 'error' });
-      showSearchEmpty('검색 결과가 없습니다.');
+      const clearAction = {
+        label: '검색어 지우기',
+        variant: 'primary',
+        onClick: () => {
+          if (UI.searchInput) {
+            UI.searchInput.value = '';
+            resetSearchUI();
+            UI.searchInput.focus();
+            updateSearchInputVisibility(true);
+          }
+        },
+      };
+      showSearchEmpty('검색 결과가 없습니다', {
+        message: '다른 키워드로 검색해보세요.',
+        actions: [clearAction],
+      });
     })
     .finally(() => {
       if (seq !== STATE.search.requestSeq) return;
@@ -939,6 +1264,7 @@ function setupSearchHandlers() {
     };
 
   document.addEventListener('keydown', (evt) => {
+    if (isAnyModalOpen()) return;
     if (evt.key === 'Escape' && STATE.search.isOpen) {
       closeInlineSearch();
     } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
@@ -957,10 +1283,40 @@ function setupSearchHandlers() {
   if (UI.searchInput) {
     UI.searchInput.addEventListener('input', (evt) => {
       updateSearchInputVisibility(true);
+      STATE.search.activeIndex = -1;
+      setActiveSearchIndex(-1);
       debouncedSearch(evt.target.value);
     });
     UI.searchInput.addEventListener('keydown', (evt) => {
-      if (evt.key === 'Enter') performSearch(evt.target.value);
+      if (isAnyModalOpen()) return;
+      const elements = getSearchResultElements();
+      const hasResults = elements.length > 0;
+
+      if (evt.key === 'ArrowDown') {
+        if (!STATE.search.isOpen) openInlineSearch();
+        if (hasResults) {
+          evt.preventDefault();
+          const nextIndex =
+            STATE.search.activeIndex < 0
+              ? 0
+              : Math.min(STATE.search.activeIndex + 1, elements.length - 1);
+          setActiveSearchIndex(nextIndex);
+        }
+      } else if (evt.key === 'ArrowUp') {
+        if (hasResults) {
+          evt.preventDefault();
+          const current = STATE.search.activeIndex < 0 ? 0 : STATE.search.activeIndex;
+          const nextIndex = Math.max(current - 1, 0);
+          setActiveSearchIndex(nextIndex);
+        }
+      } else if (evt.key === 'Enter') {
+        if (STATE.search.activeIndex >= 0 && STATE.search.activeIndex < elements.length) {
+          evt.preventDefault();
+          openActiveSearchResult();
+        } else {
+          performSearch(evt.target.value);
+        }
+      }
     });
   }
 
@@ -979,10 +1335,32 @@ function setupSearchHandlers() {
    Auth modal + profile
    ========================= */
 
+const isProfileMenuOpen = () => UI.profileMenu && !UI.profileMenu.classList.contains('hidden');
+
+function closeProfileMenu() {
+  if (UI.profileMenu) UI.profileMenu.classList.add('hidden');
+  if (UI.profileButton) UI.profileButton.setAttribute('aria-expanded', 'false');
+}
+
+function openProfileMenu() {
+  if (!UI.profileMenu || !UI.profileButton) return;
+  UI.profileMenu.classList.remove('hidden');
+  UI.profileButton.setAttribute('aria-expanded', 'true');
+  const firstItem = UI.profileMenu.querySelector('[role="menuitem"]');
+  if (firstItem) firstItem.focus();
+}
+
+function toggleProfileMenu() {
+  if (isProfileMenuOpen()) closeProfileMenu();
+  else openProfileMenu();
+}
+
 function updateProfileButtonState() {
   const btn = UI.profileButton;
   const textEl = UI.profileButtonText;
   if (!btn || !textEl) return;
+
+  btn.setAttribute('aria-expanded', isProfileMenuOpen() ? 'true' : 'false');
 
   const isAuth = STATE.auth.isAuthenticated;
   const user = STATE.auth.user;
@@ -1000,6 +1378,7 @@ function updateProfileButtonState() {
   } else {
     textEl.textContent = 'Login';
     btn.setAttribute('title', 'Login');
+    closeProfileMenu();
   }
 }
 
@@ -1009,11 +1388,37 @@ function setupProfileButton() {
 
   btn.onclick = () => {
     if (STATE.auth.isAuthenticated) {
-      logout();
+      toggleProfileMenu();
     } else {
       openAuthModal({ reason: 'profile' });
     }
   };
+
+  document.addEventListener('click', (evt) => {
+    if (!isProfileMenuOpen()) return;
+    if (UI.profileButton?.contains(evt.target) || UI.profileMenu?.contains(evt.target)) return;
+    closeProfileMenu();
+  });
+
+  document.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Escape' && isProfileMenuOpen()) {
+      closeProfileMenu();
+    }
+  });
+
+  if (UI.profileMenuMy) {
+    UI.profileMenuMy.onclick = () => {
+      closeProfileMenu();
+      updateTab('my');
+    };
+  }
+
+  if (UI.profileMenuLogout) {
+    UI.profileMenuLogout.onclick = () => {
+      closeProfileMenu();
+      logout();
+    };
+  }
 }
 
 function applyAuthMode(mode = 'login') {
@@ -1051,22 +1456,23 @@ function openAuthModal(_opts = {}) {
   const pwdEl = document.getElementById('authPassword');
   const confirmEl = document.getElementById('authPasswordConfirm');
   const errorEl = document.getElementById('authError');
+  const closeBtn = document.getElementById('authCloseBtn');
   if (!modal) return;
 
   const mode = typeof _opts === 'string' ? _opts : _opts?.mode || 'login';
 
-  modal.classList.remove('hidden');
+  closeProfileMenu();
   if (errorEl) errorEl.textContent = '';
   if (emailEl) emailEl.value = '';
   if (pwdEl) pwdEl.value = '';
   if (confirmEl) confirmEl.value = '';
   applyAuthMode(mode);
-  if (emailEl) emailEl.focus();
+  openModal(modal, { initialFocusEl: closeBtn || emailEl || modal });
 }
 
 function closeAuthModal() {
   const modal = document.getElementById('authModal');
-  if (modal) modal.classList.add('hidden');
+  if (modal) closeModal(modal);
 }
 
 function setupAuthModalListeners() {
@@ -1555,6 +1961,7 @@ async function fetchAndRenderContent(tabId) {
   const skeletonTimer = setTimeout(showSkeleton, 120);
 
   let data = [];
+  let emptyStateConfig = null;
 
   try {
     if (tabId === 'my') {
@@ -1605,6 +2012,47 @@ async function fetchAndRenderContent(tabId) {
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
+
+      if (!data.length) {
+        if (mode === 'completed') {
+          emptyStateConfig = {
+            title: '완결된 구독 작품이 아직 없습니다',
+            message: '구독 중인 작품이 완결되면 여기에 표시됩니다.',
+            actions: [
+              {
+                label: '구독 목록 보기',
+                variant: 'primary',
+                onClick: () => {
+                  STATE.filters.my.viewMode = 'subscribing';
+                  updateTab('my');
+                },
+              },
+              {
+                label: '검색하기',
+                variant: 'secondary',
+                onClick: () => openSearchAndFocus(),
+              },
+            ],
+          };
+        } else {
+          emptyStateConfig = {
+            title: '구독한 작품이 없습니다',
+            message: '작품을 검색한 뒤, 작품 화면에서 알림을 설정해보세요.',
+            actions: [
+              {
+                label: '검색하기',
+                variant: 'primary',
+                onClick: () => openSearchAndFocus(),
+              },
+              {
+                label: '웹툰 보기',
+                variant: 'secondary',
+                onClick: () => updateTab('webtoon'),
+              },
+            ],
+          };
+        }
+      }
     } else {
       let url = '';
 
@@ -1671,8 +2119,10 @@ async function fetchAndRenderContent(tabId) {
   UI.contentGrid.innerHTML = '';
 
   if (!data.length) {
-    UI.contentGrid.innerHTML =
-      '<div class="col-span-3 text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
+    if (emptyStateConfig) renderEmptyState(UI.contentGrid, emptyStateConfig);
+    else
+      UI.contentGrid.innerHTML =
+        '<div class="col-span-3 text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
     return;
   }
 
@@ -1688,20 +2138,30 @@ async function fetchAndRenderContent(tabId) {
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
   el.className = 'relative group cursor-pointer fade-in';
+  const subKey = buildSubscriptionKey(content);
+  if (subKey) {
+    el.setAttribute('data-sub-key', subKey);
+  }
 
   const meta = normalizeMeta(content?.meta);
-  const thumb =
-    meta?.common?.thumbnail_url ||
-    'https://via.placeholder.com/300x400/333/999?text=No+Img';
+  const thumb = meta?.common?.thumbnail_url || FALLBACK_THUMB;
   const authors = Array.isArray(meta?.common?.authors)
     ? meta.common.authors.join(', ')
     : '';
 
   const cardContainer = document.createElement('div');
   cardContainer.className = `${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2`;
+  cardContainer.setAttribute('data-card-thumb', 'true');
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
+  imgEl.loading = 'lazy';
+  imgEl.decoding = 'async';
+  imgEl.onerror = () => {
+    if (imgEl.dataset.fallbackApplied === '1') return;
+    imgEl.dataset.fallbackApplied = '1';
+    imgEl.src = FALLBACK_THUMB;
+  };
   imgEl.className =
     'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
   cardContainer.appendChild(imgEl);
@@ -1750,56 +2210,11 @@ function createCard(content, tabId, aspectClass) {
     'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
   cardContainer.appendChild(gradient);
 
-  // Star overlay (subscribe toggle)
-  const starButton = document.createElement('button');
-  starButton.type = 'button';
-  starButton.className =
-    'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors';
+  const subscribed = isSubscribed(content);
+  if (subscribed) {
+    cardContainer.appendChild(createStarBadgeEl());
+  }
 
-  const setStarVisual = (on) => {
-    starButton.innerHTML = on
-      ? '<span class="text-[12px]">★</span><span class="text-[10px]">구독중</span>'
-      : '<span class="text-[12px]">☆</span><span class="text-[10px]">구독</span>';
-
-    starButton.className =
-      'absolute top-[6px] right-[6px] h-[26px] px-2 rounded-[12px] backdrop-blur-[4px] flex items-center gap-1 z-20 text-xs font-bold transition-colors ' +
-      (on ? 'bg-black/60 text-[#4F46E5]' : 'bg-black/40 text-gray-400');
-  };
-
-  setStarVisual(isSubscribed(content));
-
-  starButton.onclick = async (evt) => {
-    evt.stopPropagation();
-    if (!requireAuthOrPrompt('subscription-toggle')) return;
-
-    const key = buildSubscriptionKey(content);
-    if (!key) {
-      showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
-      return;
-    }
-
-    const currentlySubscribed = isSubscribed(content);
-    const nextState = !currentlySubscribed;
-
-    // optimistic update
-    setStarVisual(nextState);
-    if (nextState) STATE.subscriptionsSet.add(key);
-    else STATE.subscriptionsSet.delete(key);
-
-    try {
-      if (nextState) await subscribeContent(content);
-      else await unsubscribeContent(content);
-
-      if (STATE.activeTab === 'my') fetchAndRenderContent('my');
-    } catch (e) {
-      // rollback
-      if (currentlySubscribed) STATE.subscriptionsSet.add(key);
-      else STATE.subscriptionsSet.delete(key);
-      setStarVisual(currentlySubscribed);
-    }
-  };
-
-  cardContainer.appendChild(starButton);
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
@@ -1818,7 +2233,7 @@ function createCard(content, tabId, aspectClass) {
   textContainer.appendChild(authorEl);
   el.appendChild(textContainer);
 
-  el.onclick = () => openModal(content);
+  el.onclick = () => openSubscribeModal(content);
   return el;
 }
 
@@ -1898,11 +2313,12 @@ function getContentUrl(content) {
   return '';
 }
 
-function openModal(content) {
+function openSubscribeModal(content) {
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
+  closeProfileMenu();
 
   const titleText = String(content?.title || '').trim();
   const url = getContentUrl(content);
@@ -1939,13 +2355,17 @@ function openModal(content) {
     while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
     linkContainer.classList.add('hidden');
   }
-  if (modalEl) modalEl.classList.remove('hidden');
+  if (modalEl) {
+    openModal(modalEl, {
+      initialFocusEl: document.getElementById('subscribeButton') || modalEl,
+    });
+  }
   syncModalButton();
 }
 
-function closeModal() {
+function closeSubscribeModal() {
   const modalEl = document.getElementById('subscribeModal');
-  if (modalEl) modalEl.classList.add('hidden');
+  if (modalEl) closeModal(modalEl);
   STATE.currentModalContent = null;
 }
 
@@ -1954,18 +2374,34 @@ window.toggleSubscriptionFromModal = async function () {
   if (!content) return;
   if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
 
+  const key = buildSubscriptionKey(content);
+  const btn = document.getElementById('subscribeButton');
+  if (key && STATE.pendingSubOps.has(key)) return;
+  if (key) STATE.pendingSubOps.add(key);
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-80', 'cursor-not-allowed');
+  }
+
   const currently = isSubscribed(content);
   try {
     if (currently) await unsubscribeContent(content);
     else await subscribeContent(content);
 
     syncModalButton();
+    refreshStarBadges({ key });
 
     if (STATE.activeTab === 'my') {
       fetchAndRenderContent('my');
     }
   } catch (e) {
     // errors already toasted in subscribe/unsubscribe
+  } finally {
+    if (key) STATE.pendingSubOps.delete(key);
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-80', 'cursor-not-allowed');
+    }
   }
 };
 
@@ -2002,9 +2438,9 @@ if (DEBUG_TOOLS) {
 }
 
 window.updateMySubTab = updateMySubTab;
-window.closeModal = closeModal;
+window.closeSubscribeModal = closeSubscribeModal;
 
 // Quick sanity test steps (manual):
 // 1) localStorage.setItem('es_access_token', '<token>')
 // 2) Reload and open the "My Sub" tab
-// 3) Toggle the star on content cards and watch POST/DELETE /api/me/subscriptions
+// 3) Open a card to trigger the subscribe modal and use the modal button to watch POST/DELETE /api/me/subscriptions
