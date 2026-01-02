@@ -137,6 +137,11 @@ const STATE = {
     aspectClass: 'aspect-[3/4]',
     tabId: 'webtoon',
   },
+  renderAbortController: null,
+  gridRenderAbort: null,
+  searchRenderAbort: null,
+  searchAbortController: null,
+  tabAbortController: null,
 };
 
 /* =========================
@@ -187,6 +192,71 @@ function setClasses(el, classStr) {
   if (!el) return el;
   el.className = classStr;
   return el;
+}
+
+async function renderInBatches({
+  items,
+  container,
+  renderItem,
+  batchSize = 24,
+  yieldMs = 8,
+  signal,
+}) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  const safeItems = Array.isArray(items) ? items : [];
+  let i = 0;
+
+  while (i < safeItems.length) {
+    if (signal?.aborted) return;
+
+    const end = Math.min(i + batchSize, safeItems.length);
+    const frag = document.createDocumentFragment();
+    for (; i < end; i += 1) {
+      frag.appendChild(renderItem(safeItems[i], i));
+    }
+    container.appendChild(frag);
+
+    await new Promise((r) => requestAnimationFrame(r));
+    const start = performance.now();
+    if (yieldMs > 0) {
+      while (performance.now() - start < yieldMs) {
+        // allow paint + microtasks
+        await Promise.resolve();
+        break;
+      }
+    }
+  }
+}
+
+function createConcurrencyLimiter(limit = 3) {
+  const queue = [];
+  let activeCount = 0;
+
+  const next = () => {
+    if (!queue.length || activeCount >= limit) return;
+    const { fn, resolve, reject } = queue.shift();
+    activeCount += 1;
+    Promise.resolve()
+      .then(fn)
+      .then((value) => {
+        activeCount -= 1;
+        resolve(value);
+        next();
+      })
+      .catch((err) => {
+        activeCount -= 1;
+        reject(err);
+        next();
+      });
+  };
+
+  return (fn) =>
+    new Promise((resolve, reject) => {
+      queue.push({ fn, resolve, reject });
+      next();
+    });
 }
 
 /* =========================
@@ -452,16 +522,6 @@ const updateCountIndicator = (category) => {
   setCountIndicatorText(`불러온 콘텐츠 ${pg.totalLoaded}${loadingSuffix}`);
 };
 
-const updateCountIndicatorForBatched = () => {
-  const { list, index } = STATE.rendering;
-  if (!list || !list.length) {
-    setCountIndicatorText('');
-    return;
-  }
-  const rendered = Math.min(index, list.length);
-  setCountIndicatorText(`불러온 콘텐츠 ${rendered} / ${list.length}`);
-};
-
 const hideLoadMoreUI = () => {
   if (UI.contentLoadMoreBtn) UI.contentLoadMoreBtn.classList.add('hidden');
 };
@@ -687,7 +747,7 @@ const buildUrl = (path, queryObj = {}) => {
   return queryString ? `${path}?${queryString}` : path;
 };
 
-async function apiRequest(method, path, { query, body, token } = {}) {
+async function apiRequest(method, path, { query, body, token, signal } = {}) {
   const url = buildUrl(path, query);
   const headers = { Accept: 'application/json' };
   let serializedBody;
@@ -706,7 +766,7 @@ async function apiRequest(method, path, { query, body, token } = {}) {
     hasToken: Boolean(token),
   });
 
-  const response = await fetch(url, { method, headers, body: serializedBody });
+  const response = await fetch(url, { method, headers, body: serializedBody, signal });
   debugLog('[apiResponse]', response.status, response.ok);
 
   const buildError = async () => {
@@ -1339,6 +1399,7 @@ const showSearchIdle = () => {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   STATE.search.results = [];
+  if (STATE.searchRenderAbort) STATE.searchRenderAbort.abort();
   if (UI.searchIdle) UI.searchIdle.classList.remove('hidden');
   if (UI.searchResultsView) UI.searchResultsView.classList.add('hidden');
   if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
@@ -1356,6 +1417,7 @@ function showSearchEmpty(title, { message = '', actions = [] } = {}) {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   STATE.search.results = [];
+  if (STATE.searchRenderAbort) STATE.searchRenderAbort.abort();
   if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
   if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
   if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
@@ -1446,7 +1508,7 @@ function updateSearchClearButton() {
   UI.searchClearButton.classList.toggle('hidden', !UI.searchPageInput.value.trim());
 }
 
-function renderSearchResults(items, effectiveType) {
+async function renderSearchResults(items, effectiveType) {
   const grid = UI.searchPageResults;
   if (!grid) return;
 
@@ -1461,6 +1523,10 @@ function renderSearchResults(items, effectiveType) {
   grid.setAttribute('role', 'listbox');
   grid.setAttribute('aria-label', '검색 결과');
   const aspectClass = getAspectByType(effectiveType);
+
+  if (STATE.searchRenderAbort) STATE.searchRenderAbort.abort();
+  const renderController = new AbortController();
+  STATE.searchRenderAbort = renderController;
 
   const normalizedItems = Array.isArray(items)
     ? items.map((raw) => ({
@@ -1495,21 +1561,28 @@ function renderSearchResults(items, effectiveType) {
     return;
   }
 
-  normalizedItems.forEach((normalized, idx) => {
-    const card = createCard(normalized, effectiveType, aspectClass);
-    card.dataset.searchIndex = String(idx);
-    card.setAttribute('role', 'option');
-    card.setAttribute('aria-selected', 'false');
-    card.__content = normalized;
-    card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
-    card.onclick = () => openSubscribeModal(normalized);
-    grid.appendChild(card);
+  await renderInBatches({
+    items: normalizedItems,
+    container: grid,
+    signal: renderController.signal,
+    renderItem: (normalized, idx) => {
+      const card = createCard(normalized, effectiveType, aspectClass);
+      card.dataset.searchIndex = String(idx);
+      card.setAttribute('role', 'option');
+      card.setAttribute('aria-selected', 'false');
+      card.__content = normalized;
+      card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
+      card.onclick = () => openSubscribeModal(normalized);
+      return card;
+    },
   });
 
-  setActiveSearchIndex(normalizedItems.length ? 0 : -1);
+  if (!renderController.signal.aborted) {
+    setActiveSearchIndex(normalizedItems.length ? 0 : -1);
+  }
 }
 
-function performSearch(q) {
+async function performSearch(q) {
   const query = (q || '').trim();
   const effectiveType = getSearchType();
   const source = getSearchSource(effectiveType);
@@ -1518,6 +1591,10 @@ function performSearch(q) {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   updateSearchClearButton();
+
+  if (STATE.searchRenderAbort) STATE.searchRenderAbort.abort();
+  if (STATE.searchAbortController) STATE.searchAbortController.abort();
+  STATE.searchAbortController = null;
 
   if (!query) {
     STATE.search.requestSeq += 1;
@@ -1529,41 +1606,45 @@ function performSearch(q) {
   const seq = ++STATE.search.requestSeq;
   STATE.search.isLoading = true;
 
+  const controller = new AbortController();
+  STATE.searchAbortController = controller;
+
   renderSearchLoading(effectiveType);
-  apiRequest('GET', '/api/contents/search', {
-    query: { q: query, type: effectiveType, source },
-  })
-    .then((res) => {
-      if (seq !== STATE.search.requestSeq) return;
-      const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
-      renderSearchResults(items, effectiveType);
-      addRecentSearch(query);
-    })
-    .catch((e) => {
-      if (seq !== STATE.search.requestSeq) return;
-      showToast(e?.message || '검색에 실패했습니다.', { type: 'error' });
-      const clearAction = {
-        label: '검색어 지우기',
-        variant: 'primary',
-        onClick: () => {
-          if (UI.searchPageInput) {
-            UI.searchPageInput.value = '';
-            performSearch('');
-            UI.searchPageInput.focus();
-            updateSearchClearButton();
-          }
-        },
-      };
-      showSearchEmpty('검색 결과가 없습니다', {
-        message: '다른 키워드로 검색해보세요.',
-        actions: [clearAction],
-      });
-    })
-    .finally(() => {
-      if (seq !== STATE.search.requestSeq) return;
-      STATE.search.isLoading = false;
-      if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+
+  try {
+    const res = await apiRequest('GET', '/api/contents/search', {
+      query: { q: query, type: effectiveType, source },
+      signal: controller.signal,
     });
+
+    if (seq !== STATE.search.requestSeq) return;
+    const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+    await renderSearchResults(items, effectiveType);
+    addRecentSearch(query);
+  } catch (e) {
+    if (controller.signal.aborted || seq !== STATE.search.requestSeq) return;
+    showToast(e?.message || '검색에 실패했습니다.', { type: 'error' });
+    const clearAction = {
+      label: '검색어 지우기',
+      variant: 'primary',
+      onClick: () => {
+        if (UI.searchPageInput) {
+          UI.searchPageInput.value = '';
+          performSearch('');
+          UI.searchPageInput.focus();
+          updateSearchClearButton();
+        }
+      },
+    };
+    showSearchEmpty('검색 결과가 없습니다', {
+      message: '다른 키워드로 검색해보세요.',
+      actions: [clearAction],
+    });
+  } finally {
+    if (seq !== STATE.search.requestSeq) return;
+    STATE.search.isLoading = false;
+    if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+  }
 }
 
 function debouncedSearch(q) {
@@ -2184,61 +2265,12 @@ const appendCardsToGrid = (
   UI.contentGrid.appendChild(fragment);
 };
 
-const renderNextBatch = () => {
-  if (STATE.rendering.scheduled) return;
-
-  STATE.rendering.scheduled = true;
-  const expectedSeq = STATE.rendering.requestSeq;
-
-  requestAnimationFrame(() => {
-    STATE.rendering.scheduled = false;
-    if (STATE.rendering.requestSeq !== expectedSeq || STATE.contentRequestSeq !== expectedSeq)
-      return;
-
-    const { list, index, batchSize, aspectClass, tabId } = STATE.rendering;
-    if (!UI.contentGrid || !list || !list.length) return;
-
-    const end = Math.min(index + batchSize, list.length);
-    const fragment = document.createDocumentFragment();
-
-    for (let i = index; i < end; i++) {
-      fragment.appendChild(createCard(list[i], tabId, aspectClass));
-    }
-
-    UI.contentGrid.appendChild(fragment);
-    STATE.rendering.index = end;
-    updateCountIndicatorForBatched();
-
-    if (end < list.length) {
-      renderNextBatch();
-    }
-  });
-};
-
-const startBatchedRender = (items, tabId, aspectClass) => {
-  const list = Array.isArray(items) ? items : [];
-  STATE.rendering.list = list;
-  STATE.rendering.index = 0;
-  STATE.rendering.scheduled = false;
-  STATE.rendering.requestSeq = STATE.contentRequestSeq;
-  STATE.rendering.aspectClass = aspectClass;
-  STATE.rendering.tabId = tabId;
-
-  if (UI.contentGrid) UI.contentGrid.innerHTML = '';
-
-  if (!list.length) {
-    setCountIndicatorText('');
-    return;
-  }
-
-  updateCountIndicatorForBatched();
-  renderNextBatch();
-};
-
-async function loadNextPage(category) {
+async function loadNextPage(category, { signal } = {}) {
+  const effectiveSignal = signal || STATE.tabAbortController?.signal;
   const pg = STATE.pagination?.[category];
   if (!pg || pg.loading || pg.done) return;
   if (pg.requestSeq !== STATE.contentRequestSeq) return;
+  if (effectiveSignal?.aborted) return;
 
   pg.loading = true;
   updateLoadMoreUI(category);
@@ -2257,8 +2289,9 @@ async function loadNextPage(category) {
   const url = buildUrl(`/api/contents/${category}`, query);
 
   try {
-    const json = await apiRequest('GET', url);
+    const json = await apiRequest('GET', url, { signal: effectiveSignal });
     if (pg.requestSeq !== STATE.contentRequestSeq) return;
+    if (effectiveSignal?.aborted) return;
 
     const incoming = Array.isArray(json?.contents)
       ? json.contents.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
@@ -2317,6 +2350,7 @@ async function loadNextPage(category) {
       disconnectInfiniteObserver();
     }
   } catch (e) {
+    if (effectiveSignal?.aborted) return;
     showToast(e?.message || '콘텐츠를 불러오지 못했습니다.', { type: 'error' });
   } finally {
     pg.loading = false;
@@ -2327,13 +2361,23 @@ async function loadNextPage(category) {
 async function fetchAndRenderContent(tabId) {
   if (!UI.contentGrid) return;
 
+  if (STATE.tabAbortController) STATE.tabAbortController.abort();
+  if (STATE.gridRenderAbort) STATE.gridRenderAbort.abort();
+
+  const tabAbortController = new AbortController();
+  STATE.tabAbortController = tabAbortController;
+  STATE.renderAbortController = tabAbortController;
+  STATE.gridRenderAbort = null;
+
+  const { signal } = tabAbortController;
+
   disconnectInfiniteObserver();
   setActivePaginationCategory(null);
   hideLoadMoreUI();
   setCountIndicatorText('');
 
   const requestSeq = ++STATE.contentRequestSeq;
-  const isStale = () => STATE.contentRequestSeq !== requestSeq;
+  const isStale = () => STATE.contentRequestSeq !== requestSeq || signal.aborted;
 
   UI.contentGrid.innerHTML = '';
   STATE.isLoading = true;
@@ -2377,6 +2421,7 @@ async function fetchAndRenderContent(tabId) {
       let subs = [];
       try {
         subs = await loadSubscriptions();
+        if (isStale()) return;
       } catch (e) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
@@ -2462,7 +2507,7 @@ async function fetchAndRenderContent(tabId) {
           updateLoadMoreUI(day);
           updateCountIndicator(day);
           setupInfiniteObserver(day);
-          await loadNextPage(day);
+          await loadNextPage(day, { signal });
           return;
         }
 
@@ -2472,7 +2517,7 @@ async function fetchAndRenderContent(tabId) {
       }
 
       if (url) {
-        const json = await apiRequest('GET', url);
+        const json = await apiRequest('GET', url, { signal });
 
         if (tabId === 'webtoon' || tabId === 'novel') {
           const day = STATE.filters[tabId].day;
@@ -2501,7 +2546,9 @@ async function fetchAndRenderContent(tabId) {
     data = Array.isArray(data)
       ? data.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
       : [];
+    if (isStale()) return;
   } catch (e) {
+    if (signal.aborted) return;
     console.error('Fetch error', e);
     showToast(e?.message || '오류가 발생했습니다.', { type: 'error' });
   } finally {
@@ -2521,13 +2568,20 @@ async function fetchAndRenderContent(tabId) {
     return;
   }
 
-  if (tabId === 'webtoon' || tabId === 'novel') {
-    startBatchedRender(data, tabId, aspectClass);
-    return;
-  }
-
-  appendCardsToGrid(data, { tabId, aspectClass, clearBeforeAppend: true });
+  const renderController = new AbortController();
+  STATE.gridRenderAbort = renderController;
+  STATE.renderAbortController = renderController;
+  STATE.rendering.list = data;
+  STATE.rendering.aspectClass = aspectClass;
+  STATE.rendering.tabId = tabId;
   setCountIndicatorText(`총 ${data.length}건`);
+
+  await renderInBatches({
+    items: data,
+    container: UI.contentGrid,
+    signal: renderController.signal,
+    renderItem: (item) => createCard(item, tabId, aspectClass),
+  });
 }
 
 /* =========================
@@ -2572,11 +2626,21 @@ function createCard(content, tabId, aspectClass) {
   imgEl.src = thumb;
   imgEl.loading = 'lazy';
   imgEl.decoding = 'async';
+  imgEl.fetchPriority = 'low';
   imgEl.onerror = () => {
     if (imgEl.dataset.fallbackApplied === '1') return;
     imgEl.dataset.fallbackApplied = '1';
     imgEl.src = FALLBACK_THUMB;
   };
+  const thumbSizeMap = {
+    'aspect-[3/4]': { width: 300, height: 400 },
+    'aspect-[1/1.4]': { width: 280, height: 392 },
+    'aspect-[2/3]': { width: 320, height: 480 },
+    default: { width: 300, height: 400 },
+  };
+  const { width, height } = thumbSizeMap[aspectClass] || thumbSizeMap.default;
+  imgEl.width = width;
+  imgEl.height = height;
   imgEl.className =
     'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
   cardContainer.appendChild(imgEl);
