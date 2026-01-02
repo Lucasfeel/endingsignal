@@ -7,6 +7,10 @@
    - no backend changes
 */
 
+/* =========================
+   Constants & UI tokens
+   ========================= */
+
 const DEBUG_API = false;
 const DEBUG_TOOLS = false;
 
@@ -22,9 +26,42 @@ const ICONS = {
   my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
 };
 
+const UI_CLASSES = {
+  btnPrimary:
+    'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
+  btnSecondary:
+    'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
+  btnGhost:
+    'h-10 px-4 rounded-xl bg-transparent text-white/80 text-sm hover:bg-white/5 active:bg-white/8',
+  iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
+
+  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
+  chipActive: 'h-9 px-3 inline-flex items-center rounded-full bg-white/15 text-sm text-white',
+
+  emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
+  emptyTitle: 'text-lg font-semibold',
+  emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
+
+  sectionTitle: 'text-base font-semibold',
+  sectionSubtle: 'text-sm text-white/70',
+
+  starBadge:
+    'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none',
+  affordOverlay:
+    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100',
+  affordHint:
+    'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1 group-hover:opacity-100',
+
+  inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
+};
+
 const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><rect width="300" height="400" fill="#1E1E1E"/><path d="M30 320h240v30H30z" fill="#2d2d2d"/><rect x="60" y="60" width="180" height="200" rx="12" fill="#2f2f2f"/><text x="150" y="175" text-anchor="middle" fill="#6b7280" font-family="sans-serif" font-size="20">No Image</text></svg>'
 )}`;
+
+/* =========================
+   Application state
+   ========================= */
 
 const STATE = {
   activeTab: 'webtoon',
@@ -102,6 +139,10 @@ const STATE = {
   },
 };
 
+/* =========================
+   DOM cache
+   ========================= */
+
 const UI = {
   bottomNav: document.getElementById('bottomNav'),
   contentGrid: document.getElementById('contentGridContainer'),
@@ -142,24 +183,33 @@ const UI = {
   searchPageClearQuery: document.getElementById('searchPageClearQuery'),
 };
 
+function setClasses(el, classStr) {
+  if (!el) return el;
+  el.className = classStr;
+  return el;
+}
+
+/* =========================
+   Generic helpers
+   ========================= */
+
 function renderEmptyState(containerEl, { title = '', message = '', actions = [] } = {}) {
   if (!containerEl) return;
   containerEl.innerHTML = '';
 
-  const wrapper = document.createElement('div');
-  wrapper.className =
-    'w-full col-span-full flex flex-col items-center justify-center text-center py-12 px-4';
+  const wrapper = setClasses(
+    document.createElement('div'),
+    `w-full col-span-full ${UI_CLASSES.emptyWrap}`,
+  );
 
   if (title) {
-    const titleEl = document.createElement('h3');
-    titleEl.className = 'text-lg font-semibold text-white';
+    const titleEl = setClasses(document.createElement('h3'), `${UI_CLASSES.emptyTitle} text-white`);
     titleEl.textContent = title;
     wrapper.appendChild(titleEl);
   }
 
   if (message) {
-    const msgEl = document.createElement('p');
-    msgEl.className = 'text-sm text-white/70 mt-2 max-w-md';
+    const msgEl = setClasses(document.createElement('p'), UI_CLASSES.emptyMsg);
     msgEl.textContent = message;
     wrapper.appendChild(msgEl);
   }
@@ -172,12 +222,9 @@ function renderEmptyState(containerEl, { title = '', message = '', actions = [] 
       if (!action?.label || typeof action.onClick !== 'function') return;
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className =
-        'px-4 py-2 rounded-full text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#121212] spring-bounce';
-      if (action.variant === 'primary')
-        btn.className += ' bg-[#4F46E5] text-white hover:bg-[#4338CA] focus:ring-[#4F46E5]';
-      else btn.className += ' bg-white/5 text-white hover:bg-white/10 border border-white/10 focus:ring-white/40';
-
+      const variantClass =
+        action.variant === 'secondary' ? UI_CLASSES.btnSecondary : UI_CLASSES.btnPrimary;
+      setClasses(btn, `${variantClass} spring-bounce`);
       btn.textContent = action.label;
       btn.onclick = action.onClick;
       actionsWrap.appendChild(btn);
@@ -191,7 +238,9 @@ function renderEmptyState(containerEl, { title = '', message = '', actions = [] 
 
 let contentGridObserver = null;
 
-// Modal management
+/* =========================
+   Modals
+   ========================= */
 const modalStack = [];
 const modalMeta = new Map();
 let bodyOverflowBackup = '';
@@ -289,8 +338,7 @@ function closeModal(modalEl) {
 
 function createStarBadgeEl() {
   const badgeEl = document.createElement('div');
-  badgeEl.className =
-    'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none';
+  setClasses(badgeEl, UI_CLASSES.starBadge);
   badgeEl.setAttribute('aria-hidden', 'true');
   badgeEl.setAttribute('data-star-badge', 'true');
   badgeEl.textContent = '★';
@@ -1146,20 +1194,18 @@ const renderRecentSearches = () => {
 
   if (!list.length) {
     const empty = document.createElement('div');
-    empty.className = 'text-sm text-white/60';
+    setClasses(empty, UI_CLASSES.sectionSubtle);
     empty.textContent = '최근 검색어가 없습니다';
     chips.appendChild(empty);
     return;
   }
 
   list.slice(0, MAX_RECENT_SEARCHES).forEach((query) => {
-    const wrapper = document.createElement('div');
-    wrapper.className =
-      'inline-flex items-center gap-2 h-9 px-3 rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/10';
+    const wrapper = setClasses(document.createElement('div'), UI_CLASSES.chip);
 
     const labelBtn = document.createElement('button');
     labelBtn.type = 'button';
-    labelBtn.className = 'truncate';
+    labelBtn.className = 'truncate text-left';
     labelBtn.textContent = query;
     labelBtn.onclick = () => {
       if (UI.searchPageInput) {
@@ -1172,8 +1218,7 @@ const renderRecentSearches = () => {
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.setAttribute('aria-label', 'Remove recent search');
-    deleteBtn.className =
-      'h-6 w-6 rounded-full bg-white/5 flex items-center justify-center text-white/70 hover:bg-white/10';
+    deleteBtn.className = 'h-6 w-6 rounded-full bg-white/10 flex items-center justify-center text-white/70';
     deleteBtn.textContent = '×';
     deleteBtn.onclick = (evt) => {
       evt.stopPropagation();
@@ -1573,6 +1618,18 @@ function openSearchAndFocus() {
 function setupSearchHandlers() {
   renderRecentSearches();
 
+  if (UI.searchBackButton) setClasses(UI.searchBackButton, UI_CLASSES.iconBtn);
+  if (UI.searchClearButton)
+    setClasses(UI.searchClearButton, `${UI_CLASSES.iconBtn} h-8 w-8 hidden`);
+  if (UI.searchPageInput) setClasses(UI.searchPageInput, UI_CLASSES.inputBase);
+  if (UI.searchRecentClearAll) setClasses(UI.searchRecentClearAll, UI_CLASSES.sectionSubtle);
+  if (UI.searchPopularTitle) setClasses(UI.searchPopularTitle, UI_CLASSES.sectionTitle);
+  if (UI.searchPopularSubtitle) setClasses(UI.searchPopularSubtitle, UI_CLASSES.sectionSubtle);
+  if (UI.searchResultCount?.parentElement)
+    setClasses(UI.searchResultCount.parentElement, UI_CLASSES.sectionSubtle);
+  if (UI.searchPageClearQuery)
+    setClasses(UI.searchPageClearQuery, `${UI_CLASSES.btnSecondary} mt-6`);
+
   if (UI.searchButton) UI.searchButton.onclick = () => openSearchPage({ focus: true });
 
   if (UI.searchInput) {
@@ -1818,6 +1875,9 @@ function setupAuthModalListeners() {
   const pwdEl = document.getElementById('authPassword');
   const confirmEl = document.getElementById('authPasswordConfirm');
   const errorEl = document.getElementById('authError');
+
+  if (cancelBtn) setClasses(cancelBtn, `${UI_CLASSES.btnSecondary} spring-bounce`);
+  if (submitBtn) setClasses(submitBtn, `${UI_CLASSES.btnPrimary} spring-bounce neon-glow`);
 
   if (cancelBtn) cancelBtn.onclick = () => closeAuthModal();
   if (toggleBtn)
@@ -2470,6 +2530,10 @@ async function fetchAndRenderContent(tabId) {
   setCountIndicatorText(`총 ${data.length}건`);
 }
 
+/* =========================
+   Cards
+   ========================= */
+
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
   el.className =
@@ -2496,15 +2560,13 @@ function createCard(content, tabId, aspectClass) {
   const affordOverlay = document.createElement('div');
   affordOverlay.setAttribute('data-afford-overlay', 'true');
   affordOverlay.setAttribute('aria-hidden', 'true');
-  affordOverlay.className =
-    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100';
+  setClasses(affordOverlay, UI_CLASSES.affordOverlay);
 
   const affordHint = document.createElement('div');
   affordHint.setAttribute('data-afford-hint', 'true');
   affordHint.setAttribute('aria-hidden', 'true');
   affordHint.textContent = 'Open';
-  affordHint.className =
-    'absolute bottom-2 left-2 z-[6] text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1 pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100';
+  setClasses(affordHint, UI_CLASSES.affordHint);
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
@@ -2698,6 +2760,7 @@ function openSubscribeModal(content) {
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
+  const ctaBtn = document.getElementById('subscribeButton');
   closeProfileMenu();
 
   recordRecentlyOpened(content);
@@ -2737,6 +2800,7 @@ function openSubscribeModal(content) {
     while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
     linkContainer.classList.add('hidden');
   }
+  if (ctaBtn) setClasses(ctaBtn, `${UI_CLASSES.btnPrimary} spring-bounce neon-glow`);
   if (modalEl) {
     openModal(modalEl, {
       initialFocusEl: document.getElementById('subscribeButton') || modalEl,
