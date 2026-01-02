@@ -1941,7 +1941,7 @@ function createCard(content, tabId, aspectClass) {
     badgeEl.className =
       'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none';
     badgeEl.setAttribute('aria-hidden', 'true');
-    badgeEl.textContent = '★ 구독중';
+    badgeEl.textContent = '★';
     cardContainer.appendChild(badgeEl);
   }
 
