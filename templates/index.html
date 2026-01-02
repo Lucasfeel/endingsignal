@@ -120,24 +120,25 @@
             </div>
             <div class="flex items-center gap-4">
                 <div id="headerSearchWrap" class="relative flex items-center">
-                    <button id="searchButton" class="spring-bounce">
+                    <button id="searchButton" data-ui="header-btn" class="h-10 w-10">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                     </button>
                     <input
                         id="searchInput"
                         type="text"
-                        class="ml-2 w-[180px] transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                        data-ui="search-trigger"
+                        class="ml-2 w-[180px]"
                         placeholder="검색"
                         readonly
                     />
                 </div>
-                <button id="profileButton" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap rounded-full bg-[#2d2d2d] border border-white/10 flex items-center justify-center text-xs text-white spring-bounce hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)]">
+                <button id="profileButton" data-ui="header-btn" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap">
                     <span class="sr-only">프로필</span>
                     <span id="profileButtonText">Login</span>
                 </button>
-                <div id="profileMenu" class="hidden absolute right-4 top-[48px] w-40 rounded-xl bg-[#1E1E1E] border border-white/10 shadow-2xl z-[130] py-2 text-sm" role="menu" aria-label="프로필 메뉴">
-                    <button id="profileMenuMy" role="menuitem" class="w-full text-left px-4 py-2 text-white hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]">내 구독</button>
-                    <button id="profileMenuLogout" role="menuitem" class="w-full text-left px-4 py-2 text-red-300 hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]">로그아웃</button>
+                <div id="profileMenu" data-ui="menu-wrap" class="hidden absolute right-4 top-[48px] z-[130] w-40" role="menu" aria-label="프로필 메뉴">
+                    <button id="profileMenuMy" data-ui="menu-item" role="menuitem">내 구독</button>
+                    <button id="profileMenuLogout" data-ui="menu-item-danger" role="menuitem">로그아웃</button>
                 </div>
             </div>
         </header>
@@ -177,10 +178,7 @@
 
             <div id="contentGridFooter" class="px-4 pb-4 space-y-2">
                 <div id="contentCountIndicator" class="text-center text-[11px] text-gray-400"></div>
-                <button
-                    id="contentLoadMoreBtn"
-                    class="hidden w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors"
-                >더 불러오기</button>
+                <button id="contentLoadMoreBtn" data-ui="load-more" class="hidden">더 불러오기</button>
                 <div id="contentGridSentinel" class="h-6 w-full"></div>
             </div>
 
@@ -200,14 +198,14 @@
         </nav>
 
         <!-- Modals -->
-        <div id="subscribeModal" class="fixed inset-0 flex items-center justify-center z-[100] hidden" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" tabindex="-1">
+        <div id="subscribeModal" data-ui="modal-wrap" class="fixed inset-0 z-[100] hidden" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" tabindex="-1">
             <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-modal-overlay="true"></div>
-            <div id="modalContent" class="relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all">
-                <h2 id="subscribeModalTitle" class="text-xl font-bold mb-1 text-white">완결 알림 받기</h2>
-                <p id="modalWebtoonTitle" class="mb-4 text-gray-400 text-sm"></p>
+            <div id="modalContent" data-ui="modal-card" class="relative">
+                <h2 id="subscribeModalTitle" data-ui="modal-title">완결 알림 받기</h2>
+                <p id="modalWebtoonTitle" data-ui="modal-body" class="mb-4"></p>
                 <div id="modalWebtoonLinkContainer" class="mb-6 text-sm"></div>
                 <div class="flex justify-end gap-2">
-                    <button id="subscribeButton" onclick="toggleSubscriptionFromModal()" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce neon-glow">구독/해제</button>
+                    <button id="subscribeButton" data-ui="modal-primary" onclick="toggleSubscriptionFromModal()">구독/해제</button>
                 </div>
             </div>
         </div>
@@ -218,13 +216,13 @@
                 <div id="searchPageContainer" class="mx-auto h-full max-w-[480px] px-4">
                     <div class="flex h-full flex-col min-h-0">
                         <div class="flex items-center gap-2 pt-4 pb-3">
-                            <button id="searchBackButton" class="h-10 w-10 flex items-center justify-center rounded-xl bg-white/5" aria-label="뒤로">
+                            <button id="searchBackButton" data-ui="search-back" aria-label="뒤로">
                                 ←
                             </button>
 
                             <div class="flex-1 relative">
-                                <input id="searchPageInput" type="text" inputmode="search" autocomplete="off" placeholder="작품을 검색해 보세요" class="w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white text-base outline-none" />
-                                <button id="searchClearButton" class="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg bg-white/5 hidden" aria-label="검색어 지우기">×</button>
+                                <input id="searchPageInput" data-ui="search-input" type="text" inputmode="search" autocomplete="off" placeholder="작품을 검색해 보세요" />
+                                <button id="searchClearButton" data-ui="search-clear" class="absolute right-2 top-1/2 -translate-y-1/2" aria-label="검색어 지우기">×</button>
                             </div>
                         </div>
 
@@ -232,31 +230,31 @@
                             <div id="searchIdle" class="space-y-6">
                                 <div class="flex items-center justify-between">
                                     <h2 class="text-base font-semibold">최근 검색어</h2>
-                                    <button id="searchRecentClearAll" class="text-sm text-white/60">전체삭제</button>
+                                    <button id="searchRecentClearAll" data-ui="search-recent-clear">전체삭제</button>
                                 </div>
                                 <div id="searchRecentChips" class="flex flex-wrap gap-2"></div>
 
                                 <div class="flex items-center justify-between">
                                     <div class="space-y-0.5">
-                                        <h2 id="searchPopularTitle" class="text-base font-semibold">최근 본 작품</h2>
-                                        <p id="searchPopularSubtitle" class="text-xs text-white/60">최근에 열어본 작품이 여기에 표시됩니다.</p>
+                                        <h2 id="searchPopularTitle" data-ui="search-popular-title">최근 본 작품</h2>
+                                        <p id="searchPopularSubtitle" data-ui="search-popular-subtitle">최근에 열어본 작품이 여기에 표시됩니다.</p>
                                     </div>
                                 </div>
-                                <div id="searchPopularGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+                                <div id="searchPopularGrid" data-ui="grid-2to3"></div>
                             </div>
 
                             <div id="searchResultsView" class="hidden space-y-3">
                                 <div class="flex items-center justify-between">
-                                    <div class="text-sm text-white/70"><span id="searchResultCount">0</span>개 결과</div>
+                                    <div data-ui="search-result-label"><span id="searchResultCount">0</span>개 결과</div>
                                 </div>
 
-                                <div id="searchPageLoading" class="hidden grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
-                                <div id="searchPageResults" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+                                <div id="searchPageLoading" data-ui="grid-2to3" class="hidden"></div>
+                                <div id="searchPageResults" data-ui="grid-2to3"></div>
 
                                 <div id="searchPageEmpty" class="hidden py-12 text-center">
-                                    <div class="text-lg font-semibold">검색 결과가 없습니다</div>
-                                    <div class="mt-2 text-sm text-white/70">다른 키워드로 검색해보세요.</div>
-                                    <button id="searchPageClearQuery" class="mt-6 h-10 px-4 rounded-xl bg-white/10">검색어 지우기</button>
+                                    <div data-ui="search-empty-title">검색 결과가 없습니다</div>
+                                    <div data-ui="search-empty-msg">다른 키워드로 검색해보세요.</div>
+                                    <button id="searchPageClearQuery" data-ui="search-empty-button">검색어 지우기</button>
                                 </div>
                             </div>
                         </div>
@@ -264,23 +262,23 @@
                 </div>
             </div>
         </div>
-        <div id="authModal" class="fixed inset-0 flex items-center justify-center z-[120] hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" tabindex="-1">
+        <div id="authModal" data-ui="modal-wrap" class="fixed inset-0 z-[120] hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" tabindex="-1">
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-modal-overlay="true"></div>
-            <div class="relative z-10 bg-[#1E1E1E] border border-white/5 p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all">
-                <h2 id="authTitle" class="text-xl font-bold mb-1 text-white">로그인</h2>
-                <p class="text-gray-400 text-sm mb-4">이메일과 비밀번호를 입력해주세요.</p>
+            <div class="relative z-10 border border-white/5" data-ui="modal-card">
+                <h2 id="authTitle" data-ui="modal-title">로그인</h2>
+                <p data-ui="modal-body" class="mb-4">이메일과 비밀번호를 입력해주세요.</p>
                 <div class="space-y-3">
-                    <input id="authEmail" type="email" class="w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]" placeholder="email" />
-                    <input id="authPassword" type="password" class="w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]" placeholder="password" />
+                    <input id="authEmail" data-ui="input-sm" type="email" placeholder="email" />
+                    <input id="authPassword" data-ui="input-sm" type="password" placeholder="password" />
                     <div id="authPasswordConfirmRow" class="space-y-2 hidden">
-                        <label class="block text-sm font-medium text-gray-300">비밀번호 확인</label>
-                        <input id="authPasswordConfirm" type="password" class="w-full px-4 py-3 bg-[#111] border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-[#4F46E5]" placeholder="비밀번호를 다시 입력" />
+                        <label data-ui="input-label">비밀번호 확인</label>
+                        <input id="authPasswordConfirm" data-ui="input-sm" type="password" class="px-4 py-3 rounded-xl" placeholder="비밀번호를 다시 입력" />
                     </div>
                     <p id="authError" class="text-red-400 text-xs min-h-[16px]"></p>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
-                    <button id="authCloseBtn" class="px-4 py-2 rounded-lg bg-[#3a3a3c] text-gray-300 text-sm font-medium spring-bounce">닫기</button>
-                    <button id="authSubmitBtn" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-sm font-bold spring-bounce neon-glow">로그인</button>
+                    <button id="authCloseBtn" data-ui="modal-secondary">닫기</button>
+                    <button id="authSubmitBtn" data-ui="modal-primary">로그인</button>
                 </div>
                 <div class="mt-4 text-center text-xs text-gray-400">
                     <span id="authModeHintText">계정이 없으신가요?</span>
@@ -288,7 +286,6 @@
                 </div>
             </div>
         </div>
-        <div id="toast" class="fixed bottom-24 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-full bg-gray-800 text-white text-sm opacity-0 transition-opacity duration-300 pointer-events-none z-[110]"></div>
     </div>
 
     <script src="/static/app.js" defer></script>
