@@ -263,6 +263,41 @@ function closeModal(modalEl) {
   }
 }
 
+function createStarBadgeEl() {
+  const badgeEl = document.createElement('div');
+  badgeEl.className =
+    'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none';
+  badgeEl.setAttribute('aria-hidden', 'true');
+  badgeEl.setAttribute('data-star-badge', 'true');
+  badgeEl.textContent = '★';
+  return badgeEl;
+}
+
+function syncStarBadgeForCard(cardEl) {
+  if (!cardEl) return;
+  const key = cardEl.getAttribute('data-sub-key');
+  if (!key) return;
+
+  const thumb = cardEl.querySelector('[data-card-thumb="true"]');
+  if (!thumb) return;
+
+  const shouldShow = STATE.subscriptionsSet.has(key);
+  const existing = thumb.querySelector('[data-star-badge="true"]');
+
+  if (shouldShow && !existing) {
+    thumb.appendChild(createStarBadgeEl());
+  } else if (!shouldShow && existing) {
+    existing.remove();
+  }
+}
+
+function refreshStarBadges({ key } = {}) {
+  const cards = Array.from(document.querySelectorAll('[data-sub-key]'));
+  const targets = key ? cards.filter((card) => card.getAttribute('data-sub-key') === key) : cards;
+
+  targets.forEach((card) => syncStarBadgeForCard(card));
+}
+
 document.addEventListener(
   'keydown',
   (evt) => {
@@ -797,6 +832,7 @@ async function subscribeContent(content) {
     });
 
     if (key) STATE.subscriptionsSet.add(key);
+    STATE.subscriptionsLoadedAt = null;
 
     // best-effort refresh (does not block UX)
     loadSubscriptions({ force: true }).catch((err) =>
@@ -834,6 +870,7 @@ async function unsubscribeContent(content) {
     });
 
     if (key) STATE.subscriptionsSet.delete(key);
+    STATE.subscriptionsLoadedAt = null;
 
     loadSubscriptions({ force: true }).catch((err) =>
       console.warn('Failed to refresh subscriptions after unsubscribe', err)
@@ -2101,6 +2138,10 @@ async function fetchAndRenderContent(tabId) {
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
   el.className = 'relative group cursor-pointer fade-in';
+  const subKey = buildSubscriptionKey(content);
+  if (subKey) {
+    el.setAttribute('data-sub-key', subKey);
+  }
 
   const meta = normalizeMeta(content?.meta);
   const thumb = meta?.common?.thumbnail_url || FALLBACK_THUMB;
@@ -2110,6 +2151,7 @@ function createCard(content, tabId, aspectClass) {
 
   const cardContainer = document.createElement('div');
   cardContainer.className = `${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2`;
+  cardContainer.setAttribute('data-card-thumb', 'true');
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
@@ -2170,12 +2212,7 @@ function createCard(content, tabId, aspectClass) {
 
   const subscribed = isSubscribed(content);
   if (subscribed) {
-    const badgeEl = document.createElement('div');
-    badgeEl.className =
-      'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none';
-    badgeEl.setAttribute('aria-hidden', 'true');
-    badgeEl.textContent = '★';
-    cardContainer.appendChild(badgeEl);
+    cardContainer.appendChild(createStarBadgeEl());
   }
 
   el.appendChild(cardContainer);
@@ -2352,6 +2389,7 @@ window.toggleSubscriptionFromModal = async function () {
     else await subscribeContent(content);
 
     syncModalButton();
+    refreshStarBadges({ key });
 
     if (STATE.activeTab === 'my') {
       fetchAndRenderContent('my');
