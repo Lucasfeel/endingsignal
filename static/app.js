@@ -31,10 +31,6 @@ const UI_CLASSES = {
     'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
     'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
-  btnGhost:
-    'h-10 px-4 rounded-xl bg-transparent text-white/80 text-sm hover:bg-white/5 active:bg-white/8',
-  btnDanger:
-    'h-10 px-4 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-500/90 active:bg-red-500/80 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
@@ -43,7 +39,6 @@ const UI_CLASSES = {
     'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
 
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
-  chipActive: 'h-9 px-3 inline-flex items-center rounded-full bg-white/15 text-sm text-white',
 
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
@@ -84,7 +79,6 @@ const UI_CLASSES = {
   modalTitle: 'text-xl font-bold mb-1 text-white',
   modalBodyText: 'text-gray-400 text-sm',
 
-  grid3: 'grid grid-cols-3 gap-3',
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
 
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -92,7 +86,6 @@ const UI_CLASSES = {
     'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
   menuItemDanger:
     'w-full text-left px-4 py-3 text-sm text-red-300 hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
-  divider: 'h-px bg-white/10',
 
   loadMoreBtn:
     'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
@@ -250,7 +243,6 @@ const DATA_UI_CLASS_MAP = {
   'search-empty-msg': UI_CLASSES.emptyMsg,
   'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
   'header-btn': UI_CLASSES.headerBtn,
-  'grid-3': UI_CLASSES.grid3,
   'grid-2to3': UI_CLASSES.grid2to3,
   'modal-wrap': UI_CLASSES.modalWrap,
   'modal-card': UI_CLASSES.modalCard,
@@ -258,14 +250,12 @@ const DATA_UI_CLASS_MAP = {
   'modal-body': UI_CLASSES.modalBodyText,
   'modal-primary': cx(UI_CLASSES.btnPrimary, 'spring-bounce neon-glow'),
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
-  'modal-danger': cx(UI_CLASSES.btnDanger, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
   'pill-hint': UI_CLASSES.pillHint,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
-  divider: UI_CLASSES.divider,
   'btn-secondary': UI_CLASSES.btnSecondary,
   'load-more': UI_CLASSES.loadMoreBtn,
 };
@@ -275,11 +265,13 @@ function applyDataUiClasses(root = document) {
   if (!elements) return;
 
   elements.forEach((el) => {
+    if (el.dataset.uiApplied === '1') return;
     const key = el.getAttribute('data-ui');
     const tokenClass = DATA_UI_CLASS_MAP[key];
     if (!tokenClass) return;
     const classParts = tokenClass.split(/\s+/).filter(Boolean);
     if (classParts.length) el.classList.add(...classParts);
+    el.dataset.uiApplied = '1';
   });
 }
 
