@@ -30,15 +30,17 @@ const STATE = {
   activeTab: 'webtoon',
   lastBrowseTab: 'webtoon',
   filters: {
-    webtoon: { source: 'all', day: 'mon' },
-    novel: { source: 'all', day: 'mon' },
+    webtoon: { source: 'all', day: 'all' },
+    novel: { source: 'all', day: 'all' },
     ott: { source: 'all', genre: 'drama' },
     series: { sort: 'latest' },
     my: { viewMode: 'subscribing' },
   },
   search: {
     isOpen: false,
-    q: '',
+    pageOpen: false,
+    query: '',
+    results: [],
     isLoading: false,
     debounceTimer: null,
     requestSeq: 0,
@@ -122,11 +124,20 @@ const UI = {
   headerSearchWrap: document.getElementById('headerSearchWrap'),
   searchButton: document.getElementById('searchButton'),
   searchInput: document.getElementById('searchInput'),
-  searchClearBtn: document.getElementById('searchClearBtn'),
-  searchPanel: document.getElementById('searchPanel'),
-  searchResultsGrid: document.getElementById('searchResultsGrid'),
-  searchEmptyState: document.getElementById('searchEmptyState'),
-  searchLoadingState: document.getElementById('searchLoadingState'),
+  searchPage: document.getElementById('searchPage'),
+  searchPageInput: document.getElementById('searchPageInput'),
+  searchBackButton: document.getElementById('searchBackButton'),
+  searchClearButton: document.getElementById('searchClearButton'),
+  searchIdle: document.getElementById('searchIdle'),
+  searchResultsView: document.getElementById('searchResultsView'),
+  searchPageResults: document.getElementById('searchPageResults'),
+  searchPageEmpty: document.getElementById('searchPageEmpty'),
+  searchPageLoading: document.getElementById('searchPageLoading'),
+  searchRecentChips: document.getElementById('searchRecentChips'),
+  searchRecentClearAll: document.getElementById('searchRecentClearAll'),
+  searchPopularGrid: document.getElementById('searchPopularGrid'),
+  searchResultCount: document.getElementById('searchResultCount'),
+  searchPageClearQuery: document.getElementById('searchPageClearQuery'),
 };
 
 function renderEmptyState(containerEl, { title = '', message = '', actions = [] } = {}) {
@@ -182,6 +193,7 @@ let contentGridObserver = null;
 const modalStack = [];
 const modalMeta = new Map();
 let bodyOverflowBackup = '';
+let searchPageOverflowBackup = '';
 
 const isAnyModalOpen = () => modalStack.length > 0;
 const getTopModal = () => modalStack[modalStack.length - 1] || null;
@@ -959,6 +971,9 @@ function setupScrollEffect() {
    Search modal
    ========================= */
 
+const RECENT_SEARCH_KEY = 'es_recent_searches';
+const MAX_RECENT_SEARCHES = 10;
+
 const getSearchType = () =>
   STATE.activeTab === 'my'
     ? STATE.lastBrowseTab || 'webtoon'
@@ -978,26 +993,144 @@ const getAspectByType = (type) => {
   return 'aspect-[3/4]';
 };
 
+const loadRecentSearches = () => {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCH_KEY);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === 'string');
+  } catch (e) {
+    console.warn('Failed to load recent searches', e);
+  }
+  return [];
+};
+
+const saveRecentSearches = (list) => {
+  try {
+    localStorage.setItem(RECENT_SEARCH_KEY, JSON.stringify(list.slice(0, MAX_RECENT_SEARCHES)));
+  } catch (e) {
+    console.warn('Failed to save recent searches', e);
+  }
+};
+
+const renderRecentSearches = () => {
+  const chips = UI.searchRecentChips;
+  if (!chips) return;
+  const list = loadRecentSearches();
+  chips.innerHTML = '';
+
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'text-sm text-white/60';
+    empty.textContent = '최근 검색어가 없습니다';
+    chips.appendChild(empty);
+    return;
+  }
+
+  list.slice(0, MAX_RECENT_SEARCHES).forEach((query) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'px-3 h-9 rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/10 spring-bounce';
+    btn.textContent = query;
+    btn.onclick = () => {
+      if (UI.searchPageInput) {
+        UI.searchPageInput.value = query;
+        performSearch(query);
+        UI.searchPageInput.focus();
+      }
+    };
+    chips.appendChild(btn);
+  });
+};
+
+const addRecentSearch = (query) => {
+  const q = (query || '').trim();
+  if (!q) return;
+  const list = loadRecentSearches();
+  const existingIdx = list.findIndex((item) => item.toLowerCase() === q.toLowerCase());
+  if (existingIdx >= 0) list.splice(existingIdx, 1);
+  list.unshift(q);
+  saveRecentSearches(list);
+  renderRecentSearches();
+};
+
+const clearRecentSearches = () => {
+  saveRecentSearches([]);
+  renderRecentSearches();
+};
+
+const renderPopularGrid = () => {
+  const grid = UI.searchPopularGrid;
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  const tabId = getSearchType();
+  const aspectClass = getAspectByType(tabId);
+  const pool = Array.isArray(STATE.rendering?.list) ? STATE.rendering.list : [];
+  const items = pool.slice(0, 9);
+
+  if (!items.length) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'text-sm text-white/50 col-span-3 text-center py-8';
+    placeholder.textContent = '인기 작품을 불러오지 못했습니다.';
+    grid.appendChild(placeholder);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  items.forEach((item, idx) => {
+    const card = createCard(item, tabId, aspectClass);
+    card.dataset.searchIndex = String(idx);
+    card.onclick = () => openSubscribeModal(item);
+    fragment.appendChild(card);
+  });
+
+  grid.appendChild(fragment);
+};
+
+const showSearchIdle = () => {
+  STATE.search.activeIndex = -1;
+  setActiveSearchIndex(-1);
+  STATE.search.results = [];
+  if (UI.searchIdle) UI.searchIdle.classList.remove('hidden');
+  if (UI.searchResultsView) UI.searchResultsView.classList.add('hidden');
+  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+  if (UI.searchPageResults) {
+    UI.searchPageResults.innerHTML = '';
+    UI.searchPageResults.classList.add('hidden');
+  }
+  if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
+  if (UI.searchResultCount) UI.searchResultCount.textContent = '0';
+  renderRecentSearches();
+  renderPopularGrid();
+};
+
 function showSearchEmpty(title, { message = '', actions = [] } = {}) {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
-  if (UI.searchEmptyState) {
-    UI.searchEmptyState.classList.remove('hidden');
-    renderEmptyState(UI.searchEmptyState, {
-      title,
-      message,
-      actions,
-    });
+  STATE.search.results = [];
+  if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
+  if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
+  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+  if (UI.searchPageResults) {
+    UI.searchPageResults.classList.add('hidden');
+    UI.searchPageResults.innerHTML = '';
   }
-  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
-  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+  if (UI.searchResultCount) UI.searchResultCount.textContent = '0';
+
+  if (UI.searchPageEmpty) {
+    UI.searchPageEmpty.classList.remove('hidden');
+    const titleEl = UI.searchPageEmpty.querySelector('.font-semibold');
+    const messageEl = UI.searchPageEmpty.querySelector('.text-white/70');
+    if (titleEl) titleEl.textContent = title || '검색 결과가 없습니다';
+    if (messageEl) messageEl.textContent = message || '다른 키워드로 검색해보세요.';
+  }
 }
 
 const SEARCH_ACTIVE_CLASSES = ['ring-2', 'ring-white/50', 'bg-white/5'];
 
 const getSearchResultElements = () => {
-  if (!UI.searchResultsGrid) return [];
-  return Array.from(UI.searchResultsGrid.querySelectorAll('[data-search-index]'));
+  if (!UI.searchPageResults) return [];
+  return Array.from(UI.searchPageResults.querySelectorAll('[data-search-index]'));
 };
 
 function setActiveSearchIndex(nextIndex) {
@@ -1036,12 +1169,19 @@ function openActiveSearchResult() {
   const el = elements[idx];
   const content = el.__content;
   if (!content) return;
-  closeInlineSearch();
   openSubscribeModal(content);
 }
 
 function renderSearchLoading(type) {
-  const container = UI.searchLoadingState;
+  if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
+  if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
+  if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
+  if (UI.searchPageResults) {
+    UI.searchPageResults.classList.add('hidden');
+    UI.searchPageResults.innerHTML = '';
+  }
+
+  const container = UI.searchPageLoading;
   if (!container) return;
   container.classList.remove('hidden');
   container.innerHTML = '';
@@ -1053,110 +1193,50 @@ function renderSearchLoading(type) {
   }
 }
 
-function resetSearchUI({ preserveInput = false } = {}) {
-  if (!preserveInput && UI.searchInput) UI.searchInput.value = '';
-  STATE.search.q = UI.searchInput ? UI.searchInput.value.trim() : '';
-  STATE.search.requestSeq += 1; // invalidate inflight requests
-  STATE.search.activeIndex = -1;
-  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
-  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
-  if (STATE.search.q) {
-    if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
-  } else {
-    showSearchEmpty('검색어를 입력하세요.');
-  }
-}
-
-function updateSearchInputVisibility(isOpen) {
-  const input = UI.searchInput;
-  if (!input) return;
-  const collapsed = ['w-0', 'opacity-0', 'pointer-events-none', 'ml-0'];
-  const expanded = ['w-[220px]', 'opacity-100', 'pointer-events-auto', 'ml-2'];
-
-  if (isOpen) {
-    collapsed.forEach((c) => input.classList.remove(c));
-    expanded.forEach((c) => input.classList.add(c));
-  } else {
-    expanded.forEach((c) => input.classList.remove(c));
-    collapsed.forEach((c) => input.classList.add(c));
-  }
-
-  if (UI.searchClearBtn) {
-    const hasValue = Boolean(input.value);
-    UI.searchClearBtn.classList.toggle('hidden', !isOpen || !hasValue);
-  }
-}
-
-function closeInlineSearch({ clearInput = false } = {}) {
-  STATE.search.isOpen = false;
-  STATE.search.requestSeq += 1;
-  if (STATE.search.debounceTimer) {
-    clearTimeout(STATE.search.debounceTimer);
-    STATE.search.debounceTimer = null;
-  }
-
-  STATE.search.activeIndex = -1;
-
-  if (UI.searchPanel) UI.searchPanel.classList.add('hidden');
-  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
-  if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
-  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
-
-  if (UI.searchInput && clearInput) UI.searchInput.value = '';
-  STATE.search.q = UI.searchInput ? UI.searchInput.value.trim() : '';
-  updateSearchInputVisibility(false);
-}
-
-function openInlineSearch() {
-  STATE.search.isOpen = true;
-  updateSearchInputVisibility(true);
-  if (UI.searchPanel) UI.searchPanel.classList.remove('hidden');
-  resetSearchUI({ preserveInput: true });
-
-  if (UI.searchInput) {
-    UI.searchInput.focus();
-    const value = UI.searchInput.value.trim();
-    if (value) performSearch(value);
-  }
-}
-
-function openSearchAndFocus() {
-  if (!UI.searchInput) return;
-  if (!STATE.search.isOpen) openInlineSearch();
-  else {
-    if (UI.searchPanel) UI.searchPanel.classList.remove('hidden');
-    updateSearchInputVisibility(true);
-  }
-
-  requestAnimationFrame(() => {
-    if (UI.searchInput) UI.searchInput.focus();
-  });
+function updateSearchClearButton() {
+  if (!UI.searchClearButton || !UI.searchPageInput) return;
+  UI.searchClearButton.classList.toggle('hidden', !UI.searchPageInput.value.trim());
 }
 
 function renderSearchResults(items, effectiveType) {
-  const grid = UI.searchResultsGrid;
+  const grid = UI.searchPageResults;
   if (!grid) return;
 
-  if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
-  if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
+  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+  if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
+  if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
+  if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
 
   STATE.search.activeIndex = -1;
   grid.innerHTML = '';
+  grid.classList.remove('hidden');
   grid.setAttribute('role', 'listbox');
   grid.setAttribute('aria-label', '검색 결과');
   const aspectClass = getAspectByType(effectiveType);
 
-  const normalizedItems = Array.isArray(items) ? items : [];
+  const normalizedItems = Array.isArray(items)
+    ? items.map((raw) => ({
+        ...raw,
+        meta: normalizeMeta(raw?.meta),
+        title: safeString(raw?.title, ''),
+        content_id: raw?.content_id || raw?.contentId || raw?.id,
+        id: raw?.id || raw?.content_id || raw?.contentId,
+        source: raw?.source || getSearchSource(effectiveType),
+      }))
+    : [];
+  STATE.search.results = normalizedItems;
+  if (UI.searchResultCount) UI.searchResultCount.textContent = String(normalizedItems.length || 0);
+
   if (!normalizedItems.length) {
     const clearAction = {
       label: '검색어 지우기',
       variant: 'primary',
       onClick: () => {
-        if (UI.searchInput) {
-          UI.searchInput.value = '';
-          resetSearchUI();
-          UI.searchInput.focus();
-          updateSearchInputVisibility(true);
+        if (UI.searchPageInput) {
+          UI.searchPageInput.value = '';
+          performSearch('');
+          UI.searchPageInput.focus();
+          updateSearchClearButton();
         }
       },
     };
@@ -1167,26 +1247,14 @@ function renderSearchResults(items, effectiveType) {
     return;
   }
 
-  normalizedItems.forEach((raw, idx) => {
-    const normalized = {
-      ...raw,
-      meta: normalizeMeta(raw?.meta),
-      title: safeString(raw?.title, ''),
-      content_id: raw?.content_id || raw?.contentId || raw?.id,
-      id: raw?.id || raw?.content_id || raw?.contentId,
-      source: raw?.source || getSearchSource(effectiveType),
-    };
-
+  normalizedItems.forEach((normalized, idx) => {
     const card = createCard(normalized, effectiveType, aspectClass);
     card.dataset.searchIndex = String(idx);
     card.setAttribute('role', 'option');
     card.setAttribute('aria-selected', 'false');
     card.__content = normalized;
     card.addEventListener('mouseenter', () => setActiveSearchIndex(idx));
-    card.onclick = () => {
-      closeInlineSearch();
-      openSubscribeModal(normalized);
-    };
+    card.onclick = () => openSubscribeModal(normalized);
     grid.appendChild(card);
   });
 
@@ -1198,24 +1266,22 @@ function performSearch(q) {
   const effectiveType = getSearchType();
   const source = getSearchSource(effectiveType);
 
-  STATE.search.q = query;
+  STATE.search.query = query;
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
+  updateSearchClearButton();
 
   if (!query) {
-    showSearchEmpty('검색어를 입력하세요.');
-    if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
-    if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
+    STATE.search.requestSeq += 1;
+    if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+    showSearchIdle();
     return;
   }
 
   const seq = ++STATE.search.requestSeq;
   STATE.search.isLoading = true;
 
-  if (UI.searchEmptyState) UI.searchEmptyState.classList.add('hidden');
   renderSearchLoading(effectiveType);
-  if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
-
   apiRequest('GET', '/api/contents/search', {
     query: { q: query, type: effectiveType, source },
   })
@@ -1223,6 +1289,7 @@ function performSearch(q) {
       if (seq !== STATE.search.requestSeq) return;
       const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
       renderSearchResults(items, effectiveType);
+      addRecentSearch(query);
     })
     .catch((e) => {
       if (seq !== STATE.search.requestSeq) return;
@@ -1231,11 +1298,11 @@ function performSearch(q) {
         label: '검색어 지우기',
         variant: 'primary',
         onClick: () => {
-          if (UI.searchInput) {
-            UI.searchInput.value = '';
-            resetSearchUI();
-            UI.searchInput.focus();
-            updateSearchInputVisibility(true);
+          if (UI.searchPageInput) {
+            UI.searchPageInput.value = '';
+            performSearch('');
+            UI.searchPageInput.focus();
+            updateSearchClearButton();
           }
         },
       };
@@ -1247,7 +1314,7 @@ function performSearch(q) {
     .finally(() => {
       if (seq !== STATE.search.requestSeq) return;
       STATE.search.isLoading = false;
-      if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
+      if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
     });
 }
 
@@ -1256,44 +1323,101 @@ function debouncedSearch(q) {
   STATE.search.debounceTimer = setTimeout(() => performSearch(q), 300);
 }
 
+function openSearchPage({ focus = true } = {}) {
+  if (!UI.searchPage) return;
+
+  if (!STATE.search.pageOpen && !isAnyModalOpen()) {
+    searchPageOverflowBackup = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  STATE.search.pageOpen = true;
+  UI.searchPage.classList.remove('hidden');
+
+  if (UI.searchPageInput) {
+    UI.searchPageInput.value = STATE.search.query || '';
+    updateSearchClearButton();
+  }
+
+  if (STATE.search.query) {
+    if (STATE.search.results.length) renderSearchResults(STATE.search.results, getSearchType());
+    else performSearch(STATE.search.query);
+  } else {
+    showSearchIdle();
+  }
+
+  if (focus && UI.searchPageInput) {
+    requestAnimationFrame(() => UI.searchPageInput.focus());
+  }
+}
+
+function closeSearchPage() {
+  if (!STATE.search.pageOpen) return;
+  STATE.search.pageOpen = false;
+  STATE.search.activeIndex = -1;
+  setActiveSearchIndex(-1);
+  if (UI.searchPage) UI.searchPage.classList.add('hidden');
+  if (!isAnyModalOpen()) document.body.style.overflow = searchPageOverflowBackup || '';
+}
+
+function openSearchAndFocus() {
+  openSearchPage({ focus: true });
+}
+
 function setupSearchHandlers() {
-  if (UI.searchButton)
-    UI.searchButton.onclick = () => {
-      if (STATE.search.isOpen) closeInlineSearch();
-      else openInlineSearch();
-    };
+  renderRecentSearches();
 
-  document.addEventListener('keydown', (evt) => {
-    if (isAnyModalOpen()) return;
-    if (evt.key === 'Escape' && STATE.search.isOpen) {
-      closeInlineSearch();
-    } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
-      evt.preventDefault();
-      if (STATE.search.isOpen) closeInlineSearch();
-      else openInlineSearch();
-    }
-  });
-
-  document.addEventListener('click', (evt) => {
-    if (!STATE.search.isOpen) return;
-    if (UI.headerSearchWrap && UI.headerSearchWrap.contains(evt.target)) return;
-    closeInlineSearch();
-  });
+  if (UI.searchButton) UI.searchButton.onclick = () => openSearchPage({ focus: true });
 
   if (UI.searchInput) {
-    UI.searchInput.addEventListener('input', (evt) => {
-      updateSearchInputVisibility(true);
+    UI.searchInput.addEventListener('focus', () => openSearchPage({ focus: true }));
+    UI.searchInput.addEventListener('click', () => openSearchPage({ focus: true }));
+    UI.searchInput.addEventListener('keydown', (evt) => {
+      evt.preventDefault();
+      openSearchPage({ focus: true });
+    });
+  }
+
+  if (UI.searchBackButton) UI.searchBackButton.onclick = () => closeSearchPage();
+
+  if (UI.searchClearButton)
+    UI.searchClearButton.onclick = () => {
+      if (UI.searchPageInput) {
+        UI.searchPageInput.value = '';
+        STATE.search.query = '';
+        performSearch('');
+        UI.searchPageInput.focus();
+        updateSearchClearButton();
+      }
+    };
+
+  if (UI.searchPageClearQuery)
+    UI.searchPageClearQuery.onclick = () => {
+      if (UI.searchPageInput) {
+        UI.searchPageInput.value = '';
+        STATE.search.query = '';
+        performSearch('');
+        UI.searchPageInput.focus();
+        updateSearchClearButton();
+      }
+    };
+
+  if (UI.searchRecentClearAll) UI.searchRecentClearAll.onclick = () => clearRecentSearches();
+
+  if (UI.searchPageInput) {
+    UI.searchPageInput.addEventListener('input', (evt) => {
+      updateSearchClearButton();
       STATE.search.activeIndex = -1;
       setActiveSearchIndex(-1);
       debouncedSearch(evt.target.value);
     });
-    UI.searchInput.addEventListener('keydown', (evt) => {
-      if (isAnyModalOpen()) return;
+
+    UI.searchPageInput.addEventListener('keydown', (evt) => {
+      if (!STATE.search.pageOpen) return;
       const elements = getSearchResultElements();
       const hasResults = elements.length > 0;
 
       if (evt.key === 'ArrowDown') {
-        if (!STATE.search.isOpen) openInlineSearch();
         if (hasResults) {
           evt.preventDefault();
           const nextIndex =
@@ -1316,19 +1440,24 @@ function setupSearchHandlers() {
         } else {
           performSearch(evt.target.value);
         }
+      } else if (evt.key === 'Escape') {
+        closeSearchPage();
       }
     });
   }
 
-  if (UI.searchClearBtn)
-    UI.searchClearBtn.onclick = (evt) => {
-      evt.stopPropagation();
-      resetSearchUI();
-      if (UI.searchInput) {
-        UI.searchInput.focus();
-        updateSearchInputVisibility(true);
-      }
-    };
+  document.addEventListener('keydown', (evt) => {
+    if (isAnyModalOpen()) {
+      if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') evt.preventDefault();
+      return;
+    }
+    if (evt.key === 'Escape' && STATE.search.pageOpen) {
+      closeSearchPage();
+    } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
+      evt.preventDefault();
+      openSearchPage({ focus: true });
+    }
+  });
 }
 
 /* =========================
@@ -1609,7 +1738,7 @@ function renderBottomNav() {
 async function updateTab(tabId) {
   STATE.activeTab = tabId;
   if (tabId !== 'my') STATE.lastBrowseTab = tabId;
-  if (STATE.search.isOpen) closeInlineSearch();
+  if (STATE.search.pageOpen) closeSearchPage();
 
   renderBottomNav();
   updateFilterVisibility(tabId);
