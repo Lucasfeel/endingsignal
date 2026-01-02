@@ -33,13 +33,18 @@ const UI_CLASSES = {
     'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
   btnGhost:
     'h-10 px-4 rounded-xl bg-transparent text-white/80 text-sm hover:bg-white/5 active:bg-white/8',
+  btnDanger:
+    'h-10 px-4 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-500/90 active:bg-red-500/80 disabled:opacity-50 disabled:cursor-not-allowed',
+  btnDisabled: 'opacity-80 cursor-not-allowed',
+
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
+  iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
 
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
   chipActive: 'h-9 px-3 inline-flex items-center rounded-full bg-white/15 text-sm text-white',
 
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
-  emptyTitle: 'text-lg font-semibold',
+  emptyTitle: 'text-lg font-semibold text-white',
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
 
   sectionTitle: 'text-base font-semibold',
@@ -47,12 +52,42 @@ const UI_CLASSES = {
 
   starBadge:
     'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none',
+  badgeBase:
+    'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center',
   affordOverlay:
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100',
   affordHint:
-    'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1 group-hover:opacity-100',
+    'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
+  pillHint: 'text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1',
+
+  cardRoot:
+    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5',
+  cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
+  cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
+  cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
+  cardTextWrap: 'px-0.5',
+  cardTitle: 'font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate',
+  cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
 
   inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
+  inputSm:
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
+  inputLabel: 'block text-sm font-medium text-gray-300',
+
+  modalWrap: 'flex items-center justify-center',
+  modalCard:
+    'relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
+  modalTitle: 'text-xl font-bold mb-1 text-white',
+  modalBodyText: 'text-gray-400 text-sm',
+
+  grid3: 'grid grid-cols-3 gap-3',
+  grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
+
+  toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
+  toastSuccess:
+    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
+  toastError:
+    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
 };
 
 const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -188,10 +223,52 @@ const UI = {
   searchPageClearQuery: document.getElementById('searchPageClearQuery'),
 };
 
+const DATA_UI_CLASS_MAP = {
+  'search-back': UI_CLASSES.iconBtn,
+  'search-clear': cx(UI_CLASSES.iconBtnSm, 'hidden'),
+  'search-input': UI_CLASSES.inputBase,
+  'search-recent-clear': UI_CLASSES.sectionSubtle,
+  'search-popular-title': UI_CLASSES.sectionTitle,
+  'search-popular-subtitle': UI_CLASSES.sectionSubtle,
+  'search-result-label': UI_CLASSES.sectionSubtle,
+  'search-empty-title': UI_CLASSES.emptyTitle,
+  'search-empty-msg': UI_CLASSES.emptyMsg,
+  'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
+  'grid-3': UI_CLASSES.grid3,
+  'grid-2to3': UI_CLASSES.grid2to3,
+  'modal-wrap': UI_CLASSES.modalWrap,
+  'modal-card': UI_CLASSES.modalCard,
+  'modal-title': UI_CLASSES.modalTitle,
+  'modal-body': UI_CLASSES.modalBodyText,
+  'modal-primary': cx(UI_CLASSES.btnPrimary, 'spring-bounce neon-glow'),
+  'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
+  'modal-danger': cx(UI_CLASSES.btnDanger, 'spring-bounce'),
+  'input-sm': UI_CLASSES.inputSm,
+  'input-label': UI_CLASSES.inputLabel,
+  'pill-hint': UI_CLASSES.pillHint,
+};
+
+function applyDataUiClasses(root = document) {
+  const elements = root?.querySelectorAll?.('[data-ui]');
+  if (!elements) return;
+
+  elements.forEach((el) => {
+    const key = el.getAttribute('data-ui');
+    const tokenClass = DATA_UI_CLASS_MAP[key];
+    if (!tokenClass) return;
+    const existing = el.className || '';
+    setClasses(el, cx(tokenClass, existing));
+  });
+}
+
 function setClasses(el, classStr) {
   if (!el) return el;
   el.className = classStr;
   return el;
+}
+
+function cx(...parts) {
+  return parts.filter(Boolean).join(' ');
 }
 
 async function renderInBatches({
@@ -269,11 +346,11 @@ function renderEmptyState(containerEl, { title = '', message = '', actions = [] 
 
   const wrapper = setClasses(
     document.createElement('div'),
-    `w-full col-span-full ${UI_CLASSES.emptyWrap}`,
+    cx('w-full col-span-full', UI_CLASSES.emptyWrap),
   );
 
   if (title) {
-    const titleEl = setClasses(document.createElement('h3'), `${UI_CLASSES.emptyTitle} text-white`);
+    const titleEl = setClasses(document.createElement('h3'), UI_CLASSES.emptyTitle);
     titleEl.textContent = title;
     wrapper.appendChild(titleEl);
   }
@@ -588,12 +665,16 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
       : normalizedMessage;
 
   const toast = document.createElement('div');
-  toast.className =
-    'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2';
+  setClasses(toast, UI_CLASSES.toastWrap);
 
   const inner = document.createElement('div');
-  inner.className =
-    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white';
+  const toastTone =
+    type === 'success'
+      ? UI_CLASSES.toastSuccess
+      : type === 'error'
+      ? UI_CLASSES.toastError
+      : UI_CLASSES.toastSuccess;
+  setClasses(inner, toastTone);
   inner.textContent = `${prefix}${truncatedMessage}`;
 
   toast.appendChild(inner);
@@ -1046,6 +1127,7 @@ const formatDateKST = (isoString) => {
    ========================= */
 
 document.addEventListener('DOMContentLoaded', async () => {
+  applyDataUiClasses();
   setupAuthModalListeners();
   setupProfileButton();
   updateProfileButtonState();
@@ -1429,8 +1511,8 @@ function showSearchEmpty(title, { message = '', actions = [] } = {}) {
 
   if (UI.searchPageEmpty) {
     UI.searchPageEmpty.classList.remove('hidden');
-    const titleEl = UI.searchPageEmpty.querySelector('.font-semibold');
-    const messageEl = UI.searchPageEmpty.querySelector('.text-white/70');
+    const titleEl = UI.searchPageEmpty.querySelector('[data-ui="search-empty-title"]');
+    const messageEl = UI.searchPageEmpty.querySelector('[data-ui="search-empty-msg"]');
     if (titleEl) titleEl.textContent = title || '검색 결과가 없습니다';
     if (messageEl) messageEl.textContent = message || '다른 키워드로 검색해보세요.';
   }
@@ -1699,18 +1781,6 @@ function openSearchAndFocus() {
 function setupSearchHandlers() {
   renderRecentSearches();
 
-  if (UI.searchBackButton) setClasses(UI.searchBackButton, UI_CLASSES.iconBtn);
-  if (UI.searchClearButton)
-    setClasses(UI.searchClearButton, `${UI_CLASSES.iconBtn} h-8 w-8 hidden`);
-  if (UI.searchPageInput) setClasses(UI.searchPageInput, UI_CLASSES.inputBase);
-  if (UI.searchRecentClearAll) setClasses(UI.searchRecentClearAll, UI_CLASSES.sectionSubtle);
-  if (UI.searchPopularTitle) setClasses(UI.searchPopularTitle, UI_CLASSES.sectionTitle);
-  if (UI.searchPopularSubtitle) setClasses(UI.searchPopularSubtitle, UI_CLASSES.sectionSubtle);
-  if (UI.searchResultCount?.parentElement)
-    setClasses(UI.searchResultCount.parentElement, UI_CLASSES.sectionSubtle);
-  if (UI.searchPageClearQuery)
-    setClasses(UI.searchPageClearQuery, `${UI_CLASSES.btnSecondary} mt-6`);
-
   if (UI.searchButton) UI.searchButton.onclick = () => openSearchPage({ focus: true });
 
   if (UI.searchInput) {
@@ -1956,9 +2026,6 @@ function setupAuthModalListeners() {
   const pwdEl = document.getElementById('authPassword');
   const confirmEl = document.getElementById('authPasswordConfirm');
   const errorEl = document.getElementById('authError');
-
-  if (cancelBtn) setClasses(cancelBtn, `${UI_CLASSES.btnSecondary} spring-bounce`);
-  if (submitBtn) setClasses(submitBtn, `${UI_CLASSES.btnPrimary} spring-bounce neon-glow`);
 
   if (cancelBtn) cancelBtn.onclick = () => closeAuthModal();
   if (toggleBtn)
@@ -2590,8 +2657,7 @@ async function fetchAndRenderContent(tabId) {
 
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
-  el.className =
-    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5';
+  setClasses(el, UI_CLASSES.cardRoot);
   const subKey = buildSubscriptionKey(content);
   if (subKey) {
     el.setAttribute('data-sub-key', subKey);
@@ -2608,7 +2674,7 @@ function createCard(content, tabId, aspectClass) {
     : '';
 
   const cardContainer = document.createElement('div');
-  cardContainer.className = `${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2`;
+  setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
   cardContainer.setAttribute('data-card-thumb', 'true');
 
   const affordOverlay = document.createElement('div');
@@ -2620,7 +2686,7 @@ function createCard(content, tabId, aspectClass) {
   affordHint.setAttribute('data-afford-hint', 'true');
   affordHint.setAttribute('aria-hidden', 'true');
   affordHint.textContent = 'Open';
-  setClasses(affordHint, UI_CLASSES.affordHint);
+  setClasses(affordHint, cx(UI_CLASSES.pillHint, UI_CLASSES.affordHint));
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
@@ -2641,8 +2707,7 @@ function createCard(content, tabId, aspectClass) {
   const { width, height } = thumbSizeMap[aspectClass] || thumbSizeMap.default;
   imgEl.width = width;
   imgEl.height = height;
-  imgEl.className =
-    'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
+  setClasses(imgEl, UI_CLASSES.cardImage);
   cardContainer.appendChild(imgEl);
 
   // Badge logic
@@ -2655,11 +2720,9 @@ function createCard(content, tabId, aspectClass) {
       safeString(fs?.final_status, '') === '휴재' || content?.status === '휴재';
 
     const badgeEl = document.createElement('div');
-    badgeEl.className =
-      'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-1';
 
     if (isScheduled) {
-      badgeEl.className += ' bg-yellow-500/80';
+      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-yellow-500/80'));
       const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
       badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
         formatted
@@ -2668,25 +2731,26 @@ function createCard(content, tabId, aspectClass) {
       }`;
       cardContainer.appendChild(badgeEl);
     } else if (isCompleted) {
-      badgeEl.className += ' bg-green-500/80';
+      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-green-500/80'));
       badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
       cardContainer.appendChild(badgeEl);
     } else if (isHiatus) {
-      badgeEl.className += ' bg-gray-600/80';
+      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-gray-600/80'));
       badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">휴재</span>`;
       cardContainer.appendChild(badgeEl);
     }
   } else if (content.status === '완결') {
     const badgeEl = document.createElement('div');
-    badgeEl.className =
-      'absolute top-0 left-0 bg-black/60 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center gap-0.5';
+    setClasses(
+      badgeEl,
+      cx(UI_CLASSES.badgeBase, 'bg-black/60 gap-0.5 rounded-br-lg'),
+    );
     badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">EN</span><span class="text-[10px] text-yellow-400 leading-none">🔔</span>`;
     cardContainer.appendChild(badgeEl);
   }
 
   const gradient = document.createElement('div');
-  gradient.className =
-    'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
+  setClasses(gradient, UI_CLASSES.cardGradient);
   cardContainer.appendChild(gradient);
 
   cardContainer.appendChild(affordOverlay);
@@ -2700,15 +2764,14 @@ function createCard(content, tabId, aspectClass) {
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
-  textContainer.className = 'px-0.5';
+  setClasses(textContainer, UI_CLASSES.cardTextWrap);
 
   const titleEl = document.createElement('h3');
-  titleEl.className =
-    'font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate';
+  setClasses(titleEl, UI_CLASSES.cardTitle);
   titleEl.textContent = content.title || '';
 
   const authorEl = document.createElement('p');
-  authorEl.className = 'text-[11px] text-[#A3A3A3] mt-0.5 truncate';
+  setClasses(authorEl, UI_CLASSES.cardMeta);
   authorEl.textContent = authors;
 
   textContainer.appendChild(titleEl);
@@ -2864,7 +2927,6 @@ function openSubscribeModal(content) {
     while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
     linkContainer.classList.add('hidden');
   }
-  if (ctaBtn) setClasses(ctaBtn, `${UI_CLASSES.btnPrimary} spring-bounce neon-glow`);
   if (modalEl) {
     openModal(modalEl, {
       initialFocusEl: document.getElementById('subscribeButton') || modalEl,
@@ -2888,9 +2950,10 @@ window.toggleSubscriptionFromModal = async function () {
   const btn = document.getElementById('subscribeButton');
   if (key && STATE.pendingSubOps.has(key)) return;
   if (key) STATE.pendingSubOps.add(key);
+  const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
   if (btn) {
     btn.disabled = true;
-    btn.classList.add('opacity-80', 'cursor-not-allowed');
+    btn.classList.add(...disabledClasses);
   }
 
   const currently = isSubscribed(content);
@@ -2910,7 +2973,7 @@ window.toggleSubscriptionFromModal = async function () {
     if (key) STATE.pendingSubOps.delete(key);
     if (btn) {
       btn.disabled = false;
-      btn.classList.remove('opacity-80', 'cursor-not-allowed');
+      btn.classList.remove(...disabledClasses);
     }
   }
 };
