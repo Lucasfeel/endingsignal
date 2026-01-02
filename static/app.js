@@ -129,6 +129,53 @@ const UI = {
   searchLoadingState: document.getElementById('searchLoadingState'),
 };
 
+function renderEmptyState(containerEl, { title = '', message = '', actions = [] } = {}) {
+  if (!containerEl) return;
+  containerEl.innerHTML = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.className =
+    'w-full col-span-full flex flex-col items-center justify-center text-center py-12 px-4';
+
+  if (title) {
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'text-lg font-semibold text-white';
+    titleEl.textContent = title;
+    wrapper.appendChild(titleEl);
+  }
+
+  if (message) {
+    const msgEl = document.createElement('p');
+    msgEl.className = 'text-sm text-white/70 mt-2 max-w-md';
+    msgEl.textContent = message;
+    wrapper.appendChild(msgEl);
+  }
+
+  if (Array.isArray(actions) && actions.length) {
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'mt-6 flex flex-wrap items-center justify-center gap-3';
+
+    actions.forEach((action) => {
+      if (!action?.label || typeof action.onClick !== 'function') return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className =
+        'px-4 py-2 rounded-full text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#121212] spring-bounce';
+      if (action.variant === 'primary')
+        btn.className += ' bg-[#4F46E5] text-white hover:bg-[#4338CA] focus:ring-[#4F46E5]';
+      else btn.className += ' bg-white/5 text-white hover:bg-white/10 border border-white/10 focus:ring-white/40';
+
+      btn.textContent = action.label;
+      btn.onclick = action.onClick;
+      actionsWrap.appendChild(btn);
+    });
+
+    wrapper.appendChild(actionsWrap);
+  }
+
+  containerEl.appendChild(wrapper);
+}
+
 let contentGridObserver = null;
 
 // Modal management
@@ -894,12 +941,16 @@ const getAspectByType = (type) => {
   return 'aspect-[3/4]';
 };
 
-function showSearchEmpty(message) {
+function showSearchEmpty(title, { message = '', actions = [] } = {}) {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   if (UI.searchEmptyState) {
-    UI.searchEmptyState.textContent = message;
     UI.searchEmptyState.classList.remove('hidden');
+    renderEmptyState(UI.searchEmptyState, {
+      title,
+      message,
+      actions,
+    });
   }
   if (UI.searchResultsGrid) UI.searchResultsGrid.innerHTML = '';
   if (UI.searchLoadingState) UI.searchLoadingState.classList.add('hidden');
@@ -1032,6 +1083,19 @@ function openInlineSearch() {
   }
 }
 
+function openSearchAndFocus() {
+  if (!UI.searchInput) return;
+  if (!STATE.search.isOpen) openInlineSearch();
+  else {
+    if (UI.searchPanel) UI.searchPanel.classList.remove('hidden');
+    updateSearchInputVisibility(true);
+  }
+
+  requestAnimationFrame(() => {
+    if (UI.searchInput) UI.searchInput.focus();
+  });
+}
+
 function renderSearchResults(items, effectiveType) {
   const grid = UI.searchResultsGrid;
   if (!grid) return;
@@ -1047,7 +1111,22 @@ function renderSearchResults(items, effectiveType) {
 
   const normalizedItems = Array.isArray(items) ? items : [];
   if (!normalizedItems.length) {
-    showSearchEmpty('검색 결과가 없습니다.');
+    const clearAction = {
+      label: '검색어 지우기',
+      variant: 'primary',
+      onClick: () => {
+        if (UI.searchInput) {
+          UI.searchInput.value = '';
+          resetSearchUI();
+          UI.searchInput.focus();
+          updateSearchInputVisibility(true);
+        }
+      },
+    };
+    showSearchEmpty('검색 결과가 없습니다', {
+      message: '다른 키워드로 검색해보세요.',
+      actions: [clearAction],
+    });
     return;
   }
 
@@ -1111,7 +1190,22 @@ function performSearch(q) {
     .catch((e) => {
       if (seq !== STATE.search.requestSeq) return;
       showToast(e?.message || '검색에 실패했습니다.', { type: 'error' });
-      showSearchEmpty('검색 결과가 없습니다.');
+      const clearAction = {
+        label: '검색어 지우기',
+        variant: 'primary',
+        onClick: () => {
+          if (UI.searchInput) {
+            UI.searchInput.value = '';
+            resetSearchUI();
+            UI.searchInput.focus();
+            updateSearchInputVisibility(true);
+          }
+        },
+      };
+      showSearchEmpty('검색 결과가 없습니다', {
+        message: '다른 키워드로 검색해보세요.',
+        actions: [clearAction],
+      });
     })
     .finally(() => {
       if (seq !== STATE.search.requestSeq) return;
@@ -1830,6 +1924,7 @@ async function fetchAndRenderContent(tabId) {
   const skeletonTimer = setTimeout(showSkeleton, 120);
 
   let data = [];
+  let emptyStateConfig = null;
 
   try {
     if (tabId === 'my') {
@@ -1880,6 +1975,47 @@ async function fetchAndRenderContent(tabId) {
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
+
+      if (!data.length) {
+        if (mode === 'completed') {
+          emptyStateConfig = {
+            title: '완결된 구독 작품이 아직 없습니다',
+            message: '구독 중인 작품이 완결되면 여기에 표시됩니다.',
+            actions: [
+              {
+                label: '구독 목록 보기',
+                variant: 'primary',
+                onClick: () => {
+                  STATE.filters.my.viewMode = 'subscribing';
+                  updateTab('my');
+                },
+              },
+              {
+                label: '검색하기',
+                variant: 'secondary',
+                onClick: () => openSearchAndFocus(),
+              },
+            ],
+          };
+        } else {
+          emptyStateConfig = {
+            title: '구독한 작품이 없습니다',
+            message: '작품을 검색한 뒤, 작품 화면에서 알림을 설정해보세요.',
+            actions: [
+              {
+                label: '검색하기',
+                variant: 'primary',
+                onClick: () => openSearchAndFocus(),
+              },
+              {
+                label: '웹툰 보기',
+                variant: 'secondary',
+                onClick: () => updateTab('webtoon'),
+              },
+            ],
+          };
+        }
+      }
     } else {
       let url = '';
 
@@ -1946,8 +2082,10 @@ async function fetchAndRenderContent(tabId) {
   UI.contentGrid.innerHTML = '';
 
   if (!data.length) {
-    UI.contentGrid.innerHTML =
-      '<div class="col-span-3 text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
+    if (emptyStateConfig) renderEmptyState(UI.contentGrid, emptyStateConfig);
+    else
+      UI.contentGrid.innerHTML =
+        '<div class="col-span-3 text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
     return;
   }
 
