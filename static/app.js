@@ -37,7 +37,6 @@ const STATE = {
     my: { viewMode: 'subscribing' },
   },
   search: {
-    isOpen: false,
     pageOpen: false,
     query: '',
     results: [],
@@ -193,7 +192,22 @@ let contentGridObserver = null;
 const modalStack = [];
 const modalMeta = new Map();
 let bodyOverflowBackup = '';
-let searchPageOverflowBackup = '';
+let scrollLockCount = 0;
+
+const lockBodyScroll = () => {
+  if (scrollLockCount === 0) {
+    bodyOverflowBackup = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+  scrollLockCount += 1;
+};
+
+const unlockBodyScroll = () => {
+  scrollLockCount = Math.max(0, scrollLockCount - 1);
+  if (scrollLockCount === 0) {
+    document.body.style.overflow = bodyOverflowBackup || '';
+  }
+};
 
 const isAnyModalOpen = () => modalStack.length > 0;
 const getTopModal = () => modalStack[modalStack.length - 1] || null;
@@ -240,10 +254,7 @@ function openModal(modalEl, { initialFocusEl } = {}) {
 
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
-  if (!isAnyModalOpen()) {
-    bodyOverflowBackup = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-  }
+  lockBodyScroll();
 
   modalStack.push(modalEl);
   modalMeta.set(modalEl, { opener });
@@ -265,9 +276,7 @@ function closeModal(modalEl) {
   modalEl.classList.add('hidden');
   modalEl.setAttribute('aria-hidden', 'true');
 
-  if (!isAnyModalOpen()) {
-    document.body.style.overflow = bodyOverflowBackup || '';
-  }
+  unlockBodyScroll();
 
   const opener = meta.opener;
   if (opener && document.contains(opener) && typeof opener.focus === 'function') {
@@ -968,7 +977,7 @@ function setupScrollEffect() {
 }
 
 /* =========================
-   Search modal
+   Search page
    ========================= */
 
 const RECENT_SEARCH_KEY = 'es_recent_searches';
@@ -991,6 +1000,46 @@ const getAspectByType = (type) => {
   if (type === 'novel') return 'aspect-[1/1.4]';
   if (type === 'ott') return 'aspect-[2/3]';
   return 'aspect-[3/4]';
+};
+
+let searchViewportCleanup = null;
+
+const applySearchPageViewportHeight = () => {
+  if (!UI.searchPage) return;
+  const viewportHeight = window.visualViewport?.height;
+  if (viewportHeight) {
+    const unit = viewportHeight * 0.01;
+    UI.searchPage.style.setProperty('--vvh', `${unit}px`);
+    UI.searchPage.style.height = 'calc(var(--vvh, 1vh) * 100)';
+  } else {
+    UI.searchPage.style.removeProperty('--vvh');
+    UI.searchPage.style.height = '100dvh';
+  }
+};
+
+const startSearchViewportSync = () => {
+  applySearchPageViewportHeight();
+  if (!window.visualViewport) {
+    searchViewportCleanup = null;
+    return;
+  }
+
+  const handler = () => applySearchPageViewportHeight();
+  window.visualViewport.addEventListener('resize', handler);
+  window.visualViewport.addEventListener('scroll', handler);
+  searchViewportCleanup = () => {
+    window.visualViewport.removeEventListener('resize', handler);
+    window.visualViewport.removeEventListener('scroll', handler);
+  };
+};
+
+const stopSearchViewportSync = () => {
+  if (searchViewportCleanup) searchViewportCleanup();
+  searchViewportCleanup = null;
+  if (UI.searchPage) {
+    UI.searchPage.style.removeProperty('--vvh');
+    UI.searchPage.style.removeProperty('height');
+  }
 };
 
 const loadRecentSearches = () => {
@@ -1326,12 +1375,14 @@ function debouncedSearch(q) {
 function openSearchPage({ focus = true } = {}) {
   if (!UI.searchPage) return;
 
-  if (!STATE.search.pageOpen && !isAnyModalOpen()) {
-    searchPageOverflowBackup = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+  const wasOpen = STATE.search.pageOpen;
+  if (!wasOpen) {
+    STATE.search.pageOpen = true;
+    lockBodyScroll();
+    startSearchViewportSync();
+  } else {
+    STATE.search.pageOpen = true;
   }
-
-  STATE.search.pageOpen = true;
   UI.searchPage.classList.remove('hidden');
 
   if (UI.searchPageInput) {
@@ -1357,7 +1408,8 @@ function closeSearchPage() {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   if (UI.searchPage) UI.searchPage.classList.add('hidden');
-  if (!isAnyModalOpen()) document.body.style.overflow = searchPageOverflowBackup || '';
+  stopSearchViewportSync();
+  unlockBodyScroll();
 }
 
 function openSearchAndFocus() {
