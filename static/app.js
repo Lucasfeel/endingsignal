@@ -44,6 +44,7 @@ const STATE = {
     debounceTimer: null,
     requestSeq: 0,
     activeIndex: -1,
+    recentlyOpened: [],
   },
   contents: {},
   isLoading: false,
@@ -135,6 +136,8 @@ const UI = {
   searchRecentChips: document.getElementById('searchRecentChips'),
   searchRecentClearAll: document.getElementById('searchRecentClearAll'),
   searchPopularGrid: document.getElementById('searchPopularGrid'),
+  searchPopularTitle: document.getElementById('searchPopularTitle'),
+  searchPopularSubtitle: document.getElementById('searchPopularSubtitle'),
   searchResultCount: document.getElementById('searchResultCount'),
   searchPageClearQuery: document.getElementById('searchPageClearQuery'),
 };
@@ -982,6 +985,9 @@ function setupScrollEffect() {
 
 const RECENT_SEARCH_KEY = 'es_recent_searches';
 const MAX_RECENT_SEARCHES = 10;
+const RECENTLY_OPENED_KEY = 'es_recently_opened';
+const MAX_RECENTLY_OPENED = 12;
+const POPULAR_GRID_LIMIT = 9;
 
 const getSearchType = () =>
   STATE.activeTab === 'my'
@@ -1061,6 +1067,77 @@ const saveRecentSearches = (list) => {
   }
 };
 
+const loadRecentlyOpened = () => {
+  try {
+    const raw = localStorage.getItem(RECENTLY_OPENED_KEY);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((entry) => ({
+          key: safeString(entry?.key, ''),
+          content: entry?.content,
+          openedAt: Number(entry?.openedAt) || 0,
+        }))
+        .filter((entry) => entry.key && entry.content);
+    }
+  } catch (e) {
+    console.warn('Failed to load recently opened', e);
+  }
+  return [];
+};
+
+const saveRecentlyOpened = (list) => {
+  try {
+    localStorage.setItem(RECENTLY_OPENED_KEY, JSON.stringify(list.slice(0, MAX_RECENTLY_OPENED)));
+  } catch (e) {
+    console.warn('Failed to save recently opened', e);
+  }
+};
+
+const buildRecentContentSnapshot = (content) => {
+  const normalizedMeta = normalizeMeta(content?.meta);
+  const thumb =
+    normalizedMeta?.common?.thumbnail_url ||
+    content?.normalized_thumbnail ||
+    content?.thumbnail_url ||
+    content?.thumbnail ||
+    '';
+  const authors = Array.isArray(normalizedMeta?.common?.authors)
+    ? normalizedMeta.common.authors
+    : [];
+
+  return {
+    title: safeString(content?.title, ''),
+    status: safeString(content?.status, ''),
+    source: content?.source || '',
+    content_id: content?.content_id || content?.contentId || content?.id,
+    id: content?.id || content?.content_id || content?.contentId,
+    meta: {
+      common: {
+        ...safeObj(normalizedMeta?.common),
+        thumbnail_url: thumb,
+        authors,
+      },
+    },
+  };
+};
+
+const recordRecentlyOpened = (content) => {
+  const key = buildSubscriptionKey(content) || contentKey(content);
+  if (!key) return;
+
+  const snapshot = buildRecentContentSnapshot(content);
+  const existing = loadRecentlyOpened();
+  const next = [
+    { key, content: snapshot, openedAt: Date.now() },
+    ...existing.filter((entry) => entry.key !== key),
+  ].slice(0, MAX_RECENTLY_OPENED);
+
+  STATE.search.recentlyOpened = next;
+  saveRecentlyOpened(next);
+  renderPopularGrid();
+};
+
 const renderRecentSearches = () => {
   const chips = UI.searchRecentChips;
   if (!chips) return;
@@ -1076,18 +1153,36 @@ const renderRecentSearches = () => {
   }
 
   list.slice(0, MAX_RECENT_SEARCHES).forEach((query) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'px-3 h-9 rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/10 spring-bounce';
-    btn.textContent = query;
-    btn.onclick = () => {
+    const wrapper = document.createElement('div');
+    wrapper.className =
+      'inline-flex items-center gap-2 h-9 px-3 rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/10';
+
+    const labelBtn = document.createElement('button');
+    labelBtn.type = 'button';
+    labelBtn.className = 'truncate';
+    labelBtn.textContent = query;
+    labelBtn.onclick = () => {
       if (UI.searchPageInput) {
         UI.searchPageInput.value = query;
         performSearch(query);
         UI.searchPageInput.focus();
       }
     };
-    chips.appendChild(btn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.setAttribute('aria-label', 'Remove recent search');
+    deleteBtn.className =
+      'h-6 w-6 rounded-full bg-white/5 flex items-center justify-center text-white/70 hover:bg-white/10';
+    deleteBtn.textContent = '×';
+    deleteBtn.onclick = (evt) => {
+      evt.stopPropagation();
+      removeRecentSearch(query);
+    };
+
+    wrapper.appendChild(labelBtn);
+    wrapper.appendChild(deleteBtn);
+    chips.appendChild(wrapper);
   });
 };
 
@@ -1107,6 +1202,34 @@ const clearRecentSearches = () => {
   renderRecentSearches();
 };
 
+const removeRecentSearch = (query) => {
+  const list = loadRecentSearches();
+  const filtered = list.filter((item) => item.toLowerCase() !== query.toLowerCase());
+  saveRecentSearches(filtered);
+  renderRecentSearches();
+};
+
+const normalizeContentForGrid = (content, fallbackSource) => {
+  const normalizedMeta = normalizeMeta(content?.meta);
+  return {
+    ...content,
+    meta: normalizedMeta,
+    title: safeString(content?.title, ''),
+    status: safeString(content?.status, ''),
+    content_id: content?.content_id || content?.contentId || content?.id,
+    id: content?.id || content?.content_id || content?.contentId,
+    source: content?.source || fallbackSource || '',
+  };
+};
+
+const shuffleArray = (arr) => {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
 const renderPopularGrid = () => {
   const grid = UI.searchPopularGrid;
   if (!grid) return;
@@ -1114,13 +1237,45 @@ const renderPopularGrid = () => {
   grid.innerHTML = '';
   const tabId = getSearchType();
   const aspectClass = getAspectByType(tabId);
-  const pool = Array.isArray(STATE.rendering?.list) ? STATE.rendering.list : [];
-  const items = pool.slice(0, 9);
+  const recent = (STATE.search.recentlyOpened.length
+    ? STATE.search.recentlyOpened
+    : loadRecentlyOpened()
+  ).sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
+
+  if (!STATE.search.recentlyOpened.length) {
+    STATE.search.recentlyOpened = recent;
+  }
+
+  const useRecent = recent.length > 0;
+
+  if (UI.searchPopularTitle) {
+    UI.searchPopularTitle.textContent = useRecent ? '최근 본 작품' : '추천 작품';
+  }
+  if (UI.searchPopularSubtitle) {
+    UI.searchPopularSubtitle.textContent = useRecent
+      ? '최근에 열어본 작품이 여기에 표시됩니다.'
+      : '최근 열어본 작품이 없어서 추천 작품을 보여드려요.';
+    UI.searchPopularSubtitle.classList.toggle('hidden', false);
+  }
+
+  const items = useRecent
+    ? recent
+        .map((entry) => normalizeContentForGrid(entry?.content, getSearchSource(tabId)))
+        .filter((item) => item?.content_id && item?.source)
+        .slice(0, POPULAR_GRID_LIMIT)
+    : (() => {
+        const pool = Array.isArray(STATE.rendering?.list) ? [...STATE.rendering.list] : [];
+        if (!pool.length) return [];
+        return shuffleArray(pool)
+          .slice(0, 30)
+          .slice(0, POPULAR_GRID_LIMIT)
+          .map((item) => normalizeContentForGrid(item, getSearchSource(tabId)));
+      })();
 
   if (!items.length) {
     const placeholder = document.createElement('div');
     placeholder.className = 'text-sm text-white/50 col-span-3 text-center py-8';
-    placeholder.textContent = '인기 작품을 불러오지 못했습니다.';
+    placeholder.textContent = '추천 작품을 불러오지 못했습니다.';
     grid.appendChild(placeholder);
     return;
   }
@@ -1129,7 +1284,6 @@ const renderPopularGrid = () => {
   items.forEach((item, idx) => {
     const card = createCard(item, tabId, aspectClass);
     card.dataset.searchIndex = String(idx);
-    card.onclick = () => openSubscribeModal(item);
     fragment.appendChild(card);
   });
 
@@ -2318,11 +2472,16 @@ async function fetchAndRenderContent(tabId) {
 
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
-  el.className = 'relative group cursor-pointer fade-in';
+  el.className =
+    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5';
   const subKey = buildSubscriptionKey(content);
   if (subKey) {
     el.setAttribute('data-sub-key', subKey);
   }
+
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', `${content?.title || '콘텐츠'} — Open`);
 
   const meta = normalizeMeta(content?.meta);
   const thumb = meta?.common?.thumbnail_url || FALLBACK_THUMB;
@@ -2333,6 +2492,19 @@ function createCard(content, tabId, aspectClass) {
   const cardContainer = document.createElement('div');
   cardContainer.className = `${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2`;
   cardContainer.setAttribute('data-card-thumb', 'true');
+
+  const affordOverlay = document.createElement('div');
+  affordOverlay.setAttribute('data-afford-overlay', 'true');
+  affordOverlay.setAttribute('aria-hidden', 'true');
+  affordOverlay.className =
+    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100';
+
+  const affordHint = document.createElement('div');
+  affordHint.setAttribute('data-afford-hint', 'true');
+  affordHint.setAttribute('aria-hidden', 'true');
+  affordHint.textContent = 'Open';
+  affordHint.className =
+    'absolute bottom-2 left-2 z-[6] text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1 pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100';
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
@@ -2391,6 +2563,9 @@ function createCard(content, tabId, aspectClass) {
     'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
   cardContainer.appendChild(gradient);
 
+  cardContainer.appendChild(affordOverlay);
+  cardContainer.appendChild(affordHint);
+
   const subscribed = isSubscribed(content);
   if (subscribed) {
     cardContainer.appendChild(createStarBadgeEl());
@@ -2413,6 +2588,30 @@ function createCard(content, tabId, aspectClass) {
   textContainer.appendChild(titleEl);
   textContainer.appendChild(authorEl);
   el.appendChild(textContainer);
+
+  const showPress = () => {
+    affordOverlay.classList.add('opacity-100');
+    affordHint.classList.add('opacity-100');
+  };
+
+  const hidePress = () => {
+    affordOverlay.classList.remove('opacity-100');
+    affordHint.classList.remove('opacity-100');
+    if (el.__pressT) {
+      clearTimeout(el.__pressT);
+      el.__pressT = null;
+    }
+  };
+
+  el.onpointerdown = () => {
+    showPress();
+    if (el.__pressT) clearTimeout(el.__pressT);
+    el.__pressT = setTimeout(hidePress, 180);
+  };
+
+  el.onpointerup = hidePress;
+  el.onpointercancel = hidePress;
+  el.onpointerleave = hidePress;
 
   el.onclick = () => openSubscribeModal(content);
   return el;
@@ -2500,6 +2699,8 @@ function openSubscribeModal(content) {
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
   closeProfileMenu();
+
+  recordRecentlyOpened(content);
 
   const titleText = String(content?.title || '').trim();
   const url = getContentUrl(content);
