@@ -2318,11 +2318,16 @@ async function fetchAndRenderContent(tabId) {
 
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
-  el.className = 'relative group cursor-pointer fade-in';
+  el.className =
+    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5';
   const subKey = buildSubscriptionKey(content);
   if (subKey) {
     el.setAttribute('data-sub-key', subKey);
   }
+
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', `${content?.title || '콘텐츠'} — Open`);
 
   const meta = normalizeMeta(content?.meta);
   const thumb = meta?.common?.thumbnail_url || FALLBACK_THUMB;
@@ -2333,6 +2338,19 @@ function createCard(content, tabId, aspectClass) {
   const cardContainer = document.createElement('div');
   cardContainer.className = `${aspectClass} rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2`;
   cardContainer.setAttribute('data-card-thumb', 'true');
+
+  const affordOverlay = document.createElement('div');
+  affordOverlay.setAttribute('data-afford-overlay', 'true');
+  affordOverlay.setAttribute('aria-hidden', 'true');
+  affordOverlay.className =
+    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100';
+
+  const affordHint = document.createElement('div');
+  affordHint.setAttribute('data-afford-hint', 'true');
+  affordHint.setAttribute('aria-hidden', 'true');
+  affordHint.textContent = 'Open';
+  affordHint.className =
+    'absolute bottom-2 left-2 z-[6] text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1 pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100';
 
   const imgEl = document.createElement('img');
   imgEl.src = thumb;
@@ -2391,6 +2409,9 @@ function createCard(content, tabId, aspectClass) {
     'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60';
   cardContainer.appendChild(gradient);
 
+  cardContainer.appendChild(affordOverlay);
+  cardContainer.appendChild(affordHint);
+
   const subscribed = isSubscribed(content);
   if (subscribed) {
     cardContainer.appendChild(createStarBadgeEl());
@@ -2413,6 +2434,30 @@ function createCard(content, tabId, aspectClass) {
   textContainer.appendChild(titleEl);
   textContainer.appendChild(authorEl);
   el.appendChild(textContainer);
+
+  const showPress = () => {
+    affordOverlay.classList.add('opacity-100');
+    affordHint.classList.add('opacity-100');
+  };
+
+  const hidePress = () => {
+    affordOverlay.classList.remove('opacity-100');
+    affordHint.classList.remove('opacity-100');
+    if (el.__pressT) {
+      clearTimeout(el.__pressT);
+      el.__pressT = null;
+    }
+  };
+
+  el.onpointerdown = () => {
+    showPress();
+    if (el.__pressT) clearTimeout(el.__pressT);
+    el.__pressT = setTimeout(hidePress, 180);
+  };
+
+  el.onpointerup = hidePress;
+  el.onpointercancel = hidePress;
+  el.onpointerleave = hidePress;
 
   el.onclick = () => openSubscribeModal(content);
   return el;
