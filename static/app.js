@@ -26,27 +26,40 @@ const ICONS = {
   my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
 };
 
+// UI_CLASSES: Tailwind class tokens for reusable UI primitives.
+// - Prefer tokens over ad-hoc class strings to keep styling consistent.
+// - Keep layout/positioning (fixed/inset/z) in HTML; tokens cover visual styling only.
+// How to extend:
+// - Add a new token here with a concise, semantic name.
+// - If used in static HTML, annotate the element with data-ui and add a map entry below.
+// - For JS-only elements, add a DATA_UI_CLASS_MAP entry with a "dynamic-only" note.
+// - Avoid mixing layout utilities into tokens; keep spacing/positioning close to markup.
+// - Smoke test search page, modals, cards, and toasts after changes.
 const UI_CLASSES = {
+  // Buttons
   btnPrimary:
     'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
     'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
+  // Icon buttons
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
   iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
   headerBtn:
     'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
 
+  // Chips & empty states
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
-
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
 
+  // Typography helpers
   sectionTitle: 'text-base font-semibold',
   sectionSubtle: 'text-sm text-white/70',
 
+  // Card overlays/badges
   starBadge:
     'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none',
   badgeBase:
@@ -57,6 +70,7 @@ const UI_CLASSES = {
     'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
   pillHint: 'text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1',
 
+  // Cards
   cardRoot:
     'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5',
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
@@ -66,6 +80,7 @@ const UI_CLASSES = {
   cardTitle: 'font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate',
   cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
 
+  // Inputs
   inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
   inputSm:
     'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
@@ -73,23 +88,28 @@ const UI_CLASSES = {
     'transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]',
   inputLabel: 'block text-sm font-medium text-gray-300',
 
+  // Modal
   modalWrap: 'flex items-center justify-center',
   modalCard:
     'relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
   modalTitle: 'text-xl font-bold mb-1 text-white',
   modalBodyText: 'text-gray-400 text-sm',
 
+  // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
 
+  // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
   menuItem:
     'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
   menuItemDanger:
     'w-full text-left px-4 py-3 text-sm text-red-300 hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
 
+  // Pagination controls
   loadMoreBtn:
     'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
 
+  // Toasts
   toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
   toastSuccess:
     'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
@@ -230,7 +250,11 @@ const UI = {
   searchPageClearQuery: document.getElementById('searchPageClearQuery'),
 };
 
+// DATA_UI_CLASS_MAP: maps data-ui keys in static HTML to UI_CLASSES tokens.
+// - Keys mirror data-ui="..." attributes in templates/index.html.
+// - Some entries are dynamic-only for nodes created in JS (not always present in templates).
 const DATA_UI_CLASS_MAP = {
+  // Static HTML (templates/index.html)
   'search-back': UI_CLASSES.iconBtn,
   'search-clear': cx(UI_CLASSES.iconBtnSm, 'hidden'),
   'search-input': UI_CLASSES.inputBase,
@@ -252,20 +276,25 @@ const DATA_UI_CLASS_MAP = {
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
-  'pill-hint': UI_CLASSES.pillHint,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
-  'btn-secondary': UI_CLASSES.btnSecondary,
   'load-more': UI_CLASSES.loadMoreBtn,
+
+  // Dynamic-only (JS-generated nodes)
+  'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
+  'btn-secondary': UI_CLASSES.btnSecondary, // dynamic-only: secondary CTAs injected by JS
 };
 
+// applyDataUiClasses: applies token classes to nodes annotated with data-ui.
+// - Idempotent: per-element guard prevents duplicate class application on re-runs.
+// - Safe to call after dynamically inserting any data-ui elements into the DOM.
 function applyDataUiClasses(root = document) {
   const elements = root?.querySelectorAll?.('[data-ui]');
   if (!elements) return;
 
   elements.forEach((el) => {
-    if (el.dataset.uiApplied === '1') return;
+    if (el.dataset.uiApplied === '1') return; // guard against repeat application
     const key = el.getAttribute('data-ui');
     const tokenClass = DATA_UI_CLASS_MAP[key];
     if (!tokenClass) return;
