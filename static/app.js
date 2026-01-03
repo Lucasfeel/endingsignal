@@ -1015,6 +1015,15 @@ const safeBool = (v, fallback = false) =>
   typeof v === 'boolean' ? v : fallback;
 const safeObj = (v) => (v && typeof v === 'object' ? v : {});
 
+function normalizeSearchText(s) {
+  return (s || '')
+    .toString()
+    .trim()
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
 const normalizeSubscriptionItem = (item) => {
   if (!item || typeof item !== 'object') return null;
 
@@ -1476,7 +1485,7 @@ const removeRecentSearch = (query) => {
 
 const normalizeContentForGrid = (content, fallbackSource) => {
   const normalizedMeta = normalizeMeta(content?.meta);
-  return {
+  const normalized = {
     ...content,
     meta: normalizedMeta,
     title: safeString(content?.title, ''),
@@ -1485,6 +1494,35 @@ const normalizeContentForGrid = (content, fallbackSource) => {
     id: content?.id || content?.content_id || content?.contentId,
     source: content?.source || fallbackSource || '',
   };
+  normalized.__search_title_n = normalizeSearchText(normalized.title);
+  normalized.__search_alt_n = normalizeSearchText(
+    safeString(
+      content?.alt_title ||
+        content?.subtitle ||
+        normalizedMeta?.common?.alt_title ||
+        normalizedMeta?.common?.title_alias,
+      ''
+    )
+  );
+  return normalized;
+};
+
+const matchesSearchQuery = (content, normalizedQuery) => {
+  if (!normalizedQuery) return false;
+  const titleN = content?.__search_title_n ?? normalizeSearchText(content?.title);
+  const altN =
+    content?.__search_alt_n ??
+    normalizeSearchText(
+      safeString(
+        content?.alt_title ||
+          content?.subtitle ||
+          content?.meta?.common?.alt_title ||
+          content?.meta?.common?.title_alias,
+        ''
+      )
+    );
+
+  return Boolean((titleN && titleN.includes(normalizedQuery)) || (altN && altN.includes(normalizedQuery)));
 };
 
 const shuffleArray = (arr) => {
@@ -1694,14 +1732,7 @@ async function renderSearchResults(items, effectiveType) {
   STATE.searchRenderAbort = renderController;
 
   const normalizedItems = Array.isArray(items)
-    ? items.map((raw) => ({
-        ...raw,
-        meta: normalizeMeta(raw?.meta),
-        title: safeString(raw?.title, ''),
-        content_id: raw?.content_id || raw?.contentId || raw?.id,
-        id: raw?.id || raw?.content_id || raw?.contentId,
-        source: raw?.source || getSearchSource(effectiveType),
-      }))
+    ? items.map((raw) => normalizeContentForGrid(raw, getSearchSource(effectiveType)))
     : [];
   STATE.search.results = normalizedItems;
   if (UI.searchResultCount) UI.searchResultCount.textContent = String(normalizedItems.length || 0);
@@ -1752,6 +1783,8 @@ async function renderSearchResults(items, effectiveType) {
 
 async function performSearch(q) {
   const query = (q || '').trim();
+  const normalizedQuery = normalizeSearchText(query);
+  const hasWhitespace = /\s/.test(query);
   const effectiveType = getSearchType();
   const source = getSearchSource(effectiveType);
 
@@ -1787,7 +1820,24 @@ async function performSearch(q) {
 
     if (seq !== STATE.search.requestSeq) return;
     const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
-    await renderSearchResults(items, effectiveType);
+    let normalizedItems = items;
+
+    if (normalizedQuery) {
+      const filtered = items.filter((item) => matchesSearchQuery(item, normalizedQuery));
+      if (filtered.length) normalizedItems = filtered;
+    }
+
+    if ((!normalizedItems.length && hasWhitespace) || (!items.length && hasWhitespace)) {
+      const pool = Array.isArray(STATE.rendering?.list) ? STATE.rendering.list : [];
+      const fallbackResults = pool.filter((item) => matchesSearchQuery(item, normalizedQuery));
+      if (fallbackResults.length) {
+        await renderSearchResults(fallbackResults, effectiveType);
+        addRecentSearch(query);
+        return;
+      }
+    }
+
+    await renderSearchResults(normalizedItems, effectiveType);
     addRecentSearch(query);
   } catch (e) {
     if (controller.signal.aborted || seq !== STATE.search.requestSeq) return;
@@ -2696,7 +2746,7 @@ async function fetchAndRenderContent(tabId) {
     }
 
     data = Array.isArray(data)
-      ? data.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
+      ? data.map((item) => normalizeContentForGrid(item, getSearchSource(tabId)))
       : [];
     if (isStale()) return;
   } catch (e) {
