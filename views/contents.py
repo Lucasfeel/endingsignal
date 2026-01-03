@@ -2,6 +2,7 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from database import get_db, get_cursor
+from utils.text import normalize_search_text
 import base64
 import json
 import math
@@ -95,13 +96,14 @@ def search_contents():
     cursor = None
     try:
         query = request.args.get('q', '').strip()
+        normalized_query = normalize_search_text(query)
         content_type = request.args.get('type', 'webtoon')
         source = request.args.get('source', 'all')
 
-        if not query:
+        if not normalized_query:
             return jsonify([])
 
-        q_len = len(query)
+        q_len = len(normalized_query)
         # 너무 짧은 검색어(1자 이하)는 노이즈가 많으므로 즉시 반환
         if q_len <= 1:
             return jsonify([])
@@ -109,9 +111,11 @@ def search_contents():
         conn = get_db()
         cursor = get_cursor(conn)
 
-        title_expr = "COALESCE(title, '')"
-        author_expr = "COALESCE(meta->'common'->>'authors', '')"
-        like_param = f"%{query}%"
+        # The normalized columns are precomputed and indexed with pg_trgm to keep
+        # whitespace-insensitive searches fast without per-row text manipulation.
+        title_expr = "COALESCE(normalized_title, '')"
+        author_expr = "COALESCE(normalized_authors, '')"
+        like_param = f"%{normalized_query}%"
 
         def compute_thresholds(length):
             if length <= 2:
@@ -139,7 +143,7 @@ def search_contents():
             where_clauses.append(
                 f"(similarity({title_expr}, %s) >= %s OR similarity({author_expr}, %s) >= %s)"
             )
-            params.extend([query, title_threshold, query, author_threshold])
+            params.extend([normalized_query, title_threshold, normalized_query, author_threshold])
 
         search_query = f"""
             SELECT content_id, title, status, meta, source
@@ -156,7 +160,7 @@ def search_contents():
             LIMIT 100
         """
 
-        params.extend([like_param, like_param, query, query])
+        params.extend([like_param, like_param, normalized_query, normalized_query])
 
         cursor.execute(search_query, tuple(params))
         raw_rows = cursor.fetchall()

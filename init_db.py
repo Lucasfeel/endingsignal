@@ -55,14 +55,11 @@ def main():
     try:
         load_dotenv()
 
-        if database_already_initialized():
-            print("[SKIP] Database already initialized. Skipping setup.")
-            print("==========================================")
-            print("  DATABASE INITIALIZATION SCRIPT FINISHED")
-            print("==========================================")
-            sys.exit(0)
-
-        print("[INFO] Database not initialized. Running setup...")
+        already_initialized = database_already_initialized()
+        if already_initialized:
+            print("[INFO] Database already initialized. Running idempotent setup to apply latest schema...")
+        else:
+            print("[INFO] Database not initialized. Running setup...")
         setup_database_standalone()
         print("\n[SUCCESS] Database initialization complete.")
         print("==========================================")
