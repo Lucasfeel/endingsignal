@@ -258,6 +258,11 @@ const UI = {
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
+  myPagePwCurrent: document.getElementById('myPagePwCurrent'),
+  myPagePwNew: document.getElementById('myPagePwNew'),
+  myPagePwConfirm: document.getElementById('myPagePwConfirm'),
+  myPagePwSubmit: document.getElementById('myPagePwSubmit'),
+  myPagePwError: document.getElementById('myPagePwError'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -287,6 +292,7 @@ const DATA_UI_CLASS_MAP = {
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
+  'btn-primary': UI_CLASSES.btnPrimary,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
@@ -983,7 +989,7 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
   if (!response.ok) {
     const errorObj = await buildError();
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       logout({ silent: true });
       showToast('세션이 만료되었습니다. 다시 로그인해주세요.', { type: 'error' });
     }
@@ -1237,6 +1243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateProfileButtonState();
   setupSearchHandlers();
   setupMyPageHandlers();
+  setupMyPagePasswordChange();
 
   if (UI.contentLoadMoreBtn) {
     UI.contentLoadMoreBtn.addEventListener('click', () => {
@@ -2071,6 +2078,88 @@ function handleMyPageUnauthorized() {
   openAuthModal({ reason: 'my-page' });
 }
 
+function setMyPagePwError(message = '') {
+  if (UI.myPagePwError) UI.myPagePwError.textContent = message || '';
+}
+
+function resetMyPagePasswordForm() {
+  if (UI.myPagePwCurrent) UI.myPagePwCurrent.value = '';
+  if (UI.myPagePwNew) UI.myPagePwNew.value = '';
+  if (UI.myPagePwConfirm) UI.myPagePwConfirm.value = '';
+  setMyPagePwError('');
+}
+
+function setMyPagePwSubmitting(isSubmitting) {
+  if (!UI.myPagePwSubmit) return;
+  UI.myPagePwSubmit.disabled = isSubmitting;
+  UI.myPagePwSubmit.textContent = isSubmitting ? '변경 중...' : '변경하기';
+}
+
+async function handleMyPageChangePassword() {
+  const currentPassword = (UI.myPagePwCurrent?.value || '').trim();
+  const newPassword = (UI.myPagePwNew?.value || '').trim();
+  const confirmPassword = (UI.myPagePwConfirm?.value || '').trim();
+
+  setMyPagePwError('');
+
+  if (!currentPassword) {
+    setMyPagePwError('현재 비밀번호를 입력해주세요.');
+    return;
+  }
+
+  if (!newPassword) {
+    setMyPagePwError('새 비밀번호를 입력해주세요.');
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    setMyPagePwError('비밀번호는 8자 이상이어야 합니다.');
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setMyPagePwError('새 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  const token = getAccessToken();
+  if (!token) {
+    handleMyPageUnauthorized();
+    return;
+  }
+
+  setMyPagePwSubmitting(true);
+
+  try {
+    await apiRequest('POST', '/api/auth/change-password', {
+      body: { current_password: currentPassword, new_password: newPassword },
+      token,
+    });
+
+    showToast('비밀번호가 변경되었습니다.', { type: 'success' });
+    resetMyPagePasswordForm();
+  } catch (e) {
+    if (e?.httpStatus === 401) {
+      handleMyPageUnauthorized();
+      return;
+    }
+
+    let message = '비밀번호 변경에 실패했습니다.';
+    if (e?.code === 'INVALID_PASSWORD') {
+      message = '현재 비밀번호가 올바르지 않습니다.';
+    } else if (e?.code === 'WEAK_PASSWORD' || e?.code === 'PASSWORD_TOO_SHORT') {
+      message = '비밀번호는 8자 이상이어야 합니다.';
+    } else if (e?.code === 'INVALID_INPUT') {
+      message = '비밀번호를 다시 확인해주세요.';
+    }
+
+    setMyPagePwError(message);
+    showToast(message, { type: 'error' });
+  } finally {
+    setMyPagePwSubmitting(false);
+  }
+}
+
 function openMyPage() {
   if (!UI.myPage) return;
 
@@ -2110,6 +2199,25 @@ function setupMyPageHandlers() {
       openMyPage();
     };
   }
+}
+
+function setupMyPagePasswordChange() {
+  if (UI.myPagePwSubmit) {
+    UI.myPagePwSubmit.addEventListener('click', (evt) => {
+      evt.preventDefault();
+      handleMyPageChangePassword();
+    });
+  }
+
+  [UI.myPagePwCurrent, UI.myPagePwNew, UI.myPagePwConfirm].forEach((input) => {
+    if (!input) return;
+    input.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        handleMyPageChangePassword();
+      }
+    });
+  });
 }
 
 /* =========================

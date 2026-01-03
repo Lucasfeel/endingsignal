@@ -281,6 +281,24 @@
                                         <span id="myPageEmailValue" class="text-white/90 font-medium">-</span>
                                     </div>
                                 </div>
+                                <div data-ui="page-card" class="space-y-3">
+                                    <h3 data-ui="section-title">비밀번호 변경</h3>
+                                    <div class="space-y-2">
+                                        <label data-ui="input-label" for="myPagePwCurrent">현재 비밀번호</label>
+                                        <input id="myPagePwCurrent" data-ui="input-sm" type="password" autocomplete="current-password" placeholder="현재 비밀번호" />
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label data-ui="input-label" for="myPagePwNew">새 비밀번호</label>
+                                        <input id="myPagePwNew" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호" />
+                                        <p class="text-xs text-white/60">비밀번호는 8자 이상 입력해주세요.</p>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
+                                        <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
+                                    </div>
+                                    <p id="myPagePwError" class="text-xs text-red-400 min-h-[16px]"></p>
+                                    <button id="myPagePwSubmit" data-ui="btn-primary" type="button" class="w-full h-11">변경하기</button>
+                                </div>
                             </div>
                         </div>
                     </div>
