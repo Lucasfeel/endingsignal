@@ -145,6 +145,7 @@ const STATE = {
     activeIndex: -1,
     recentlyOpened: [],
   },
+  isMyPageOpen: false,
   contents: {},
   isLoading: false,
   contentRequestSeq: 0,
@@ -248,6 +249,10 @@ const UI = {
   searchPopularSubtitle: document.getElementById('searchPopularSubtitle'),
   searchResultCount: document.getElementById('searchResultCount'),
   searchPageClearQuery: document.getElementById('searchPageClearQuery'),
+  myPage: document.getElementById('myPage'),
+  myPageBackBtn: document.getElementById('myPageBackBtn'),
+  myPageEmailValue: document.getElementById('myPageEmailValue'),
+  profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
 // DATA_UI_CLASS_MAP: maps data-ui keys in static HTML to UI_CLASSES tokens.
@@ -280,6 +285,8 @@ const DATA_UI_CLASS_MAP = {
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
   'load-more': UI_CLASSES.loadMoreBtn,
+  'page-container': 'mx-auto h-full max-w-[480px] px-4',
+  'section-title': UI_CLASSES.sectionTitle,
 
   // Dynamic-only (JS-generated nodes)
   'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
@@ -1219,6 +1226,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupProfileButton();
   updateProfileButtonState();
   setupSearchHandlers();
+  setupMyPageHandlers();
 
   if (UI.contentLoadMoreBtn) {
     UI.contentLoadMoreBtn.addEventListener('click', () => {
@@ -2001,13 +2009,97 @@ function setupSearchHandlers() {
       if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') evt.preventDefault();
       return;
     }
-    if (evt.key === 'Escape' && STATE.search.pageOpen) {
-      closeSearchPage();
+    if (evt.key === 'Escape') {
+      if (STATE.search.pageOpen) closeSearchPage();
+      else if (STATE.isMyPageOpen) closeMyPage();
     } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') {
       evt.preventDefault();
       openSearchPage({ focus: true });
     }
   });
+}
+
+/* =========================
+   My page
+   ========================= */
+
+function renderMyPageEmail(user = {}) {
+  if (UI.myPageEmailValue) UI.myPageEmailValue.textContent = safeString(user?.email, '-') || '-';
+}
+
+async function fetchMyPageUser() {
+  const token = getAccessToken();
+
+  if (!token) {
+    handleMyPageUnauthorized();
+    return;
+  }
+
+  try {
+    const res = await apiRequest('GET', '/api/auth/me', { token });
+    const user = res?.data?.user || res?.user || null;
+
+    STATE.auth.user = user;
+    STATE.auth.isAuthenticated = Boolean(user || token);
+    renderMyPageEmail(user || {});
+    updateProfileButtonState();
+  } catch (e) {
+    if (e?.httpStatus === 401 || e?.httpStatus === 403) {
+      STATE.auth.isAuthenticated = false;
+      STATE.auth.user = null;
+      updateProfileButtonState();
+      handleMyPageUnauthorized();
+    } else {
+      console.warn('Failed to load my page info', e);
+      showToast('계정 정보를 불러오지 못했습니다.', { type: 'error' });
+    }
+  }
+}
+
+function handleMyPageUnauthorized() {
+  closeMyPage();
+  openAuthModal({ reason: 'my-page' });
+}
+
+function openMyPage() {
+  if (!UI.myPage) return;
+
+  if (!STATE.auth.isAuthenticated) {
+    openAuthModal({ reason: 'my-page' });
+    return;
+  }
+
+  const wasOpen = STATE.isMyPageOpen;
+  if (!wasOpen) {
+    STATE.isMyPageOpen = true;
+    lockBodyScroll();
+  } else {
+    STATE.isMyPageOpen = true;
+  }
+
+  UI.myPage.classList.remove('hidden');
+
+  if (STATE.auth.user) renderMyPageEmail(STATE.auth.user);
+  fetchMyPageUser();
+}
+
+function closeMyPage() {
+  if (!STATE.isMyPageOpen) return;
+  STATE.isMyPageOpen = false;
+  if (UI.myPage) UI.myPage.classList.add('hidden');
+  unlockBodyScroll();
+  if (UI.profileButton) UI.profileButton.focus();
+}
+
+function setupMyPageHandlers() {
+  if (UI.myPageBackBtn) UI.myPageBackBtn.onclick = () => closeMyPage();
+
+  if (UI.profileMenuMyPage) {
+    UI.profileMenuMyPage.onclick = () => {
+      closeProfileMenu();
+      openMyPage();
+    };
+  }
 }
 
 /* =========================
