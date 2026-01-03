@@ -69,11 +69,21 @@ def setup_database_standalone():
             source TEXT NOT NULL,
             content_type TEXT NOT NULL,
             title TEXT NOT NULL,
+            normalized_title TEXT,
+            normalized_authors TEXT,
             status TEXT NOT NULL,
             meta JSONB,
             PRIMARY KEY (content_id, source)
         )""")
         print("LOG: [DB Setup] 'contents' table created or already exists.")
+
+        print("LOG: [DB Setup] Ensuring normalized search columns exist...")
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS normalized_title TEXT"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS normalized_authors TEXT"
+        )
 
         print("LOG: [DB Setup] Creating 'users' table...")
         cursor.execute("""
@@ -164,6 +174,41 @@ def setup_database_standalone():
             ON contents
             USING gin ((COALESCE(meta->'common'->>'authors', '')) gin_trgm_ops);
         """)
+
+        print("LOG: [DB Setup] Creating GIN index on contents.normalized_title...")
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contents_normalized_title_trgm
+            ON contents
+            USING gin (normalized_title gin_trgm_ops);
+            """
+        )
+
+        print("LOG: [DB Setup] Creating GIN index on contents.normalized_authors...")
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contents_normalized_authors_trgm
+            ON contents
+            USING gin (normalized_authors gin_trgm_ops);
+            """
+        )
+
+        print("LOG: [DB Setup] Backfilling normalized search fields (idempotent)...")
+        cursor.execute(
+            """
+            UPDATE contents
+            SET normalized_title = regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')
+            WHERE normalized_title IS NULL OR normalized_title = '';
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE contents
+            SET normalized_authors = regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')
+            WHERE normalized_authors IS NULL OR normalized_authors = '';
+            """
+        )
+
         print("LOG: [DB Setup] 'pg_trgm' setup complete.")
 
         print("LOG: [DB Setup] Committing changes...")
