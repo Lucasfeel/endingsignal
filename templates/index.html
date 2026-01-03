@@ -138,6 +138,7 @@
                 </button>
                 <div id="profileMenu" data-ui="menu-wrap" class="hidden absolute right-4 top-[48px] z-[130] w-40" role="menu" aria-label="프로필 메뉴">
                     <button id="profileMenuMy" data-ui="menu-item" role="menuitem">내 구독</button>
+                    <button id="profileMenuMyPage" data-ui="menu-item" role="menuitem">마이페이지</button>
                     <button id="profileMenuLogout" data-ui="menu-item-danger" role="menuitem">로그아웃</button>
                 </div>
             </div>
@@ -255,6 +256,34 @@
                                     <div data-ui="search-empty-title">검색 결과가 없습니다</div>
                                     <div data-ui="search-empty-msg">다른 키워드로 검색해보세요.</div>
                                     <button id="searchPageClearQuery" data-ui="search-empty-button">검색어 지우기</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="myPage" class="fixed inset-0 z-[85] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
+            <div class="absolute inset-0 bg-black"></div>
+
+            <div class="relative z-10 h-full">
+                <div id="myPageContainer" data-ui="page-container" class="mx-auto h-full max-w-[480px] px-4">
+                    <div class="flex h-full flex-col min-h-0">
+                        <div class="flex items-center gap-2 pt-4 pb-3">
+                            <button id="myPageBackBtn" data-ui="search-back" aria-label="뒤로">
+                                ←
+                            </button>
+                            <h2 class="text-base font-semibold">마이페이지</h2>
+                        </div>
+
+                        <div class="flex-1 min-h-0 overflow-y-auto pb-[calc(96px+env(safe-area-inset-bottom))]">
+                            <div class="space-y-3">
+                                <div class="rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 space-y-3">
+                                    <h3 data-ui="section-title">내 정보</h3>
+                                    <div class="flex items-center justify-between text-sm">
+                                        <span class="text-gray-400">이메일</span>
+                                        <span id="myPageEmailValue" class="text-white font-medium">-</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
