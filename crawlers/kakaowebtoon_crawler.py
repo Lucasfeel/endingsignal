@@ -14,6 +14,7 @@ from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
 import config
 from .base_crawler import ContentCrawler
 from database import get_cursor
+from utils.text import normalize_search_text
 
 # --- KakaoWebtoon API Configuration ---
 API_BASE_URL = "https://gateway-kw.kakao.com/section/v1/pages"
@@ -840,6 +841,8 @@ class KakaowebtoonCrawler(ContentCrawler):
             authors = self._normalize_authors(webtoon_data)
             thumbnail_url = self._select_thumbnail_url(webtoon_data)
             content_url = f"https://webtoon.kakao.com/content/{urllib.parse.quote(str(content_id))}"
+            normalized_title = normalize_search_text(title)
+            normalized_authors = normalize_search_text(" ".join(authors) if authors else "")
 
             meta_data = {
                 "common": {
@@ -853,22 +856,40 @@ class KakaowebtoonCrawler(ContentCrawler):
             }
 
             if content_id in db_existing_ids:
-                record = ("webtoon", title, status, json.dumps(meta_data), content_id, self.source_name)
+                record = (
+                    "webtoon",
+                    title,
+                    normalized_title,
+                    normalized_authors,
+                    status,
+                    json.dumps(meta_data),
+                    content_id,
+                    self.source_name,
+                )
                 updates.append(record)
             else:
-                record = (content_id, self.source_name, "webtoon", title, status, json.dumps(meta_data))
+                record = (
+                    content_id,
+                    self.source_name,
+                    "webtoon",
+                    title,
+                    normalized_title,
+                    normalized_authors,
+                    status,
+                    json.dumps(meta_data),
+                )
                 inserts.append(record)
 
         if updates:
             cursor.executemany(
-                "UPDATE contents SET content_type=%s, title=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
+                "UPDATE contents SET content_type=%s, title=%s, normalized_title=%s, normalized_authors=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
                 updates,
             )
             print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
 
         if inserts:
             cursor.executemany(
-                "INSERT INTO contents (content_id, source, content_type, title, status, meta) VALUES (%s, %s, %s, %s, %s, %s) "
+                "INSERT INTO contents (content_id, source, content_type, title, normalized_title, normalized_authors, status, meta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT (content_id, source) DO NOTHING",
                 inserts,
             )
