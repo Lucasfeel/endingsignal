@@ -13,48 +13,34 @@
 
 const DEBUG_API = false;
 const DEBUG_TOOLS = false;
-window.__NAV_ICON_DEBUG__ = window.__NAV_ICON_DEBUG__ || false;
 
 function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
 }
 
-// DEV NOTE (nav icon tuning): calibrated in headless viewport approximation (1280x720, DPR 2.0).
-// Toggle window.__NAV_ICON_DEBUG__ = true in console to outline icon wrappers for alignment.
 const ICONS = {
-  webtoon: () => {
-    const gradId = `wbGrad-${Math.random().toString(36).slice(2, 7)}`;
-    return `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="var(--nav-fg)" stop-opacity="1" />
-          <stop offset="100%" stop-color="var(--nav-fg)" stop-opacity="0.92" />
-        </linearGradient>
-      </defs>
-      <path fill="url(#${gradId})" d="M10.5 14.5c0-3.6 2.9-6.5 6.5-6.5h17c3.6 0 6.5 2.9 6.5 6.5v14.3c0 3.6-2.9 6.5-6.5 6.5H22l-6.4 4.6c-.9.7-2.1-.1-2.1-1.2v-3.9h-1c-1.6 0-3-1.3-3-3V14.5Z" />
-    </svg>`;
-  },
+  webtoon: () =>
+    `<svg width="36" height="36" viewBox="0 0 36 36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 7.5c-2.9 0-5.25 2.35-5.25 5.25v8c0 2.9 2.35 5.25 5.25 5.25h8.6l3.1 2.95c.6.57 1.55.15 1.55-.68V26h4.75c2.9 0 5.25-2.35 5.25-5.25v-8C32.25 9.85 29.9 7.5 27 7.5H9Z"/>
+    </svg>`,
   novel: () =>
-    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      <path fill="var(--nav-fg)" d="M33.2 8.3c-4.2-4.2-11-4.2-15.2 0l-7.2 7.2c-.8.8-.5 2.2.6 2.7l5.8 2.7-4.6 4.6c-.7.7-.7 1.8 0 2.5s1.8.7 2.5 0l4.6-4.6 2.7 5.8c.5 1.1 1.9 1.4 2.7.6l7.2-7.2c4.2-4.2 4.2-11 0-15.2Z" />
-      <path fill="var(--nav-bg)" d="M23.9 10.8c-1.5 3.8-4.4 7.4-8.9 9.7l.7 1.5c4.2-2.1 7.5-5.3 9.5-9 .4-.7-.3-1.6-1.3-1.5Z" />
+    `<svg width="36" height="36" viewBox="0 0 36 36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M26.9 7.1c-3.6-3.6-9.5-3.6-13.1 0l-6.2 6.2a1.35 1.35 0 00.4 2.2l4.9 2.2-3.8 3.8a1.3 1.3 0 001.8 1.8l3.8-3.8 2.2 4.9a1.35 1.35 0 002.2.4l6.2-6.2c3.6-3.6 3.6-9.5 0-13.1Z"/>
     </svg>`,
   ott: () =>
-    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="24" cy="24" r="18" fill="var(--nav-fg)" />
-      <path d="M22 17.5 32 24l-10 6.5Z" fill="var(--nav-bg)" />
+    `<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="18" r="11" />
+      <path fill="currentColor" stroke="none" d="M15.75 13.5 22 18l-6.25 4.5v-9Z" />
     </svg>`,
   series: () =>
-    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      <g fill="none" stroke="var(--nav-fg)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
-        <rect x="12.5" y="12.5" width="18" height="23" rx="3.8" />
-        <rect x="19.5" y="14.8" width="18" height="22" rx="3.6" />
-        <rect x="26.5" y="17.2" width="16" height="21" rx="3.4" />
-      </g>
+    `<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="10" y="11" width="16" height="14" rx="2.5" />
+      <rect x="7" y="9" width="16" height="14" rx="2.3" />
+      <rect x="14" y="13" width="16" height="14" rx="2.7" />
     </svg>`,
   my: () =>
-    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      <path fill="var(--nav-fg)" d="M24 7.5 29 17c.3.6.9 1 1.5 1.1l10.6 1.5-7.7 7.3c-.5.5-.7 1.2-.6 1.8l1.8 10.5-9.5-5c-.6-.3-1.3-.3-1.9 0l-9.5 5 1.8-10.5c.1-.7-.1-1.4-.6-1.8l-7.7-7.3L17.5 18c.7-.1 1.2-.5 1.5-1.1l5-9.4Z" />
+    `<svg width="36" height="36" viewBox="0 0 36 36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 5.5 21.7 13l8.3 1-6 5.6 1.5 8.9L18 24.9l-7.5 3.6 1.5-8.9-6-5.6 8.3-1L18 5.5Z" />
     </svg>`,
 };
 
@@ -92,11 +78,10 @@ const UI_CLASSES = {
   sectionSubtle: 'text-sm text-white/70',
 
   // Bottom navigation
-  bottomNavItem:
-    'flex flex-col items-center justify-center w-full spring-bounce gap-2 text-[16px] font-semibold leading-[1.1] px-1',
-  bottomNavItemActive: '',
-  bottomNavIcon: 'h-11 w-11 flex items-center justify-center',
-  bottomNavLabel: 'text-[16px] font-semibold leading-[1.1]',
+  bottomNavItem: 'flex flex-col items-center justify-center w-full spring-bounce text-white/90 gap-1',
+  bottomNavItemActive: 'text-[#b277ff]',
+  bottomNavIcon: 'h-9 w-9 flex items-center justify-center',
+  bottomNavLabel: 'text-[13px] font-medium leading-tight',
 
   // Card overlays/badges
   starBadge:
@@ -2505,10 +2490,6 @@ function renderBottomNav() {
   if (!UI.bottomNav) return;
 
   UI.bottomNav.innerHTML = '';
-  UI.bottomNav.style.setProperty('--nav-bg', '#121212');
-  UI.bottomNav.style.setProperty('--nav-inactive', 'rgba(255,255,255,0.92)');
-  UI.bottomNav.style.setProperty('--nav-active', '#b277ff');
-
   const tabs = [
     { id: 'webtoon', label: 'Webtoon', icon: ICONS.webtoon },
     { id: 'novel', label: 'Web Novel', icon: ICONS.novel },
@@ -2524,21 +2505,15 @@ function renderBottomNav() {
     btn.className = cx(UI_CLASSES.bottomNavItem, isActive ? UI_CLASSES.bottomNavItemActive : '');
     btn.setAttribute('aria-label', tab.label);
     if (isActive) btn.setAttribute('aria-current', 'page');
-    btn.style.setProperty('--nav-fg', isActive ? 'var(--nav-active)' : 'var(--nav-inactive)');
-    btn.style.color = 'var(--nav-fg)';
 
     const iconWrap = document.createElement('div');
     iconWrap.className = cx(UI_CLASSES.bottomNavIcon, isActive ? 'scale-105' : 'scale-100');
-    iconWrap.style.color = 'var(--nav-fg)';
-    if (window.__NAV_ICON_DEBUG__) {
-      iconWrap.style.outline = '1px solid rgba(255,0,0,0.25)';
-    }
     iconWrap.innerHTML = tab.icon();
     const svg = iconWrap.querySelector('svg');
     if (svg) svg.setAttribute('aria-hidden', 'true');
 
     const labelEl = document.createElement('span');
-    labelEl.className = UI_CLASSES.bottomNavLabel;
+    labelEl.className = cx(UI_CLASSES.bottomNavLabel, isActive ? 'font-semibold' : 'font-medium');
     labelEl.textContent = tab.label;
 
     btn.append(iconWrap, labelEl);
