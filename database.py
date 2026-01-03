@@ -94,9 +94,28 @@ def setup_database_standalone():
             role TEXT NOT NULL DEFAULT 'user',
             is_active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
             last_login_at TIMESTAMP
         )""")
         print("LOG: [DB Setup] 'users' table created or already exists.")
+
+        print("LOG: [DB Setup] Ensuring 'users.updated_at' column exists and has defaults...")
+        cursor.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+            """
+        )
+        cursor.execute(
+            "ALTER TABLE users ALTER COLUMN updated_at SET DEFAULT NOW();"
+        )
+        cursor.execute(
+            """
+            UPDATE users
+            SET updated_at = COALESCE(created_at, NOW())
+            WHERE updated_at IS NULL;
+            """
+        )
 
         print("LOG: [DB Setup] Creating 'subscriptions' table...")
         cursor.execute("""
