@@ -16,6 +16,10 @@ def is_valid_email(email: str) -> bool:
     return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email))
 
 
+def is_valid_password(password: str) -> bool:
+    return isinstance(password, str) and len(password) >= 8
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -84,6 +88,37 @@ def authenticate_user(email: str, password: str):
         cursor.execute('UPDATE users SET last_login_at = NOW() WHERE id = %s', (user['id'],))
         conn.commit()
         return {'id': user['id'], 'email': user['email'], 'role': user['role']}
+    except psycopg2.Error:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+
+
+def change_password(user_id: int, current_password: str, new_password: str):
+    conn = get_db()
+    cursor = get_cursor(conn)
+    try:
+        cursor.execute(
+            'SELECT id, email, password_hash, is_active FROM users WHERE id = %s',
+            (user_id,),
+        )
+        user = cursor.fetchone()
+        if not user or not user['is_active']:
+            return False, 'UNAUTHORIZED', '사용자를 찾을 수 없습니다.'
+
+        if not verify_password(current_password, user['password_hash']):
+            return False, 'INVALID_PASSWORD', '현재 비밀번호가 올바르지 않습니다.'
+
+        if not is_valid_password(new_password):
+            return False, 'WEAK_PASSWORD', '비밀번호는 8자 이상이어야 합니다.'
+
+        cursor.execute(
+            'UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s',
+            (hash_password(new_password), user_id),
+        )
+        conn.commit()
+        return True, None, None
     except psycopg2.Error:
         conn.rollback()
         raise
