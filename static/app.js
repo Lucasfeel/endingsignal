@@ -156,6 +156,8 @@ const STATE = {
   isLoading: false,
   contentRequestSeq: 0,
   currentModalContent: null,
+  subscribeModalOpen: false,
+  subscribeToggleInFlight: false,
 
   auth: {
     isAuthenticated: false,
@@ -211,6 +213,7 @@ const STATE = {
   searchRenderAbort: null,
   searchAbortController: null,
   tabAbortController: null,
+  isMySubOpen: false,
 };
 
 /* =========================
@@ -226,6 +229,12 @@ const UI = {
   l1Filter: document.getElementById('l1FilterContainer'),
   l2Filter: document.getElementById('l2FilterContainer'),
   filtersWrapper: document.getElementById('filtersWrapper'),
+  subscribeModal: document.getElementById('subscribeModal'),
+  subscribeButton: document.getElementById('subscribeButton'),
+  subscribeStateLine: document.getElementById('subscribeStateLine'),
+  subscribeStateDot: document.getElementById('subscribeStateDot'),
+  subscribeStateText: document.getElementById('subscribeStateText'),
+  subscribeInlineError: document.getElementById('subscribeInlineError'),
   mySubToggle: document.getElementById('mySubToggleContainer'),
   seriesSort: document.getElementById('seriesSortOptions'),
   seriesFooter: document.getElementById('seriesFooterButton'),
@@ -559,6 +568,13 @@ function closeModal(modalEl) {
   modalEl.classList.add('hidden');
   modalEl.setAttribute('aria-hidden', 'true');
 
+  if (modalEl.id === 'subscribeModal') {
+    STATE.subscribeModalOpen = false;
+    STATE.subscribeToggleInFlight = false;
+    STATE.currentModalContent = null;
+    if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
+  }
+
   unlockBodyScroll();
 
   const hadReturnEl = Boolean(meta.returnFocusEl);
@@ -593,15 +609,16 @@ function createStarBadgeEl() {
   return badgeEl;
 }
 
-function syncStarBadgeForCard(cardEl) {
+function syncStarBadgeForCard(cardEl, subscribed) {
   if (!cardEl) return;
-  const key = cardEl.getAttribute('data-sub-key');
-  if (!key) return;
 
   const thumb = cardEl.querySelector('[data-card-thumb="true"]');
   if (!thumb) return;
 
-  const shouldShow = STATE.subscriptionsSet.has(key);
+  const contentId = cardEl.getAttribute('data-content-id');
+  const source = cardEl.getAttribute('data-source');
+  const key = source && contentId ? `${source}:${contentId}` : null;
+  const shouldShow = typeof subscribed === 'boolean' ? subscribed : key ? STATE.subscriptionsSet.has(key) : false;
   const existing = thumb.querySelector('[data-star-badge="true"]');
 
   if (shouldShow && !existing) {
@@ -611,11 +628,14 @@ function syncStarBadgeForCard(cardEl) {
   }
 }
 
-function refreshStarBadges({ key } = {}) {
-  const cards = Array.from(document.querySelectorAll('[data-sub-key]'));
-  const targets = key ? cards.filter((card) => card.getAttribute('data-sub-key') === key) : cards;
-
-  targets.forEach((card) => syncStarBadgeForCard(card));
+function syncAllRenderedStarBadges() {
+  document.querySelectorAll('[data-content-id][data-source]').forEach((cardEl) => {
+    const contentId = cardEl.getAttribute('data-content-id');
+    const source = cardEl.getAttribute('data-source');
+    const key = source && contentId ? `${source}:${contentId}` : null;
+    const subscribed = key ? STATE.subscriptionsSet.has(key) : false;
+    syncStarBadgeForCard(cardEl, subscribed);
+  });
 }
 
 document.addEventListener(
@@ -658,7 +678,7 @@ const contentKey = (c) => {
   const cid = String(c?.content_id ?? c?.contentId ?? c?.id ?? '')?.trim();
   const src = String(c?.source ?? '').trim();
   if (!cid && !src) return '';
-  return `${src}::${cid}`;
+  return `${src}:${cid}`;
 };
 
 const resetPaginationState = (category, { tabId, source, aspectClass, requestSeq }) => {
@@ -1084,16 +1104,19 @@ const normalizeSubscriptionItem = (item) => {
    Subscriptions helpers/state (CP4 + CP4.1)
    ========================= */
 
-const buildSubscriptionKey = (content) => {
+const subKey = (content) => {
   if (!content) return '';
-  const source = content.source || '';
-  const contentId = content.content_id || content.contentId || content.id;
+  const source = String(content.source || '').trim();
+  const cidRaw = content.content_id ?? content.contentId ?? content.id;
+  const contentId = cidRaw === undefined || cidRaw === null ? '' : String(cidRaw).trim();
   if (!source || !contentId) return '';
-  return `${source}::${contentId}`;
+  return `${source}:${contentId}`;
 };
 
+const buildSubscriptionKey = (content) => subKey(content);
+
 const isSubscribed = (content) => {
-  const key = buildSubscriptionKey(content);
+  const key = subKey(content);
   return key ? STATE.subscriptionsSet.has(key) : false;
 };
 
@@ -1103,6 +1126,9 @@ async function loadSubscriptions({ force = false } = {}) {
     STATE.subscriptionsSet = new Set();
     STATE.mySubscriptions = [];
     STATE.subscriptionsLoadedAt = null;
+    syncAllRenderedStarBadges();
+    syncMySubListInPlace();
+    if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
     return [];
   }
 
@@ -1128,25 +1154,21 @@ async function loadSubscriptions({ force = false } = {}) {
   STATE.subscriptionsSet = nextSet;
   STATE.mySubscriptions = normalized;
   STATE.subscriptionsLoadedAt = Date.now();
+  syncAllRenderedStarBadges();
+  syncMySubListInPlace();
+  if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
 
   return normalized;
 }
 
 async function subscribeContent(content) {
   const token = getAccessToken();
-  if (!token) {
-    showToast('로그인이 필요합니다. 로그인 후 이용해주세요.', { type: 'error' });
-    return;
-  }
+  if (!token) throw { httpStatus: 401, message: '로그인이 필요합니다.' };
 
   const contentId = content?.content_id || content?.contentId || content?.id;
   const source = content?.source;
-  const key = buildSubscriptionKey({ ...content, content_id: contentId, source });
 
-  if (!contentId || !source) {
-    showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
-    return;
-  }
+  if (!contentId || !source) throw new Error('콘텐츠 정보가 없습니다.');
 
   try {
     await apiRequest('POST', '/api/me/subscriptions', {
@@ -1154,37 +1176,21 @@ async function subscribeContent(content) {
       token,
     });
 
-    if (key) STATE.subscriptionsSet.add(key);
     STATE.subscriptionsLoadedAt = null;
 
-    // best-effort refresh (does not block UX)
-    loadSubscriptions({ force: true }).catch((err) =>
-      console.warn('Failed to refresh subscriptions after subscribe', err)
-    );
-
-    showToast('구독이 추가되었습니다.', { type: 'success' });
   } catch (e) {
-    if (key) STATE.subscriptionsSet.delete(key);
-    showToast(e?.message || '구독에 실패했습니다.', { type: 'error' });
     throw e;
   }
 }
 
 async function unsubscribeContent(content) {
   const token = getAccessToken();
-  if (!token) {
-    showToast('로그인이 필요합니다. 로그인 후 이용해주세요.', { type: 'error' });
-    return;
-  }
+  if (!token) throw { httpStatus: 401, message: '로그인이 필요합니다.' };
 
   const contentId = content?.content_id || content?.contentId || content?.id;
   const source = content?.source;
-  const key = buildSubscriptionKey({ ...content, content_id: contentId, source });
 
-  if (!contentId || !source) {
-    showToast('콘텐츠 정보가 없습니다.', { type: 'error' });
-    return;
-  }
+  if (!contentId || !source) throw new Error('콘텐츠 정보가 없습니다.');
 
   try {
     await apiRequest('DELETE', '/api/me/subscriptions', {
@@ -1192,19 +1198,59 @@ async function unsubscribeContent(content) {
       token,
     });
 
-    if (key) STATE.subscriptionsSet.delete(key);
     STATE.subscriptionsLoadedAt = null;
-
-    loadSubscriptions({ force: true }).catch((err) =>
-      console.warn('Failed to refresh subscriptions after unsubscribe', err)
-    );
-
-    showToast('구독이 해제되었습니다.', { type: 'success' });
   } catch (e) {
-    if (key) STATE.subscriptionsSet.add(key);
-    showToast(e?.message || '구독 해제에 실패했습니다.', { type: 'error' });
     throw e;
   }
+}
+
+function applySubscriptionChange({ content, subscribed }) {
+  const key = subKey(content);
+  if (!key) return;
+
+  if (subscribed) STATE.subscriptionsSet.add(key);
+  else STATE.subscriptionsSet.delete(key);
+
+  syncSubscribeModalUI(content);
+  syncAllRenderedStarBadges();
+  syncMySubListInPlace();
+}
+
+function syncSubscribeModalUI(content) {
+  const modalKey = subKey(STATE.currentModalContent);
+  const incomingKey = subKey(content);
+
+  if (!STATE.subscribeModalOpen) return;
+  if (!modalKey || !incomingKey || modalKey !== incomingKey) return;
+
+  const subscribed = isSubscribed(content);
+  if (UI.subscribeStateText) {
+    UI.subscribeStateText.textContent = subscribed ? '구독 중' : '미구독';
+  }
+  if (UI.subscribeStateDot) {
+    UI.subscribeStateDot.classList.remove('bg-purple-400', 'bg-white/50');
+    UI.subscribeStateDot.classList.add(subscribed ? 'bg-purple-400' : 'bg-white/50');
+  }
+
+  if (UI.subscribeButton) {
+    UI.subscribeButton.textContent = subscribed ? '구독 해제' : '구독하기';
+    UI.subscribeButton.dataset.subscribed = subscribed ? '1' : '0';
+  }
+}
+
+function syncMySubListInPlace() {
+  if (!STATE.isMySubOpen) return;
+  const root = document.getElementById('mySubscriptionsList') || UI.contentGrid;
+  if (!root) return;
+
+  root.querySelectorAll('[data-content-id][data-source]').forEach((cardEl) => {
+    const contentId = cardEl.getAttribute('data-content-id');
+    const source = cardEl.getAttribute('data-source');
+    const key = source && contentId ? `${source}:${contentId}` : null;
+    if (key && !STATE.subscriptionsSet.has(key)) {
+      cardEl.remove();
+    }
+  });
 }
 
 const formatDateKST = (isoString) => {
@@ -2497,6 +2543,7 @@ function renderBottomNav() {
 async function updateTab(tabId) {
   STATE.activeTab = tabId;
   if (tabId !== 'my') STATE.lastBrowseTab = tabId;
+  STATE.isMySubOpen = tabId === 'my';
   if (STATE.search.pageOpen) closeSearchPage();
 
   renderBottomNav();
@@ -3003,9 +3050,17 @@ async function fetchAndRenderContent(tabId) {
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
   setClasses(el, UI_CLASSES.cardRoot);
-  const subKey = buildSubscriptionKey(content);
-  if (subKey) {
-    el.setAttribute('data-sub-key', subKey);
+  const subscriptionKey = buildSubscriptionKey(content);
+  const contentId = content?.content_id ?? content?.contentId ?? content?.id;
+  const source = content?.source;
+  if (subscriptionKey) {
+    el.setAttribute('data-sub-key', subscriptionKey);
+  }
+  if (contentId !== undefined && contentId !== null) {
+    el.setAttribute('data-content-id', String(contentId));
+  }
+  if (source) {
+    el.setAttribute('data-source', String(source));
   }
 
   el.setAttribute('role', 'button');
@@ -3101,10 +3156,7 @@ function createCard(content, tabId, aspectClass) {
   cardContainer.appendChild(affordOverlay);
   cardContainer.appendChild(affordHint);
 
-  const subscribed = isSubscribed(content);
-  if (subscribed) {
-    cardContainer.appendChild(createStarBadgeEl());
-  }
+  syncStarBadgeForCard(el, isSubscribed(content));
 
   el.appendChild(cardContainer);
 
@@ -3164,11 +3216,8 @@ function createCard(content, tabId, aspectClass) {
    ========================= */
 
 const syncModalButton = () => {
-  const btn = document.getElementById('subscribeButton');
-  const content = STATE.currentModalContent;
-  if (!btn || !content) return;
-  const on = isSubscribed(content);
-  btn.textContent = on ? '구독 해제' : '구독하기';
+  if (!STATE.currentModalContent) return;
+  syncSubscribeModalUI(STATE.currentModalContent);
 };
 
 function getContentUrl(content) {
@@ -3237,10 +3286,20 @@ function getContentUrl(content) {
 
 function openSubscribeModal(content, opts = {}) {
   STATE.currentModalContent = content;
+  STATE.subscribeModalOpen = true;
+  STATE.subscribeToggleInFlight = false;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
   const ctaBtn = document.getElementById('subscribeButton');
+  if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
+  if (UI.subscribeStateText && !STATE.subscriptionsLoadedAt) {
+    UI.subscribeStateText.textContent = '확인 중…';
+  }
+  if (UI.subscribeStateDot) {
+    UI.subscribeStateDot.classList.remove('bg-purple-400');
+    UI.subscribeStateDot.classList.add('bg-white/50');
+  }
   const returnFocusEl = opts?.returnFocusEl instanceof HTMLElement ? opts.returnFocusEl : null;
   closeProfileMenu();
 
@@ -3287,7 +3346,13 @@ function openSubscribeModal(content, opts = {}) {
       returnFocusEl,
     });
   }
-  syncModalButton();
+  if (STATE.subscriptionsLoadedAt) {
+    syncSubscribeModalUI(content);
+  }
+
+  loadSubscriptions()
+    .catch(() => {})
+    .finally(() => syncSubscribeModalUI(content));
 }
 
 function closeSubscribeModal() {
@@ -3299,37 +3364,48 @@ function closeSubscribeModal() {
 window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
+  if (STATE.subscribeToggleInFlight) return;
   if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
-
-  const key = buildSubscriptionKey(content);
-  const btn = document.getElementById('subscribeButton');
-  if (key && STATE.pendingSubOps.has(key)) return;
-  if (key) STATE.pendingSubOps.add(key);
+  const btn = UI.subscribeButton;
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
+  const currently = isSubscribed(content);
+  const nextState = !currently;
+  if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
+
+  STATE.subscribeToggleInFlight = true;
   if (btn) {
     btn.disabled = true;
     btn.classList.add(...disabledClasses);
+    btn.textContent = currently ? '해제하는 중…' : '구독하는 중…';
   }
 
-  const currently = isSubscribed(content);
   try {
     if (currently) await unsubscribeContent(content);
     else await subscribeContent(content);
 
-    syncModalButton();
-    refreshStarBadges({ key });
-
-    if (STATE.activeTab === 'my') {
-      fetchAndRenderContent('my');
-    }
+    applySubscriptionChange({ content, subscribed: nextState });
+    showToast(nextState ? '구독했습니다.' : '구독을 해제했습니다.', { type: 'success' });
+    loadSubscriptions({ force: true }).catch((err) =>
+      console.warn('Failed to refresh subscriptions after toggle', err)
+    );
   } catch (e) {
-    // errors already toasted in subscribe/unsubscribe
+    if (e?.httpStatus === 401) {
+      showToast('로그인이 필요합니다.', { type: 'error' });
+      openAuthModal({ reason: 'subscription-auth' });
+    } else {
+      if (UI.subscribeInlineError) {
+        UI.subscribeInlineError.textContent =
+          e?.message || '잠시 후 다시 시도해 주세요.';
+      }
+      showToast(e?.message || '잠시 후 다시 시도해 주세요.', { type: 'error' });
+    }
   } finally {
-    if (key) STATE.pendingSubOps.delete(key);
+    STATE.subscribeToggleInFlight = false;
     if (btn) {
       btn.disabled = false;
       btn.classList.remove(...disabledClasses);
     }
+    if (content) syncSubscribeModalUI(content);
   }
 };
 
