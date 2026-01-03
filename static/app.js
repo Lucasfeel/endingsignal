@@ -158,6 +158,7 @@ const STATE = {
   currentModalContent: null,
   subscribeModalOpen: false,
   subscribeToggleInFlight: false,
+  subscribeModalState: { isLoading: false, loadFailed: false },
 
   auth: {
     isAuthenticated: false,
@@ -171,6 +172,7 @@ const STATE = {
   pendingSubOps: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
+  subscriptionsLoadPromise: null,
 
   pagination: {
     completed: {
@@ -379,6 +381,10 @@ async function renderInBatches({
         break;
       }
     }
+  }
+
+  if (!signal?.aborted) {
+    syncAllRenderedStarBadges();
   }
 }
 
@@ -1126,39 +1132,82 @@ async function loadSubscriptions({ force = false } = {}) {
     STATE.subscriptionsSet = new Set();
     STATE.mySubscriptions = [];
     STATE.subscriptionsLoadedAt = null;
+    STATE.subscriptionsLoadPromise = null;
     syncAllRenderedStarBadges();
     syncMySubListInPlace();
     if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
     return [];
   }
 
+  if (!force && STATE.subscriptionsLoadPromise) {
+    return STATE.subscriptionsLoadPromise;
+  }
+
   if (!force && STATE.subscriptionsLoadedAt) {
     return STATE.mySubscriptions;
   }
 
-  const res = await apiRequest('GET', '/api/me/subscriptions', { token });
-  if (!res || res.success !== true || !Array.isArray(res.data)) {
-    throw new Error('구독 정보를 불러오지 못했습니다.');
+  const loadPromise = (async () => {
+    const res = await apiRequest('GET', '/api/me/subscriptions', { token });
+    if (!res || res.success !== true || !Array.isArray(res.data)) {
+      throw new Error('구독 정보를 불러오지 못했습니다.');
+    }
+
+    const normalized = res.data
+      .map((x) => normalizeSubscriptionItem(x))
+      .filter(Boolean);
+
+    const nextSet = new Set();
+    normalized.forEach((item) => {
+      const key = buildSubscriptionKey(item);
+      if (key) nextSet.add(key);
+    });
+
+    STATE.subscriptionsSet = nextSet;
+    STATE.mySubscriptions = normalized;
+    STATE.subscriptionsLoadedAt = Date.now();
+    syncAllRenderedStarBadges();
+    syncMySubListInPlace();
+    if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+
+    return normalized;
+  })();
+
+  STATE.subscriptionsLoadPromise = loadPromise;
+
+  try {
+    return await loadPromise;
+  } finally {
+    if (STATE.subscriptionsLoadPromise === loadPromise) {
+      STATE.subscriptionsLoadPromise = null;
+    }
   }
+}
 
-  const normalized = res.data
-    .map((x) => normalizeSubscriptionItem(x))
-    .filter(Boolean);
-
-  const nextSet = new Set();
-  normalized.forEach((item) => {
-    const key = buildSubscriptionKey(item);
-    if (key) nextSet.add(key);
+function preloadSubscriptionsOnce({ force = false } = {}) {
+  const token = getAccessToken();
+  if (!token) return Promise.resolve([]);
+  return loadSubscriptions({ force }).catch((e) => {
+    console.warn('Failed to preload subscriptions', e);
+    throw e;
   });
+}
 
-  STATE.subscriptionsSet = nextSet;
-  STATE.mySubscriptions = normalized;
-  STATE.subscriptionsLoadedAt = Date.now();
-  syncAllRenderedStarBadges();
-  syncMySubListInPlace();
-  if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+async function retryModalSubscriptionLoad(content) {
+  STATE.subscribeModalState = { ...STATE.subscribeModalState, isLoading: true, loadFailed: false };
+  syncSubscribeModalUI(content);
 
-  return normalized;
+  try {
+    await loadSubscriptions({ force: true });
+    STATE.subscribeModalState.isLoading = false;
+    STATE.subscribeModalState.loadFailed = false;
+    syncSubscribeModalUI(content);
+  } catch (e) {
+    STATE.subscribeModalState.isLoading = false;
+    STATE.subscribeModalState.loadFailed = true;
+    showToast('구독 상태를 불러오지 못했습니다. 다시 시도해 주세요.', { type: 'error' });
+    syncSubscribeModalUI(content);
+  }
 }
 
 async function subscribeContent(content) {
@@ -1223,9 +1272,11 @@ function syncSubscribeModalUI(content) {
   if (!STATE.subscribeModalOpen) return;
   if (!modalKey || !incomingKey || modalKey !== incomingKey) return;
 
-  const subscribed = isSubscribed(content);
+  const modalState = STATE.subscribeModalState || { isLoading: false, loadFailed: false };
+  const subscribed = !modalState.isLoading && !modalState.loadFailed ? isSubscribed(content) : null;
+
   if (UI.subscribeStateText) {
-    UI.subscribeStateText.textContent = subscribed ? '구독 중' : '미구독';
+    UI.subscribeStateText.textContent = subscribed === null ? '' : subscribed ? '구독 중' : '미구독';
   }
   if (UI.subscribeStateDot) {
     UI.subscribeStateDot.classList.remove('bg-purple-400', 'bg-white/50');
@@ -1233,8 +1284,27 @@ function syncSubscribeModalUI(content) {
   }
 
   if (UI.subscribeButton) {
-    UI.subscribeButton.textContent = subscribed ? '구독 해제' : '구독하기';
-    UI.subscribeButton.dataset.subscribed = subscribed ? '1' : '0';
+    const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
+    const shouldDisable = modalState.isLoading || STATE.subscribeToggleInFlight;
+    if (shouldDisable) UI.subscribeButton.classList.add(...disabledClasses);
+    else UI.subscribeButton.classList.remove(...disabledClasses);
+    UI.subscribeButton.disabled = shouldDisable;
+
+    const label = modalState.isLoading
+      ? '불러오는 중'
+      : modalState.loadFailed
+        ? '다시 시도'
+        : subscribed
+          ? '구독 해제'
+          : '구독하기';
+
+    if (modalState.isLoading) {
+      UI.subscribeButton.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span><span>${label}</span>`;
+    } else {
+      UI.subscribeButton.textContent = label;
+    }
+
+    UI.subscribeButton.dataset.subscribed = subscribed === null ? '' : subscribed ? '1' : '0';
   }
 }
 
@@ -1301,7 +1371,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     // preload subscriptions so stars render correctly (if token exists)
     await fetchMe();
-    await loadSubscriptions();
+    preloadSubscriptionsOnce();
   } catch (e) {
     console.warn('Failed to preload subscriptions', e);
   }
@@ -2460,11 +2530,9 @@ function setupAuthModalListeners() {
 
       const hasToken = Boolean(getAccessToken());
       if (hasToken) {
-        try {
-          await loadSubscriptions({ force: true });
-        } catch (e) {
+        preloadSubscriptionsOnce({ force: true }).catch((e) => {
           console.warn('Failed to refresh subscriptions after auth', e);
-        }
+        });
       }
 
       closeAuthModal();
@@ -2722,6 +2790,7 @@ const appendCardsToGrid = (
   });
 
   UI.contentGrid.appendChild(fragment);
+  syncAllRenderedStarBadges();
 };
 
 async function loadNextPage(category, { signal } = {}) {
@@ -3156,8 +3225,6 @@ function createCard(content, tabId, aspectClass) {
   cardContainer.appendChild(affordOverlay);
   cardContainer.appendChild(affordHint);
 
-  syncStarBadgeForCard(el, isSubscribed(content));
-
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
@@ -3208,6 +3275,8 @@ function createCard(content, tabId, aspectClass) {
   });
 
   el.onclick = () => openSubscribeModal(content, { returnFocusEl: el });
+
+  syncStarBadgeForCard(el, isSubscribed(content));
   return el;
 }
 
@@ -3288,18 +3357,14 @@ function openSubscribeModal(content, opts = {}) {
   STATE.currentModalContent = content;
   STATE.subscribeModalOpen = true;
   STATE.subscribeToggleInFlight = false;
+  STATE.subscribeModalState = {
+    isLoading: Boolean(getAccessToken()) && !STATE.subscriptionsLoadedAt,
+    loadFailed: false,
+  };
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
   const linkContainer = document.getElementById('modalWebtoonLinkContainer');
-  const ctaBtn = document.getElementById('subscribeButton');
   if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
-  if (UI.subscribeStateText && !STATE.subscriptionsLoadedAt) {
-    UI.subscribeStateText.textContent = '확인 중…';
-  }
-  if (UI.subscribeStateDot) {
-    UI.subscribeStateDot.classList.remove('bg-purple-400');
-    UI.subscribeStateDot.classList.add('bg-white/50');
-  }
   const returnFocusEl = opts?.returnFocusEl instanceof HTMLElement ? opts.returnFocusEl : null;
   closeProfileMenu();
 
@@ -3346,13 +3411,24 @@ function openSubscribeModal(content, opts = {}) {
       returnFocusEl,
     });
   }
-  if (STATE.subscriptionsLoadedAt) {
-    syncSubscribeModalUI(content);
-  }
+  syncSubscribeModalUI(content);
 
-  loadSubscriptions()
-    .catch(() => {})
-    .finally(() => syncSubscribeModalUI(content));
+  preloadSubscriptionsOnce()
+    .then(() => {
+      if (!STATE.subscribeModalOpen) return;
+      STATE.subscribeModalState.isLoading = false;
+      STATE.subscribeModalState.loadFailed = false;
+      syncSubscribeModalUI(content);
+    })
+    .catch(() => {
+      if (!STATE.subscribeModalOpen) return;
+      STATE.subscribeModalState.isLoading = false;
+      STATE.subscribeModalState.loadFailed = true;
+      showToast('구독 상태를 불러오지 못했습니다. 다시 시도해 주세요.', {
+        type: 'error',
+      });
+      syncSubscribeModalUI(content);
+    });
 }
 
 function closeSubscribeModal() {
@@ -3364,7 +3440,15 @@ function closeSubscribeModal() {
 window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
+  const modalState = STATE.subscribeModalState || {};
+  if (modalState.isLoading) return;
   if (STATE.subscribeToggleInFlight) return;
+
+  if (modalState.loadFailed) {
+    retryModalSubscriptionLoad(content);
+    return;
+  }
+
   if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
   const btn = UI.subscribeButton;
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
