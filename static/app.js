@@ -19,11 +19,29 @@ function debugLog(...args) {
 }
 
 const ICONS = {
-  webtoon: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 4H3C1.9 4 1 4.9 1 6v13c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 19V6h8v13H3zm18 0h-8V6h8v13z"/></svg>`,
-  novel: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.127 22.562l-7.127 1.438 1.438-7.128 5.689 5.69zm1.414-1.414l11.228-11.225-5.69-5.692-11.227 11.227 5.689 5.69zm9.768-21.148l-2.816 2.817 5.691 5.691 2.816-2.819-5.691-5.689z"/></svg>`,
-  ott: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`,
-  series: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>`,
-  my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
+  webtoon: () =>
+    `<svg width="36" height="36" viewBox="0 0 36 36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 7.5c-2.9 0-5.25 2.35-5.25 5.25v8c0 2.9 2.35 5.25 5.25 5.25h8.6l3.1 2.95c.6.57 1.55.15 1.55-.68V26h4.75c2.9 0 5.25-2.35 5.25-5.25v-8C32.25 9.85 29.9 7.5 27 7.5H9Z"/>
+    </svg>`,
+  novel: () =>
+    `<svg width="36" height="36" viewBox="0 0 36 36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M26.9 7.1c-3.6-3.6-9.5-3.6-13.1 0l-6.2 6.2a1.35 1.35 0 00.4 2.2l4.9 2.2-3.8 3.8a1.3 1.3 0 001.8 1.8l3.8-3.8 2.2 4.9a1.35 1.35 0 002.2.4l6.2-6.2c3.6-3.6 3.6-9.5 0-13.1Z"/>
+    </svg>`,
+  ott: () =>
+    `<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="18" r="11" />
+      <path fill="currentColor" stroke="none" d="M15.75 13.5 22 18l-6.25 4.5v-9Z" />
+    </svg>`,
+  series: () =>
+    `<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="10" y="11" width="16" height="14" rx="2.5" />
+      <rect x="7" y="9" width="16" height="14" rx="2.3" />
+      <rect x="14" y="13" width="16" height="14" rx="2.7" />
+    </svg>`,
+  my: () =>
+    `<svg width="36" height="36" viewBox="0 0 36 36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 5.5 21.7 13l8.3 1-6 5.6 1.5 8.9L18 24.9l-7.5 3.6 1.5-8.9-6-5.6 8.3-1L18 5.5Z" />
+    </svg>`,
 };
 
 // UI_CLASSES: Tailwind class tokens for reusable UI primitives.
@@ -56,8 +74,14 @@ const UI_CLASSES = {
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
 
   // Typography helpers
-  sectionTitle: 'text-base font-semibold',
+  sectionTitle: 'text-base font-semibold text-white/90',
   sectionSubtle: 'text-sm text-white/70',
+
+  // Bottom navigation
+  bottomNavItem: 'flex flex-col items-center justify-center w-full spring-bounce text-white/90 gap-1',
+  bottomNavItemActive: 'text-[#b277ff]',
+  bottomNavIcon: 'h-9 w-9 flex items-center justify-center',
+  bottomNavLabel: 'text-[13px] font-medium leading-tight',
 
   // Card overlays/badges
   starBadge:
@@ -81,7 +105,8 @@ const UI_CLASSES = {
   cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
 
   // Inputs
-  inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
+  inputBase:
+    'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
     'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
   searchTrigger:
@@ -97,6 +122,11 @@ const UI_CLASSES = {
 
   // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
+
+  // Pages & overlays
+  pageOverlayRoot: 'bg-[#121212] text-white',
+  pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
 
   // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -252,6 +282,11 @@ const UI = {
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
+  myPagePwCurrent: document.getElementById('myPagePwCurrent'),
+  myPagePwNew: document.getElementById('myPagePwNew'),
+  myPagePwConfirm: document.getElementById('myPagePwConfirm'),
+  myPagePwSubmit: document.getElementById('myPagePwSubmit'),
+  myPagePwError: document.getElementById('myPagePwError'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -281,12 +316,17 @@ const DATA_UI_CLASS_MAP = {
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
+  'btn-primary': UI_CLASSES.btnPrimary,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
   'load-more': UI_CLASSES.loadMoreBtn,
   'page-container': 'mx-auto h-full max-w-[480px] px-4',
   'section-title': UI_CLASSES.sectionTitle,
+  'section-subtle': UI_CLASSES.sectionSubtle,
+  'page-overlay-root': UI_CLASSES.pageOverlayRoot,
+  'page-overlay-container': UI_CLASSES.pageOverlayContainer,
+  'page-card': UI_CLASSES.pageCard,
 
   // Dynamic-only (JS-generated nodes)
   'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
@@ -973,7 +1013,7 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
   if (!response.ok) {
     const errorObj = await buildError();
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       logout({ silent: true });
       showToast('세션이 만료되었습니다. 다시 로그인해주세요.', { type: 'error' });
     }
@@ -1227,6 +1267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateProfileButtonState();
   setupSearchHandlers();
   setupMyPageHandlers();
+  setupMyPagePasswordChange();
 
   if (UI.contentLoadMoreBtn) {
     UI.contentLoadMoreBtn.addEventListener('click', () => {
@@ -2061,6 +2102,88 @@ function handleMyPageUnauthorized() {
   openAuthModal({ reason: 'my-page' });
 }
 
+function setMyPagePwError(message = '') {
+  if (UI.myPagePwError) UI.myPagePwError.textContent = message || '';
+}
+
+function resetMyPagePasswordForm() {
+  if (UI.myPagePwCurrent) UI.myPagePwCurrent.value = '';
+  if (UI.myPagePwNew) UI.myPagePwNew.value = '';
+  if (UI.myPagePwConfirm) UI.myPagePwConfirm.value = '';
+  setMyPagePwError('');
+}
+
+function setMyPagePwSubmitting(isSubmitting) {
+  if (!UI.myPagePwSubmit) return;
+  UI.myPagePwSubmit.disabled = isSubmitting;
+  UI.myPagePwSubmit.textContent = isSubmitting ? '변경 중...' : '변경하기';
+}
+
+async function handleMyPageChangePassword() {
+  const currentPassword = (UI.myPagePwCurrent?.value || '').trim();
+  const newPassword = (UI.myPagePwNew?.value || '').trim();
+  const confirmPassword = (UI.myPagePwConfirm?.value || '').trim();
+
+  setMyPagePwError('');
+
+  if (!currentPassword) {
+    setMyPagePwError('현재 비밀번호를 입력해주세요.');
+    return;
+  }
+
+  if (!newPassword) {
+    setMyPagePwError('새 비밀번호를 입력해주세요.');
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    setMyPagePwError('비밀번호는 8자 이상이어야 합니다.');
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setMyPagePwError('새 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  const token = getAccessToken();
+  if (!token) {
+    handleMyPageUnauthorized();
+    return;
+  }
+
+  setMyPagePwSubmitting(true);
+
+  try {
+    await apiRequest('POST', '/api/auth/change-password', {
+      body: { current_password: currentPassword, new_password: newPassword },
+      token,
+    });
+
+    showToast('비밀번호가 변경되었습니다.', { type: 'success' });
+    resetMyPagePasswordForm();
+  } catch (e) {
+    if (e?.httpStatus === 401) {
+      handleMyPageUnauthorized();
+      return;
+    }
+
+    let message = '비밀번호 변경에 실패했습니다.';
+    if (e?.code === 'INVALID_PASSWORD') {
+      message = '현재 비밀번호가 올바르지 않습니다.';
+    } else if (e?.code === 'WEAK_PASSWORD' || e?.code === 'PASSWORD_TOO_SHORT') {
+      message = '비밀번호는 8자 이상이어야 합니다.';
+    } else if (e?.code === 'INVALID_INPUT') {
+      message = '비밀번호를 다시 확인해주세요.';
+    }
+
+    setMyPagePwError(message);
+    showToast(message, { type: 'error' });
+  } finally {
+    setMyPagePwSubmitting(false);
+  }
+}
+
 function openMyPage() {
   if (!UI.myPage) return;
 
@@ -2100,6 +2223,25 @@ function setupMyPageHandlers() {
       openMyPage();
     };
   }
+}
+
+function setupMyPagePasswordChange() {
+  if (UI.myPagePwSubmit) {
+    UI.myPagePwSubmit.addEventListener('click', (evt) => {
+      evt.preventDefault();
+      handleMyPageChangePassword();
+    });
+  }
+
+  [UI.myPagePwCurrent, UI.myPagePwNew, UI.myPagePwConfirm].forEach((input) => {
+    if (!input) return;
+    input.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        handleMyPageChangePassword();
+      }
+    });
+  });
 }
 
 /* =========================
@@ -2359,18 +2501,22 @@ function renderBottomNav() {
   tabs.forEach((tab) => {
     const btn = document.createElement('button');
     const isActive = STATE.activeTab === tab.id;
-    btn.className = `flex flex-col items-center justify-center w-full spring-bounce ${
-      isActive ? 'text-[#4F46E5]' : 'text-[#525252]'
-    }`;
+    btn.type = 'button';
+    btn.className = cx(UI_CLASSES.bottomNavItem, isActive ? UI_CLASSES.bottomNavItemActive : '');
+    btn.setAttribute('aria-label', tab.label);
+    if (isActive) btn.setAttribute('aria-current', 'page');
 
-    const iconClass = isActive ? 'scale-110 neon-drop-shadow' : 'scale-100';
+    const iconWrap = document.createElement('div');
+    iconWrap.className = cx(UI_CLASSES.bottomNavIcon, isActive ? 'scale-105' : 'scale-100');
+    iconWrap.innerHTML = tab.icon();
+    const svg = iconWrap.querySelector('svg');
+    if (svg) svg.setAttribute('aria-hidden', 'true');
 
-    btn.innerHTML = `
-      <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
-        ${tab.icon}
-      </div>
-      <span class="text-[10px] ${isActive ? 'font-bold' : 'font-medium'}">${tab.label}</span>
-    `;
+    const labelEl = document.createElement('span');
+    labelEl.className = cx(UI_CLASSES.bottomNavLabel, isActive ? 'font-semibold' : 'font-medium');
+    labelEl.textContent = tab.label;
+
+    btn.append(iconWrap, labelEl);
     btn.onclick = () => updateTab(tab.id);
     UI.bottomNav.appendChild(btn);
   });
