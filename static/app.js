@@ -56,7 +56,7 @@ const UI_CLASSES = {
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
 
   // Typography helpers
-  sectionTitle: 'text-base font-semibold',
+  sectionTitle: 'text-base font-semibold text-white/90',
   sectionSubtle: 'text-sm text-white/70',
 
   // Card overlays/badges
@@ -81,7 +81,8 @@ const UI_CLASSES = {
   cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
 
   // Inputs
-  inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
+  inputBase:
+    'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
     'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
   searchTrigger:
@@ -97,6 +98,11 @@ const UI_CLASSES = {
 
   // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
+
+  // Pages & overlays
+  pageOverlayRoot: 'bg-[#121212] text-white',
+  pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
 
   // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -287,6 +293,10 @@ const DATA_UI_CLASS_MAP = {
   'load-more': UI_CLASSES.loadMoreBtn,
   'page-container': 'mx-auto h-full max-w-[480px] px-4',
   'section-title': UI_CLASSES.sectionTitle,
+  'section-subtle': UI_CLASSES.sectionSubtle,
+  'page-overlay-root': UI_CLASSES.pageOverlayRoot,
+  'page-overlay-container': UI_CLASSES.pageOverlayContainer,
+  'page-card': UI_CLASSES.pageCard,
 
   // Dynamic-only (JS-generated nodes)
   'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
