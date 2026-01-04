@@ -146,6 +146,7 @@ const STATE = {
     query: '',
     results: [],
     isLoading: false,
+    uiMode: 'idle',
     debounceTimer: null,
     requestSeq: 0,
     activeIndex: -1,
@@ -256,16 +257,19 @@ const UI = {
   searchClearButton: document.getElementById('searchClearButton'),
   searchIdle: document.getElementById('searchIdle'),
   searchResultsView: document.getElementById('searchResultsView'),
+  searchResultsMeta: document.getElementById('searchResultsMeta'),
   searchPageResults: document.getElementById('searchPageResults'),
   searchPageEmpty: document.getElementById('searchPageEmpty'),
   searchPageLoading: document.getElementById('searchPageLoading'),
+  searchEmptyTitle: document.getElementById('searchEmptyTitle'),
+  searchEmptySubtitle: document.getElementById('searchEmptySubtitle'),
+  searchEmptyActions: document.getElementById('searchEmptyActions'),
   searchRecentChips: document.getElementById('searchRecentChips'),
   searchRecentClearAll: document.getElementById('searchRecentClearAll'),
   searchPopularGrid: document.getElementById('searchPopularGrid'),
   searchPopularTitle: document.getElementById('searchPopularTitle'),
   searchPopularSubtitle: document.getElementById('searchPopularSubtitle'),
   searchResultCount: document.getElementById('searchResultCount'),
-  searchPageClearQuery: document.getElementById('searchPageClearQuery'),
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
@@ -1742,18 +1746,24 @@ const renderPopularGrid = () => {
   grid.appendChild(fragment);
 };
 
+function setSearchUiMode(mode) {
+  STATE.search.uiMode = mode;
+  const showIdle = mode === 'idle' || mode === 'no_results';
+  if (UI.searchIdle) UI.searchIdle.classList.toggle('hidden', !showIdle);
+  if (UI.searchResultsView) UI.searchResultsView.classList.toggle('hidden', mode === 'idle');
+  if (UI.searchPageLoading) UI.searchPageLoading.classList.toggle('hidden', mode !== 'loading');
+  if (UI.searchPageResults) UI.searchPageResults.classList.toggle('hidden', mode !== 'results');
+  if (UI.searchPageEmpty) UI.searchPageEmpty.classList.toggle('hidden', mode !== 'no_results');
+  if (UI.searchResultsMeta) UI.searchResultsMeta.classList.toggle('hidden', mode !== 'results');
+}
+
 const showSearchIdle = () => {
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   STATE.search.results = [];
   if (STATE.searchRenderAbort) STATE.searchRenderAbort.abort();
-  if (UI.searchIdle) UI.searchIdle.classList.remove('hidden');
-  if (UI.searchResultsView) UI.searchResultsView.classList.add('hidden');
-  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
-  if (UI.searchPageResults) {
-    UI.searchPageResults.innerHTML = '';
-    UI.searchPageResults.classList.add('hidden');
-  }
+  setSearchUiMode('idle');
+  if (UI.searchPageResults) UI.searchPageResults.innerHTML = '';
   if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
   if (UI.searchResultCount) UI.searchResultCount.textContent = '0';
   renderRecentSearches();
@@ -1765,22 +1775,76 @@ function showSearchEmpty(title, { message = '', actions = [] } = {}) {
   setActiveSearchIndex(-1);
   STATE.search.results = [];
   if (STATE.searchRenderAbort) STATE.searchRenderAbort.abort();
-  if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
-  if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
-  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
+  setSearchUiMode('no_results');
   if (UI.searchPageResults) {
     UI.searchPageResults.classList.add('hidden');
     UI.searchPageResults.innerHTML = '';
   }
+  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
   if (UI.searchResultCount) UI.searchResultCount.textContent = '0';
 
-  if (UI.searchPageEmpty) {
-    UI.searchPageEmpty.classList.remove('hidden');
-    const titleEl = UI.searchPageEmpty.querySelector('[data-ui="search-empty-title"]');
-    const messageEl = UI.searchPageEmpty.querySelector('[data-ui="search-empty-msg"]');
-    if (titleEl) titleEl.textContent = title || '검색 결과가 없습니다';
-    if (messageEl) messageEl.textContent = message || '다른 키워드로 검색해보세요.';
+  if (UI.searchEmptyTitle) UI.searchEmptyTitle.textContent = title || '검색 결과가 없어요';
+  if (UI.searchEmptySubtitle) UI.searchEmptySubtitle.textContent = message || '다른 키워드로 검색해보세요.';
+
+  if (UI.searchEmptyActions) {
+    UI.searchEmptyActions.innerHTML = '';
+    const hasActions = Array.isArray(actions) && actions.length;
+    UI.searchEmptyActions.classList.toggle('hidden', !hasActions);
+    if (hasActions) {
+      const fragment = document.createDocumentFragment();
+      actions.forEach((action) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = action?.label || '';
+        btn.dataset.ui = action?.variant === 'primary' ? 'btn-primary' : 'btn-secondary';
+        btn.onclick = () => {
+          if (typeof action?.onClick === 'function') action.onClick();
+        };
+        fragment.appendChild(btn);
+      });
+      UI.searchEmptyActions.appendChild(fragment);
+      applyDataUiClasses(UI.searchEmptyActions);
+    }
   }
+
+  renderRecentSearches();
+  renderPopularGrid();
+}
+
+function buildSearchEmptyActions() {
+  const clearAction = {
+    label: '검색어 지우기',
+    variant: 'secondary',
+    onClick: () => {
+      if (UI.searchPageInput) {
+        UI.searchPageInput.value = '';
+      }
+      STATE.search.query = '';
+      updateSearchClearButton();
+      performSearch('');
+      if (UI.searchPageInput) UI.searchPageInput.focus();
+    },
+  };
+
+  const recommendAction = {
+    label: '추천 작품 보기',
+    variant: 'primary',
+    onClick: () => {
+      if (UI.searchPageInput) {
+        UI.searchPageInput.value = '';
+      }
+      STATE.search.query = '';
+      updateSearchClearButton();
+      performSearch('');
+      requestAnimationFrame(() => {
+        if (UI.searchPopularGrid) {
+          UI.searchPopularGrid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    },
+  };
+
+  return [clearAction, recommendAction];
 }
 
 const SEARCH_ACTIVE_CLASSES = ['ring-2', 'ring-white/50', 'bg-white/5'];
@@ -1835,9 +1899,7 @@ function openActiveSearchResult() {
 }
 
 function renderSearchLoading(type) {
-  if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
-  if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
-  if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
+  setSearchUiMode('loading');
   if (UI.searchPageResults) {
     UI.searchPageResults.classList.add('hidden');
     UI.searchPageResults.innerHTML = '';
@@ -1864,10 +1926,7 @@ async function renderSearchResults(items, effectiveType) {
   const grid = UI.searchPageResults;
   if (!grid) return;
 
-  if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
-  if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
-  if (UI.searchIdle) UI.searchIdle.classList.add('hidden');
-  if (UI.searchResultsView) UI.searchResultsView.classList.remove('hidden');
+  setSearchUiMode('results');
 
   STATE.search.activeIndex = -1;
   grid.innerHTML = '';
@@ -1887,21 +1946,13 @@ async function renderSearchResults(items, effectiveType) {
   if (UI.searchResultCount) UI.searchResultCount.textContent = String(normalizedItems.length || 0);
 
   if (!normalizedItems.length) {
-    const clearAction = {
-      label: '검색어 지우기',
-      variant: 'primary',
-      onClick: () => {
-        if (UI.searchPageInput) {
-          UI.searchPageInput.value = '';
-          performSearch('');
-          UI.searchPageInput.focus();
-          updateSearchClearButton();
-        }
-      },
-    };
-    showSearchEmpty('검색 결과가 없습니다', {
-      message: '다른 키워드로 검색해보세요.',
-      actions: [clearAction],
+    const queryText = (STATE.search.query || '').trim();
+    const subtitle = queryText
+      ? `"${queryText}"에 대한 결과를 찾지 못했어요. 띄어쓰기를 바꿔 보거나, 더 짧은 키워드로 검색해 보세요.`
+      : '다른 키워드로 검색해보세요.';
+    showSearchEmpty('검색 결과가 없어요', {
+      message: subtitle,
+      actions: buildSearchEmptyActions(),
     });
     return;
   }
@@ -1991,21 +2042,9 @@ async function performSearch(q) {
   } catch (e) {
     if (controller.signal.aborted || seq !== STATE.search.requestSeq) return;
     showToast(e?.message || '검색에 실패했습니다.', { type: 'error' });
-    const clearAction = {
-      label: '검색어 지우기',
-      variant: 'primary',
-      onClick: () => {
-        if (UI.searchPageInput) {
-          UI.searchPageInput.value = '';
-          performSearch('');
-          UI.searchPageInput.focus();
-          updateSearchClearButton();
-        }
-      },
-    };
-    showSearchEmpty('검색 결과가 없습니다', {
+    showSearchEmpty('검색 결과가 없어요', {
       message: '다른 키워드로 검색해보세요.',
-      actions: [clearAction],
+      actions: buildSearchEmptyActions(),
     });
   } finally {
     if (seq !== STATE.search.requestSeq) return;
@@ -2081,17 +2120,6 @@ function setupSearchHandlers() {
 
   if (UI.searchClearButton)
     UI.searchClearButton.onclick = () => {
-      if (UI.searchPageInput) {
-        UI.searchPageInput.value = '';
-        STATE.search.query = '';
-        performSearch('');
-        UI.searchPageInput.focus();
-        updateSearchClearButton();
-      }
-    };
-
-  if (UI.searchPageClearQuery)
-    UI.searchPageClearQuery.onclick = () => {
       if (UI.searchPageInput) {
         UI.searchPageInput.value = '';
         STATE.search.query = '';
