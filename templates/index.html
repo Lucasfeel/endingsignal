@@ -216,10 +216,11 @@
         </nav>
 
         <!-- Modals -->
-        <div id="subscribeModal" data-ui="modal-wrap" class="fixed inset-0 z-[100] hidden" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" tabindex="-1">
+        <div id="subscribeModal" data-ui="modal-wrap" class="fixed inset-0 z-[100] hidden" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" aria-describedby="subscribeModalDesc" tabindex="-1">
             <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-modal-overlay="true"></div>
             <div id="modalContent" data-ui="modal-card" class="relative">
                 <h2 id="subscribeModalTitle" data-ui="modal-title">완결 알림 받기</h2>
+                <p id="subscribeModalDesc" class="sr-only">완결 알림 구독을 설정하거나 해제할 수 있습니다.</p>
                 <p id="modalWebtoonTitle" data-ui="modal-body" class="mb-4"></p>
                 <div id="modalWebtoonLinkContainer" class="mb-6 text-sm"></div>
                 <div id="subscribeStateLine" class="flex items-center gap-2 text-white/70 text-sm mb-2">
@@ -232,10 +233,11 @@
                 </div>
             </div>
         </div>
-        <div id="searchPage" data-ui="page-overlay-root" class="fixed inset-0 z-[90] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
+        <div id="searchPage" data-ui="page-overlay-root" class="fixed inset-0 z-[90] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)" role="dialog" aria-modal="true" aria-labelledby="searchPageTitle">
             <div class="relative z-10 h-full">
                 <div id="searchPageContainer" data-ui="page-overlay-container" class="h-full">
                     <div class="flex h-full flex-col min-h-0">
+                        <h2 id="searchPageTitle" class="sr-only">검색</h2>
                         <div class="flex items-center gap-2 pt-4 pb-3">
                             <button id="searchBackButton" data-ui="search-back" aria-label="뒤로">
                                 ←
@@ -285,7 +287,7 @@
                 </div>
             </div>
         </div>
-        <div id="myPage" data-ui="page-overlay-root" class="fixed inset-0 z-[85] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
+        <div id="myPage" data-ui="page-overlay-root" class="fixed inset-0 z-[85] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)" role="dialog" aria-modal="true" aria-labelledby="myPageTitle">
             <div class="relative z-10 h-full">
                 <div id="myPageContainer" data-ui="page-overlay-container" class="h-full">
                     <div class="flex h-full flex-col min-h-0">
@@ -293,7 +295,7 @@
                             <button id="myPageBackBtn" data-ui="search-back" aria-label="뒤로">
                                 ←
                             </button>
-                            <h2 class="text-base font-semibold">마이페이지</h2>
+                            <h2 id="myPageTitle" class="text-base font-semibold">마이페이지</h2>
                         </div>
 
                         <div class="flex-1 min-h-0 overflow-y-auto pb-[calc(96px+env(safe-area-inset-bottom))]">
