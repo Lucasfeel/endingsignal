@@ -1274,13 +1274,21 @@ function syncSubscribeModalUI(content) {
 
   const modalState = STATE.subscribeModalState || { isLoading: false, loadFailed: false };
   const subscribed = !modalState.isLoading && !modalState.loadFailed ? isSubscribed(content) : null;
+  const showLoadingState = modalState.isLoading;
+  const showSubscribedState = subscribed === true;
+  const shouldShowStateLine = showLoadingState || showSubscribedState;
+
+  if (UI.subscribeStateLine) {
+    UI.subscribeStateLine.classList.toggle('hidden', !shouldShowStateLine);
+  }
 
   if (UI.subscribeStateText) {
-    UI.subscribeStateText.textContent = subscribed === null ? '' : subscribed ? '구독 중' : '미구독';
+    UI.subscribeStateText.textContent = showLoadingState ? '불러오는 중' : showSubscribedState ? '구독 중' : '';
   }
   if (UI.subscribeStateDot) {
     UI.subscribeStateDot.classList.remove('bg-purple-400', 'bg-white/50');
-    UI.subscribeStateDot.classList.add(subscribed ? 'bg-purple-400' : 'bg-white/50');
+    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-purple-400');
+    else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/50');
   }
 
   if (UI.subscribeButton) {
