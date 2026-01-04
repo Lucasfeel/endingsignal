@@ -210,11 +210,9 @@
                 </div>
             </div>
         </div>
-        <div id="searchPage" class="fixed inset-0 z-[90] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
-            <div class="absolute inset-0 bg-black"></div>
-
+        <div id="searchPage" data-ui="page-overlay-root" class="fixed inset-0 z-[90] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
             <div class="relative z-10 h-full">
-                <div id="searchPageContainer" class="mx-auto h-full max-w-[480px] px-4">
+                <div id="searchPageContainer" data-ui="page-overlay-container" class="h-full">
                     <div class="flex h-full flex-col min-h-0">
                         <div class="flex items-center gap-2 pt-4 pb-3">
                             <button id="searchBackButton" data-ui="search-back" aria-label="뒤로">
@@ -263,11 +261,9 @@
                 </div>
             </div>
         </div>
-        <div id="myPage" class="fixed inset-0 z-[85] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
-            <div class="absolute inset-0 bg-black"></div>
-
+        <div id="myPage" data-ui="page-overlay-root" class="fixed inset-0 z-[85] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
             <div class="relative z-10 h-full">
-                <div id="myPageContainer" data-ui="page-container" class="mx-auto h-full max-w-[480px] px-4">
+                <div id="myPageContainer" data-ui="page-overlay-container" class="h-full">
                     <div class="flex h-full flex-col min-h-0">
                         <div class="flex items-center gap-2 pt-4 pb-3">
                             <button id="myPageBackBtn" data-ui="search-back" aria-label="뒤로">
@@ -278,12 +274,30 @@
 
                         <div class="flex-1 min-h-0 overflow-y-auto pb-[calc(96px+env(safe-area-inset-bottom))]">
                             <div class="space-y-3">
-                                <div class="rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 space-y-3">
+                                <div data-ui="page-card" class="space-y-3">
                                     <h3 data-ui="section-title">내 정보</h3>
                                     <div class="flex items-center justify-between text-sm">
-                                        <span class="text-gray-400">이메일</span>
-                                        <span id="myPageEmailValue" class="text-white font-medium">-</span>
+                                        <span data-ui="section-subtle">이메일</span>
+                                        <span id="myPageEmailValue" class="text-white/90 font-medium">-</span>
                                     </div>
+                                </div>
+                                <div data-ui="page-card" class="space-y-3">
+                                    <h3 data-ui="section-title">비밀번호 변경</h3>
+                                    <div class="space-y-2">
+                                        <label data-ui="input-label" for="myPagePwCurrent">현재 비밀번호</label>
+                                        <input id="myPagePwCurrent" data-ui="input-sm" type="password" autocomplete="current-password" placeholder="현재 비밀번호" />
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label data-ui="input-label" for="myPagePwNew">새 비밀번호</label>
+                                        <input id="myPagePwNew" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호" />
+                                        <p class="text-xs text-white/60">비밀번호는 8자 이상 입력해주세요.</p>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
+                                        <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
+                                    </div>
+                                    <p id="myPagePwError" class="text-xs text-red-400 min-h-[16px]"></p>
+                                    <button id="myPagePwSubmit" data-ui="btn-primary" type="button" class="w-full h-11">변경하기</button>
                                 </div>
                             </div>
                         </div>

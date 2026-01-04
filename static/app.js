@@ -13,17 +13,50 @@
 
 const DEBUG_API = false;
 const DEBUG_TOOLS = false;
+window.__NAV_ICON_DEBUG__ = window.__NAV_ICON_DEBUG__ || false;
+const EXPLORE_FILTERS_KEY = 'es_explore_filters_v1';
 
 function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
 }
 
+// DEV NOTE (nav icon tuning): calibrated in headless viewport approximation (1280x720, DPR 2.0).
+// Toggle window.__NAV_ICON_DEBUG__ = true in console to outline icon wrappers for alignment.
 const ICONS = {
-  webtoon: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 4H3C1.9 4 1 4.9 1 6v13c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 19V6h8v13H3zm18 0h-8V6h8v13z"/></svg>`,
-  novel: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.127 22.562l-7.127 1.438 1.438-7.128 5.689 5.69zm1.414-1.414l11.228-11.225-5.69-5.692-11.227 11.227 5.689 5.69zm9.768-21.148l-2.816 2.817 5.691 5.691 2.816-2.819-5.691-5.689z"/></svg>`,
-  ott: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`,
-  series: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>`,
-  my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
+  webtoon: () => {
+    const gradId = `wbGrad-${Math.random().toString(36).slice(2, 7)}`;
+    return `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="var(--nav-fg)" stop-opacity="1" />
+          <stop offset="100%" stop-color="var(--nav-fg)" stop-opacity="0.92" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#${gradId})" d="M10.5 14.5c0-3.6 2.9-6.5 6.5-6.5h17c3.6 0 6.5 2.9 6.5 6.5v14.3c0 3.6-2.9 6.5-6.5 6.5H22l-6.4 4.6c-.9.7-2.1-.1-2.1-1.2v-3.9h-1c-1.6 0-3-1.3-3-3V14.5Z" />
+    </svg>`;
+  },
+  novel: () =>
+    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <path fill="var(--nav-fg)" d="M33.2 8.3c-4.2-4.2-11-4.2-15.2 0l-7.2 7.2c-.8.8-.5 2.2.6 2.7l5.8 2.7-4.6 4.6c-.7.7-.7 1.8 0 2.5s1.8.7 2.5 0l4.6-4.6 2.7 5.8c.5 1.1 1.9 1.4 2.7.6l7.2-7.2c4.2-4.2 4.2-11 0-15.2Z" />
+      <path fill="var(--nav-bg)" d="M23.9 10.8c-1.5 3.8-4.4 7.4-8.9 9.7l.7 1.5c4.2-2.1 7.5-5.3 9.5-9 .4-.7-.3-1.6-1.3-1.5Z" />
+    </svg>`,
+  ott: () =>
+    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="18" fill="var(--nav-fg)" />
+      <path d="M22 17.5 32 24l-10 6.5Z" fill="var(--nav-bg)" />
+    </svg>`,
+  series: () =>
+    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--nav-fg)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+        <rect x="12.5" y="12.5" width="18" height="23" rx="3.8" />
+        <rect x="19.5" y="14.8" width="18" height="22" rx="3.6" />
+        <rect x="26.5" y="17.2" width="16" height="21" rx="3.4" />
+      </g>
+    </svg>`,
+  my: () =>
+    `<svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <path fill="var(--nav-fg)" d="M24 7.5 29 17c.3.6.9 1 1.5 1.1l10.6 1.5-7.7 7.3c-.5.5-.7 1.2-.6 1.8l1.8 10.5-9.5-5c-.6-.3-1.3-.3-1.9 0l-9.5 5 1.8-10.5c.1-.7-.1-1.4-.6-1.8l-7.7-7.3L17.5 18c.7-.1 1.2-.5 1.5-1.1l5-9.4Z" />
+    </svg>`,
 };
 
 // UI_CLASSES: Tailwind class tokens for reusable UI primitives.
@@ -56,8 +89,15 @@ const UI_CLASSES = {
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
 
   // Typography helpers
-  sectionTitle: 'text-base font-semibold',
+  sectionTitle: 'text-base font-semibold text-white/90',
   sectionSubtle: 'text-sm text-white/70',
+
+  // Bottom navigation
+  bottomNavItem:
+    'flex flex-col items-center justify-center w-full spring-bounce gap-2 text-[16px] font-semibold leading-[1.1] px-1',
+  bottomNavItemActive: '',
+  bottomNavIcon: 'h-11 w-11 flex items-center justify-center',
+  bottomNavLabel: 'text-[16px] font-semibold leading-[1.1]',
 
   // Card overlays/badges
   starBadge:
@@ -81,7 +121,8 @@ const UI_CLASSES = {
   cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
 
   // Inputs
-  inputBase: 'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base',
+  inputBase:
+    'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
     'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
   searchTrigger:
@@ -97,6 +138,11 @@ const UI_CLASSES = {
 
   // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
+
+  // Pages & overlays
+  pageOverlayRoot: 'bg-[#121212] text-white',
+  pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
 
   // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -150,6 +196,7 @@ const STATE = {
   isLoading: false,
   contentRequestSeq: 0,
   currentModalContent: null,
+  exploreSnapshot: null,
 
   auth: {
     isAuthenticated: false,
@@ -252,6 +299,11 @@ const UI = {
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
+  myPagePwCurrent: document.getElementById('myPagePwCurrent'),
+  myPagePwNew: document.getElementById('myPagePwNew'),
+  myPagePwConfirm: document.getElementById('myPagePwConfirm'),
+  myPagePwSubmit: document.getElementById('myPagePwSubmit'),
+  myPagePwError: document.getElementById('myPagePwError'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -281,12 +333,17 @@ const DATA_UI_CLASS_MAP = {
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
+  'btn-primary': UI_CLASSES.btnPrimary,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
   'load-more': UI_CLASSES.loadMoreBtn,
   'page-container': 'mx-auto h-full max-w-[480px] px-4',
   'section-title': UI_CLASSES.sectionTitle,
+  'section-subtle': UI_CLASSES.sectionSubtle,
+  'page-overlay-root': UI_CLASSES.pageOverlayRoot,
+  'page-overlay-container': UI_CLASSES.pageOverlayContainer,
+  'page-card': UI_CLASSES.pageCard,
 
   // Dynamic-only (JS-generated nodes)
   'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
@@ -544,6 +601,10 @@ function closeModal(modalEl) {
   modalEl.setAttribute('aria-hidden', 'true');
 
   unlockBodyScroll();
+
+  if (modalEl.id === 'subscribeModal') {
+    restoreExploreScrollIfNeeded();
+  }
 
   const hadReturnEl = Boolean(meta.returnFocusEl);
   const focusTarget =
@@ -973,7 +1034,7 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
   if (!response.ok) {
     const errorObj = await buildError();
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       logout({ silent: true });
       showToast('세션이 만료되었습니다. 다시 로그인해주세요.', { type: 'error' });
     }
@@ -1227,6 +1288,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateProfileButtonState();
   setupSearchHandlers();
   setupMyPageHandlers();
+  setupMyPagePasswordChange();
+
+  const restoredFilters = readExploreFiltersFromUrlOrStorage();
+  applyExploreFilters(restoredFilters, { silent: true, skipPersist: true, setTab: true });
 
   if (UI.contentLoadMoreBtn) {
     UI.contentLoadMoreBtn.addEventListener('click', () => {
@@ -1243,8 +1308,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('Failed to preload subscriptions', e);
   }
 
+  const initialTab = getActiveExploreTab();
   renderBottomNav();
-  updateTab('webtoon');
+  updateTab(initialTab);
   setupScrollEffect();
   setupSeriesSortHandlers();
 });
@@ -1881,6 +1947,7 @@ function debouncedSearch(q) {
 function openSearchPage({ focus = true } = {}) {
   if (!UI.searchPage) return;
 
+  if (!STATE.search.pageOpen) snapshotExploreState('open-search');
   const wasOpen = STATE.search.pageOpen;
   if (!wasOpen) {
     STATE.search.pageOpen = true;
@@ -1916,6 +1983,7 @@ function closeSearchPage() {
   if (UI.searchPage) UI.searchPage.classList.add('hidden');
   stopSearchViewportSync();
   unlockBodyScroll();
+  restoreExploreScrollIfNeeded();
 }
 
 function openSearchAndFocus() {
@@ -2061,6 +2129,88 @@ function handleMyPageUnauthorized() {
   openAuthModal({ reason: 'my-page' });
 }
 
+function setMyPagePwError(message = '') {
+  if (UI.myPagePwError) UI.myPagePwError.textContent = message || '';
+}
+
+function resetMyPagePasswordForm() {
+  if (UI.myPagePwCurrent) UI.myPagePwCurrent.value = '';
+  if (UI.myPagePwNew) UI.myPagePwNew.value = '';
+  if (UI.myPagePwConfirm) UI.myPagePwConfirm.value = '';
+  setMyPagePwError('');
+}
+
+function setMyPagePwSubmitting(isSubmitting) {
+  if (!UI.myPagePwSubmit) return;
+  UI.myPagePwSubmit.disabled = isSubmitting;
+  UI.myPagePwSubmit.textContent = isSubmitting ? '변경 중...' : '변경하기';
+}
+
+async function handleMyPageChangePassword() {
+  const currentPassword = (UI.myPagePwCurrent?.value || '').trim();
+  const newPassword = (UI.myPagePwNew?.value || '').trim();
+  const confirmPassword = (UI.myPagePwConfirm?.value || '').trim();
+
+  setMyPagePwError('');
+
+  if (!currentPassword) {
+    setMyPagePwError('현재 비밀번호를 입력해주세요.');
+    return;
+  }
+
+  if (!newPassword) {
+    setMyPagePwError('새 비밀번호를 입력해주세요.');
+    return;
+  }
+
+  if (newPassword.length < 8) {
+    setMyPagePwError('비밀번호는 8자 이상이어야 합니다.');
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setMyPagePwError('새 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  const token = getAccessToken();
+  if (!token) {
+    handleMyPageUnauthorized();
+    return;
+  }
+
+  setMyPagePwSubmitting(true);
+
+  try {
+    await apiRequest('POST', '/api/auth/change-password', {
+      body: { current_password: currentPassword, new_password: newPassword },
+      token,
+    });
+
+    showToast('비밀번호가 변경되었습니다.', { type: 'success' });
+    resetMyPagePasswordForm();
+  } catch (e) {
+    if (e?.httpStatus === 401) {
+      handleMyPageUnauthorized();
+      return;
+    }
+
+    let message = '비밀번호 변경에 실패했습니다.';
+    if (e?.code === 'INVALID_PASSWORD') {
+      message = '현재 비밀번호가 올바르지 않습니다.';
+    } else if (e?.code === 'WEAK_PASSWORD' || e?.code === 'PASSWORD_TOO_SHORT') {
+      message = '비밀번호는 8자 이상이어야 합니다.';
+    } else if (e?.code === 'INVALID_INPUT') {
+      message = '비밀번호를 다시 확인해주세요.';
+    }
+
+    setMyPagePwError(message);
+    showToast(message, { type: 'error' });
+  } finally {
+    setMyPagePwSubmitting(false);
+  }
+}
+
 function openMyPage() {
   if (!UI.myPage) return;
 
@@ -2071,6 +2221,7 @@ function openMyPage() {
 
   const wasOpen = STATE.isMyPageOpen;
   if (!wasOpen) {
+    snapshotExploreState('open-my-page');
     STATE.isMyPageOpen = true;
     lockBodyScroll();
   } else {
@@ -2089,6 +2240,7 @@ function closeMyPage() {
   if (UI.myPage) UI.myPage.classList.add('hidden');
   unlockBodyScroll();
   if (UI.profileButton) UI.profileButton.focus();
+  restoreExploreScrollIfNeeded();
 }
 
 function setupMyPageHandlers() {
@@ -2100,6 +2252,25 @@ function setupMyPageHandlers() {
       openMyPage();
     };
   }
+}
+
+function setupMyPagePasswordChange() {
+  if (UI.myPagePwSubmit) {
+    UI.myPagePwSubmit.addEventListener('click', (evt) => {
+      evt.preventDefault();
+      handleMyPageChangePassword();
+    });
+  }
+
+  [UI.myPagePwCurrent, UI.myPagePwNew, UI.myPagePwConfirm].forEach((input) => {
+    if (!input) return;
+    input.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        handleMyPageChangePassword();
+      }
+    });
+  });
 }
 
 /* =========================
@@ -2344,10 +2515,193 @@ window.closeAuthModal = closeAuthModal;
    Navigation + Filters
    ========================= */
 
+const VALID_EXPLORE_TABS = ['webtoon', 'novel', 'ott', 'series', 'my'];
+const DEFAULT_EXPLORE_FILTERS = {
+  tab: 'webtoon',
+  webtoon: { source: 'all', day: 'all' },
+  novel: { source: 'all', day: 'all' },
+  ott: { source: 'all', genre: 'drama' },
+};
+
+const getActiveExploreTab = () => {
+  const tab = VALID_EXPLORE_TABS.includes(STATE.activeTab) ? STATE.activeTab : null;
+  if (tab) return tab;
+  return 'webtoon';
+};
+
+const normalizeTabId = (tabId) => (VALID_EXPLORE_TABS.includes(tabId) ? tabId : null);
+
+const getExploreScrollTop = () => {
+  const top = window.scrollY ?? document.documentElement.scrollTop ?? document.body.scrollTop;
+  return Number.isFinite(top) ? top : 0;
+};
+
+const setExploreScrollTop = (y) => {
+  const target = Number.isFinite(y) ? Math.max(0, y) : 0;
+  window.scrollTo({ top: target });
+};
+
+function clearExploreSnapshot() {
+  STATE.exploreSnapshot = null;
+}
+
+function snapshotExploreState(reason = '') {
+  STATE.exploreSnapshot = {
+    reason,
+    scrollTop: getExploreScrollTop(),
+    filters: getCurrentExploreFilters(),
+    activeTab: getActiveExploreTab(),
+    ts: Date.now(),
+  };
+}
+
+function restoreExploreScrollIfNeeded() {
+  const snap = STATE.exploreSnapshot;
+  if (!snap) return;
+  if (STATE.search?.pageOpen || STATE.isMyPageOpen) return;
+  if (snap.activeTab !== getActiveExploreTab()) {
+    clearExploreSnapshot();
+    return;
+  }
+
+  const y = Number.isFinite(snap.scrollTop) ? snap.scrollTop : 0;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      setExploreScrollTop(y);
+      clearExploreSnapshot();
+    });
+  });
+}
+
+function getCurrentExploreFilters() {
+  return {
+    tab: getActiveExploreTab(),
+    webtoon: {
+      source: STATE.filters?.webtoon?.source || DEFAULT_EXPLORE_FILTERS.webtoon.source,
+      day: STATE.filters?.webtoon?.day || DEFAULT_EXPLORE_FILTERS.webtoon.day,
+    },
+    novel: {
+      source: STATE.filters?.novel?.source || DEFAULT_EXPLORE_FILTERS.novel.source,
+      day: STATE.filters?.novel?.day || DEFAULT_EXPLORE_FILTERS.novel.day,
+    },
+    ott: {
+      source: STATE.filters?.ott?.source || DEFAULT_EXPLORE_FILTERS.ott.source,
+      genre: STATE.filters?.ott?.genre || DEFAULT_EXPLORE_FILTERS.ott.genre,
+    },
+  };
+}
+
+function persistExploreFilters(filters) {
+  const merged = { ...DEFAULT_EXPLORE_FILTERS, ...(filters || {}) };
+  try {
+    localStorage.setItem(EXPLORE_FILTERS_KEY, JSON.stringify(merged));
+  } catch (e) {
+    console.warn('Failed to persist explore filters', e);
+  }
+
+  const activeTab = normalizeTabId(merged.tab) || DEFAULT_EXPLORE_FILTERS.tab;
+  const params = new URLSearchParams();
+  if (activeTab && activeTab !== DEFAULT_EXPLORE_FILTERS.tab) params.set('tab', activeTab);
+
+  const activeFilters = merged[activeTab] || {};
+  const source = activeFilters.source || DEFAULT_EXPLORE_FILTERS[activeTab]?.source;
+  const day = activeFilters.day || DEFAULT_EXPLORE_FILTERS[activeTab]?.day;
+  const genre = activeFilters.genre || DEFAULT_EXPLORE_FILTERS[activeTab]?.genre;
+
+  if (source && source !== 'all') params.set('src', source);
+  if (activeTab === 'ott') {
+    if (genre && genre !== DEFAULT_EXPLORE_FILTERS.ott.genre) params.set('genre', genre);
+  } else if (day && day !== 'all') {
+    params.set('day', day);
+  }
+
+  const hash = params.toString();
+  const base = `${location.pathname}${location.search}`;
+  const nextUrl = hash ? `${base}#${hash}` : base;
+  history.replaceState(null, '', nextUrl);
+}
+
+function readExploreFiltersFromUrlOrStorage() {
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(EXPLORE_FILTERS_KEY) || 'null');
+  } catch (e) {
+    console.warn('Failed to parse stored explore filters', e);
+  }
+
+  const hash = location.hash?.startsWith('#') ? location.hash.slice(1) : '';
+  const params = new URLSearchParams(hash);
+  const hashTab = normalizeTabId(params.get('tab'));
+  const hashSource = params.get('src');
+  const hashDay = params.get('day');
+  const hashGenre = params.get('genre');
+
+  const base = {
+    ...DEFAULT_EXPLORE_FILTERS,
+    ...(stored || {}),
+  };
+
+  const tab = hashTab || normalizeTabId(base.tab) || DEFAULT_EXPLORE_FILTERS.tab;
+
+  const resolveSource = (key) =>
+    tab === key && hashSource ? hashSource : base?.[key]?.source || DEFAULT_EXPLORE_FILTERS[key].source;
+  const resolveDay = (key) =>
+    tab === key && hashDay ? hashDay : base?.[key]?.day || DEFAULT_EXPLORE_FILTERS[key].day;
+
+  const resolvedOttGenre =
+    tab === 'ott' && (hashGenre || hashDay)
+      ? hashGenre || hashDay
+      : base?.ott?.genre || DEFAULT_EXPLORE_FILTERS.ott.genre;
+
+  return {
+    tab,
+    webtoon: { source: resolveSource('webtoon'), day: resolveDay('webtoon') },
+    novel: { source: resolveSource('novel'), day: resolveDay('novel') },
+    ott: { source: resolveSource('ott'), genre: resolvedOttGenre },
+  };
+}
+
+function applyExploreFilters(filters, { silent = false, skipPersist = false, setTab = false } = {}) {
+  const merged = {
+    ...DEFAULT_EXPLORE_FILTERS,
+    ...(filters || {}),
+  };
+
+  STATE.filters.webtoon = {
+    source: merged.webtoon?.source || DEFAULT_EXPLORE_FILTERS.webtoon.source,
+    day: merged.webtoon?.day || DEFAULT_EXPLORE_FILTERS.webtoon.day,
+  };
+  STATE.filters.novel = {
+    source: merged.novel?.source || DEFAULT_EXPLORE_FILTERS.novel.source,
+    day: merged.novel?.day || DEFAULT_EXPLORE_FILTERS.novel.day,
+  };
+  STATE.filters.ott = {
+    source: merged.ott?.source || DEFAULT_EXPLORE_FILTERS.ott.source,
+    genre: merged.ott?.genre || DEFAULT_EXPLORE_FILTERS.ott.genre,
+  };
+
+  if (setTab) {
+    const tab = normalizeTabId(merged.tab) || DEFAULT_EXPLORE_FILTERS.tab;
+    STATE.activeTab = tab;
+    if (tab !== 'my') STATE.lastBrowseTab = tab;
+  }
+
+  if (!skipPersist) persistExploreFilters(getCurrentExploreFilters());
+
+  if (!silent) {
+    renderL1Filters(getActiveExploreTab());
+    renderL2Filters(getActiveExploreTab());
+  }
+}
+
 function renderBottomNav() {
   if (!UI.bottomNav) return;
 
   UI.bottomNav.innerHTML = '';
+  UI.bottomNav.style.setProperty('--nav-bg', '#121212');
+  UI.bottomNav.style.setProperty('--nav-inactive', 'rgba(255,255,255,0.92)');
+  UI.bottomNav.style.setProperty('--nav-active', '#b277ff');
+
   const tabs = [
     { id: 'webtoon', label: 'Webtoon', icon: ICONS.webtoon },
     { id: 'novel', label: 'Web Novel', icon: ICONS.novel },
@@ -2359,34 +2713,49 @@ function renderBottomNav() {
   tabs.forEach((tab) => {
     const btn = document.createElement('button');
     const isActive = STATE.activeTab === tab.id;
-    btn.className = `flex flex-col items-center justify-center w-full spring-bounce ${
-      isActive ? 'text-[#4F46E5]' : 'text-[#525252]'
-    }`;
+    btn.type = 'button';
+    btn.className = cx(UI_CLASSES.bottomNavItem, isActive ? UI_CLASSES.bottomNavItemActive : '');
+    btn.setAttribute('aria-label', tab.label);
+    if (isActive) btn.setAttribute('aria-current', 'page');
+    btn.style.setProperty('--nav-fg', isActive ? 'var(--nav-active)' : 'var(--nav-inactive)');
+    btn.style.color = 'var(--nav-fg)';
 
-    const iconClass = isActive ? 'scale-110 neon-drop-shadow' : 'scale-100';
+    const iconWrap = document.createElement('div');
+    iconWrap.className = cx(UI_CLASSES.bottomNavIcon, isActive ? 'scale-105' : 'scale-100');
+    iconWrap.style.color = 'var(--nav-fg)';
+    if (window.__NAV_ICON_DEBUG__) {
+      iconWrap.style.outline = '1px solid rgba(255,0,0,0.25)';
+    }
+    iconWrap.innerHTML = tab.icon();
+    const svg = iconWrap.querySelector('svg');
+    if (svg) svg.setAttribute('aria-hidden', 'true');
 
-    btn.innerHTML = `
-      <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
-        ${tab.icon}
-      </div>
-      <span class="text-[10px] ${isActive ? 'font-bold' : 'font-medium'}">${tab.label}</span>
-    `;
+    const labelEl = document.createElement('span');
+    labelEl.className = UI_CLASSES.bottomNavLabel;
+    labelEl.textContent = tab.label;
+
+    btn.append(iconWrap, labelEl);
     btn.onclick = () => updateTab(tab.id);
     UI.bottomNav.appendChild(btn);
   });
 }
 
 async function updateTab(tabId) {
-  STATE.activeTab = tabId;
-  if (tabId !== 'my') STATE.lastBrowseTab = tabId;
+  const normalized = normalizeTabId(tabId) || DEFAULT_EXPLORE_FILTERS.tab;
+  const previous = STATE.activeTab;
+  STATE.activeTab = normalized;
+  if (normalized !== 'my') STATE.lastBrowseTab = normalized;
   if (STATE.search.pageOpen) closeSearchPage();
 
-  renderBottomNav();
-  updateFilterVisibility(tabId);
-  renderL1Filters(tabId);
-  renderL2Filters(tabId);
+  if (previous !== normalized) clearExploreSnapshot();
+  persistExploreFilters(getCurrentExploreFilters());
 
-  await fetchAndRenderContent(tabId);
+  renderBottomNav();
+  updateFilterVisibility(normalized);
+  renderL1Filters(normalized);
+  renderL2Filters(normalized);
+
+  await fetchAndRenderContent(normalized);
   window.scrollTo({ top: 0 });
 }
 
@@ -2464,6 +2833,8 @@ function renderL1Filters(tabId) {
 
     el.onclick = () => {
       STATE.filters[tabId].source = item.id;
+      clearExploreSnapshot();
+      persistExploreFilters(getCurrentExploreFilters());
       renderL1Filters(tabId);
       fetchAndRenderContent(tabId);
     };
@@ -2521,6 +2892,8 @@ function renderL2Filters(tabId) {
         STATE.filters[tabId].day = item.id;
       if (tabId === 'ott') STATE.filters[tabId].genre = item.id;
 
+      clearExploreSnapshot();
+      persistExploreFilters(getCurrentExploreFilters());
       renderL2Filters(tabId);
       fetchAndRenderContent(tabId);
     };
@@ -3118,6 +3491,9 @@ function getContentUrl(content) {
 }
 
 function openSubscribeModal(content, opts = {}) {
+  if (!STATE.search.pageOpen && !STATE.isMyPageOpen) {
+    snapshotExploreState('open-content-modal');
+  }
   STATE.currentModalContent = content;
   const titleEl = document.getElementById('modalWebtoonTitle');
   const modalEl = document.getElementById('subscribeModal');
