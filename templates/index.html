@@ -106,6 +106,23 @@
             animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* Button spinner */
+        .btn-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: rgba(255, 255, 255, 0.9);
+            border-radius: 9999px;
+            display: inline-block;
+            vertical-align: middle;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="antialiased">
@@ -205,6 +222,11 @@
                 <h2 id="subscribeModalTitle" data-ui="modal-title">완결 알림 받기</h2>
                 <p id="modalWebtoonTitle" data-ui="modal-body" class="mb-4"></p>
                 <div id="modalWebtoonLinkContainer" class="mb-6 text-sm"></div>
+                <div id="subscribeStateLine" class="flex items-center gap-2 text-white/70 text-sm mb-2">
+                    <span id="subscribeStateDot" class="h-2 w-2 rounded-full bg-white/50"></span>
+                    <span id="subscribeStateText"></span>
+                </div>
+                <p id="subscribeInlineError" class="text-red-400 text-xs mt-2"></p>
                 <div class="flex justify-end gap-2">
                     <button id="subscribeButton" data-ui="modal-primary" onclick="toggleSubscriptionFromModal()">구독/해제</button>
                 </div>
