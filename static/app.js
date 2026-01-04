@@ -16,6 +16,53 @@ const DEBUG_TOOLS = false;
 window.__NAV_ICON_DEBUG__ = window.__NAV_ICON_DEBUG__ || false;
 const EXPLORE_FILTERS_KEY = 'es_explore_filters_v1';
 
+// Canonical UI tokens
+const BTN_BASE =
+  'h-11 inline-flex items-center justify-center gap-2 px-4 rounded-xl text-sm font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed';
+const BTN_PRIMARY = cx(
+  BTN_BASE,
+  'bg-white/15 text-white hover:bg-white/20 active:bg-white/25',
+);
+const BTN_SECONDARY = cx(
+  BTN_BASE,
+  'bg-white/8 text-white/90 hover:bg-white/12 active:bg-white/15',
+);
+const BTN_GHOST = cx(
+  BTN_BASE,
+  'bg-transparent text-white/80 hover:bg-white/10 active:bg-white/15',
+);
+const BTN_DANGER = cx(
+  BTN_BASE,
+  'border border-red-400/40 bg-red-500/15 text-red-100 hover:bg-red-500/20 active:bg-red-500/25',
+);
+const BTN_DISABLED = 'opacity-50 cursor-not-allowed';
+
+const INPUT_BASE =
+  'w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-white text-base placeholder:text-white/45 transition-colors focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-0 focus:border-white/20 disabled:opacity-60 disabled:cursor-not-allowed';
+const INPUT_FOCUS = 'focus:ring-2 focus:ring-white/20 focus:border-white/20';
+const INPUT_DISABLED = 'opacity-60 cursor-not-allowed';
+
+const CARD_BASE =
+  'rounded-2xl bg-[#1E1E1E] border border-white/10 shadow-[0_24px_48px_-32px_rgba(0,0,0,0.8)]';
+const CARD_HEADER = 'flex items-center justify-between gap-2';
+const CARD_BODY = 'space-y-2 text-sm text-white/80';
+const CARD_INTERACTIVE =
+  'transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25';
+const CARD_SUBTLE = 'bg-white/5 border-white/5';
+
+const CHIP_BASE =
+  'inline-flex items-center gap-2 h-9 px-3 rounded-full text-sm font-medium text-white/85 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-white/20';
+const CHIP_ACTIVE = 'bg-[#4F46E5] text-white hover:bg-[#5B55E9] active:bg-[#4F46E5]';
+const CHIP_INACTIVE = 'bg-white/8 text-white/80 hover:bg-white/12 active:bg-white/15';
+
+const TOAST_CONTAINER =
+  'fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[480px] pointer-events-none flex flex-col items-center';
+const TOAST_BASE =
+  'pointer-events-auto inline-flex max-w-[420px] w-full sm:w-auto items-center gap-2 px-4 py-2 rounded-xl border shadow-xl backdrop-blur-md text-sm font-semibold text-white transition-all duration-300 opacity-0 -translate-y-2';
+const TOAST_SUCCESS = 'bg-[#16a34a]/80 border-[#16a34a]/50';
+const TOAST_ERROR = 'bg-[#ef4444]/80 border-[#ef4444]/50';
+const TOAST_INFO = 'bg-black/75 border-white/15';
+
 function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
 }
@@ -70,20 +117,23 @@ const ICONS = {
 // - Smoke test search page, modals, cards, and toasts after changes.
 const UI_CLASSES = {
   // Buttons
-  btnPrimary:
-    'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
-  btnSecondary:
-    'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
-  btnDisabled: 'opacity-80 cursor-not-allowed',
+  btnBase: BTN_BASE,
+  btnPrimary: BTN_PRIMARY,
+  btnSecondary: BTN_SECONDARY,
+  btnGhost: BTN_GHOST,
+  btnDanger: BTN_DANGER,
+  btnDisabled: BTN_DISABLED,
 
   // Icon buttons
-  iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
-  iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
+  iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20',
+  iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20',
   headerBtn:
-    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
+    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce focus:outline-none focus:ring-2 focus:ring-white/20',
 
   // Chips & empty states
-  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
+  chipBase: CHIP_BASE,
+  chipActive: CHIP_ACTIVE,
+  chipInactive: CHIP_INACTIVE,
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
@@ -111,9 +161,13 @@ const UI_CLASSES = {
   pillHint: 'text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1',
 
   // Cards
-  cardRoot:
-    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5',
-  cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
+  cardBase: CARD_BASE,
+  cardHeader: CARD_HEADER,
+  cardBody: CARD_BODY,
+  cardInteractive: CARD_INTERACTIVE,
+  cardSubtle: CARD_SUBTLE,
+  cardRoot: cx('relative group cursor-pointer fade-in', CARD_INTERACTIVE),
+  cardThumb: 'rounded-xl overflow-hidden bg-[#1E1E1E] relative mb-2 border border-white/5',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
   cardTextWrap: 'px-0.5',
@@ -121,12 +175,11 @@ const UI_CLASSES = {
   cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
 
   // Inputs
-  inputBase:
-    'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
-  inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
-  searchTrigger:
-    'transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]',
+  inputBase: INPUT_BASE,
+  inputFocus: INPUT_FOCUS,
+  inputDisabled: INPUT_DISABLED,
+  inputSm: INPUT_BASE,
+  searchTrigger: cx(INPUT_BASE, 'h-10 pr-3 cursor-pointer bg-[#1E1E1E] text-sm'),
   inputLabel: 'block text-sm font-medium text-gray-300',
 
   // Modal
@@ -142,7 +195,7 @@ const UI_CLASSES = {
   // Pages & overlays
   pageOverlayRoot: 'bg-[#121212] text-white',
   pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
-  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
+  pageCard: cx(CARD_BASE, CARD_SUBTLE, 'p-4 backdrop-blur-sm'),
 
   // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -156,11 +209,11 @@ const UI_CLASSES = {
     'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
 
   // Toasts
-  toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
-  toastSuccess:
-    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
-  toastError:
-    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
+  toastContainer: TOAST_CONTAINER,
+  toastBase: TOAST_BASE,
+  toastSuccess: TOAST_SUCCESS,
+  toastError: TOAST_ERROR,
+  toastInfo: TOAST_INFO,
 };
 
 const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -332,7 +385,7 @@ const DATA_UI_CLASS_MAP = {
   // Static HTML (templates/index.html)
   'search-back': UI_CLASSES.iconBtn,
   'search-clear': cx(UI_CLASSES.iconBtnSm, 'hidden'),
-  'search-input': UI_CLASSES.inputBase,
+  'search-input': cx(UI_CLASSES.inputBase, 'pr-12'),
   'search-trigger': UI_CLASSES.searchTrigger,
   'search-recent-clear': UI_CLASSES.sectionSubtle,
   'search-popular-title': UI_CLASSES.sectionTitle,
@@ -352,6 +405,7 @@ const DATA_UI_CLASS_MAP = {
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
   'btn-primary': UI_CLASSES.btnPrimary,
+  'btn-danger': UI_CLASSES.btnDanger,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
@@ -362,10 +416,13 @@ const DATA_UI_CLASS_MAP = {
   'page-overlay-root': UI_CLASSES.pageOverlayRoot,
   'page-overlay-container': UI_CLASSES.pageOverlayContainer,
   'page-card': UI_CLASSES.pageCard,
+  'toast-container': UI_CLASSES.toastContainer,
+  'form-error': 'text-xs text-red-400 min-h-[16px]',
 
   // Dynamic-only (JS-generated nodes)
   'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
   'btn-secondary': UI_CLASSES.btnSecondary, // dynamic-only: secondary CTAs injected by JS
+  'btn-ghost': UI_CLASSES.btnGhost, // dynamic-only: ghost CTAs injected by JS
 };
 
 // applyDataUiClasses: applies token classes to nodes annotated with data-ui.
@@ -834,6 +891,8 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
     return;
   }
 
+  setClasses(container, UI_CLASSES.toastContainer);
+
   const prefix =
     type === 'success' ? '[성공] ' : type === 'error' ? '[오류] ' : '[알림] ';
 
@@ -844,19 +903,14 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
       : normalizedMessage;
 
   const toast = document.createElement('div');
-  setClasses(toast, UI_CLASSES.toastWrap);
-
-  const inner = document.createElement('div');
   const toastTone =
     type === 'success'
       ? UI_CLASSES.toastSuccess
       : type === 'error'
       ? UI_CLASSES.toastError
-      : UI_CLASSES.toastSuccess;
-  setClasses(inner, toastTone);
-  inner.textContent = `${prefix}${truncatedMessage}`;
-
-  toast.appendChild(inner);
+      : UI_CLASSES.toastInfo;
+  setClasses(toast, cx(UI_CLASSES.toastBase, toastTone));
+  toast.textContent = `${prefix}${truncatedMessage}`;
 
   container.appendChild(toast);
 
@@ -1650,11 +1704,14 @@ const renderRecentSearches = () => {
   }
 
   list.slice(0, MAX_RECENT_SEARCHES).forEach((query) => {
-    const wrapper = setClasses(document.createElement('div'), UI_CLASSES.chip);
+    const wrapper = setClasses(
+      document.createElement('div'),
+      cx(UI_CLASSES.chipBase, UI_CLASSES.chipInactive, 'justify-between w-full max-w-full'),
+    );
 
     const labelBtn = document.createElement('button');
     labelBtn.type = 'button';
-    labelBtn.className = 'truncate text-left';
+    labelBtn.className = 'truncate text-left flex-1 min-w-0';
     labelBtn.textContent = query;
     labelBtn.onclick = () => {
       if (UI.searchPageInput) {
@@ -1667,7 +1724,8 @@ const renderRecentSearches = () => {
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.setAttribute('aria-label', 'Remove recent search');
-    deleteBtn.className = 'h-6 w-6 rounded-full bg-white/10 flex items-center justify-center text-white/70';
+    deleteBtn.className =
+      'h-7 w-7 flex-shrink-0 rounded-full bg-white/10 flex items-center justify-center text-white/80 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/20';
     deleteBtn.textContent = '×';
     deleteBtn.onclick = (evt) => {
       evt.stopPropagation();
@@ -3015,14 +3073,19 @@ function renderL1Filters(tabId) {
   }
 
   items.forEach((item) => {
-    const el = document.createElement('div');
+    const el = document.createElement('button');
     const isActive = STATE.filters?.[tabId]?.source === item.id;
-    el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
-      isActive ? 'active' : 'inactive'
-    }`;
+    el.type = 'button';
+    setClasses(
+      el,
+      cx(
+        UI_CLASSES.chipBase,
+        isActive ? UI_CLASSES.chipActive : UI_CLASSES.chipInactive,
+        'flex-shrink-0 spring-bounce',
+      ),
+    );
     el.textContent = item.label;
-
-    if (item.color && isActive) el.style.borderColor = item.color;
+    el.setAttribute('aria-pressed', isActive ? 'true' : 'false');
 
     el.onclick = () => {
       STATE.filters[tabId].source = item.id;
@@ -3077,8 +3140,17 @@ function renderL2Filters(tabId) {
   items.forEach((item) => {
     const el = document.createElement('button');
     const isActive = activeKey === item.id;
-    el.className = `l2-tab spring-bounce ${isActive ? 'active' : ''}`;
+    el.type = 'button';
+    setClasses(
+      el,
+      cx(
+        UI_CLASSES.chipBase,
+        isActive ? UI_CLASSES.chipActive : UI_CLASSES.chipInactive,
+        'spring-bounce',
+      ),
+    );
     el.textContent = item.label;
+    el.setAttribute('aria-pressed', isActive ? 'true' : 'false');
 
     el.onclick = () => {
       if (tabId === 'webtoon' || tabId === 'novel')
