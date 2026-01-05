@@ -140,9 +140,12 @@ const UI_STATE_KEYS = {
     day: 'endingsignal.filters.day', // sessionStorage: reset on new session
   },
   scroll: {
-    explore: 'endingsignal.scroll.explore',
-    search: 'endingsignal.scroll.search',
+    webtoon: 'endingsignal.scroll.webtoon',
+    novel: 'endingsignal.scroll.novel',
+    ott: 'endingsignal.scroll.ott',
+    series: 'endingsignal.scroll.series',
     mysub: 'endingsignal.scroll.mysub',
+    search: 'endingsignal.scroll.search',
   },
 };
 
@@ -183,6 +186,17 @@ const sanitizeFilterValue = (value, allowed, fallback) => {
 const getFilterTargetTab = () => {
   if (STATE.activeTab === 'my') return STATE.lastBrowseTab || 'webtoon';
   return STATE.activeTab || STATE.lastBrowseTab || 'webtoon';
+};
+
+const getScrollViewKeyForTab = (tabId) => {
+  if (tabId === 'my') return 'mysub';
+  if (tabId === 'webtoon' || tabId === 'novel' || tabId === 'ott' || tabId === 'series') return tabId;
+  return 'webtoon';
+};
+
+const getCurrentScrollViewKey = () => {
+  if (STATE.search.pageOpen) return 'search';
+  return getScrollViewKeyForTab(STATE.activeTab);
 };
 
 const UIState = {
@@ -2254,7 +2268,7 @@ function debouncedSearch(q) {
 function openSearchPage({ focus = true } = {}) {
   if (!UI.searchPage) return;
 
-  saveScroll('explore');
+  saveScroll(getCurrentScrollViewKey());
   UIState.save();
 
   const wasOpen = STATE.search.pageOpen;
@@ -2297,7 +2311,7 @@ function closeSearchPage() {
   unlockBodyScroll();
 
   UIState.apply(UIState.load(), { rerender: true, fetch: false });
-  restoreScroll('explore');
+  restoreScroll(getScrollViewKeyForTab(STATE.activeTab));
 }
 
 function openSearchAndFocus() {
@@ -2848,8 +2862,8 @@ function renderBottomNav() {
 
 async function updateTab(tabId, { preserveScroll = true } = {}) {
   const prevTab = STATE.activeTab || 'webtoon';
-  const prevViewKey = prevTab === 'my' ? 'mysub' : 'explore';
-  const nextViewKey = tabId === 'my' ? 'mysub' : 'explore';
+  const prevViewKey = getScrollViewKeyForTab(prevTab);
+  const nextViewKey = getScrollViewKeyForTab(tabId);
 
   if (preserveScroll && STATE.hasBootstrapped) saveScroll(prevViewKey);
   UIState.save();
@@ -3605,7 +3619,7 @@ function getContentUrl(content) {
 }
 
 function openSubscribeModal(content, opts = {}) {
-  const viewKey = STATE.search.pageOpen ? 'search' : STATE.activeTab === 'my' ? 'mysub' : 'explore';
+  const viewKey = getCurrentScrollViewKey();
   saveScroll(viewKey);
   UIState.save();
 
@@ -3690,7 +3704,7 @@ function closeSubscribeModal() {
   const modalEl = document.getElementById('subscribeModal');
   if (modalEl) closeModal(modalEl);
   STATE.currentModalContent = null;
-  restoreScroll(STATE.search.pageOpen ? 'search' : STATE.activeTab === 'my' ? 'mysub' : 'explore');
+  restoreScroll(getCurrentScrollViewKey());
 }
 
 window.toggleSubscriptionFromModal = async function () {
