@@ -59,18 +59,11 @@ const ICONS = {
 // - Smoke test search page, modals, cards, and toasts after changes.
 const UI_CLASSES = {
   // Buttons
-  btnBase:
-    'inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl text-sm font-semibold text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed',
   btnPrimary:
-    'inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl text-sm font-semibold text-white bg-white/15 hover:bg-white/20 active:bg-white/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed',
+    'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
-    'inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl text-sm font-semibold text-white/90 bg-white/8 hover:bg-white/12 active:bg-white/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed',
-  btnGhost:
-    'inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl text-sm font-semibold text-white/85 bg-transparent hover:bg-white/8 active:bg-white/12 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-40 disabled:cursor-not-allowed',
-  btnDanger:
-    'inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl text-sm font-semibold text-red-200 bg-red-500/15 hover:bg-red-500/20 active:bg-red-500/25 border border-red-400/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed',
+    'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
-  btnLoading: 'relative pointer-events-none opacity-70',
 
   // Icon buttons
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
@@ -79,11 +72,7 @@ const UI_CLASSES = {
     'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
 
   // Chips & empty states
-  chipBase:
-    'inline-flex items-center gap-2 h-9 px-3 rounded-full border border-white/10 bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212]',
-  chip: 'inline-flex items-center gap-2 h-9 px-3 rounded-full border border-white/10 bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212]',
-  chipActive: 'bg-white/15 border-white/20 text-white',
-  chipInactive: 'text-white/70',
+  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
   emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
@@ -104,12 +93,6 @@ const UI_CLASSES = {
   pillHint: 'text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1',
 
   // Cards
-  sectionCard:
-    'rounded-2xl border border-white/10 bg-white/5 px-4 py-4 backdrop-blur-sm shadow-[0_10px_40px_rgba(0,0,0,0.35)]',
-  cardBase:
-    'rounded-2xl border border-white/10 bg-white/5 px-4 py-4 backdrop-blur-sm shadow-[0_10px_40px_rgba(0,0,0,0.35)]',
-  panelSubtle:
-    'rounded-xl border border-white/5 bg-white/5 px-4 py-6 text-center text-white/80',
   cardRoot:
     'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5',
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
@@ -121,11 +104,9 @@ const UI_CLASSES = {
 
   // Inputs
   inputBase:
-    'w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-base text-white placeholder:text-white/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed',
+    'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-sm text-white placeholder:text-white/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed',
-  inputFocus: 'focus-visible:ring-2 focus-visible:ring-[#4F46E5] focus-visible:ring-offset-2 focus-visible:ring-offset-[#121212]',
-  inputDisabled: 'disabled:opacity-50 disabled:cursor-not-allowed',
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
   searchTrigger:
     'transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]',
   inputLabel: 'block text-sm font-medium text-gray-300',
@@ -143,8 +124,7 @@ const UI_CLASSES = {
   // Pages & overlays
   pageOverlayRoot: 'bg-[#121212] text-white',
   pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
-  pageCard:
-    'rounded-2xl border border-white/10 bg-[#1E1E1E] px-4 py-4 backdrop-blur-sm shadow-[0_10px_40px_rgba(0,0,0,0.35)]',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
 
   // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
@@ -158,15 +138,11 @@ const UI_CLASSES = {
     'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
 
   // Toasts
-  toastContainer:
-    'fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[480px] pointer-events-none flex flex-col items-center',
-  toastWrap:
-    'pointer-events-auto w-full max-w-[440px] text-center transition-all duration-300 opacity-0 -translate-y-2 flex justify-center',
-  toastBase:
-    'inline-flex w-full items-center gap-2 px-4 py-2 rounded-xl bg-black/80 border border-white/12 shadow-xl backdrop-blur-md text-sm text-white text-left',
-  toastSuccess: 'border-emerald-400/40 text-emerald-100',
-  toastError: 'border-red-400/40 text-red-100',
-  toastInfo: 'border-white/20 text-white',
+  toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
+  toastSuccess:
+    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
+  toastError:
+    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
 };
 
 const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -636,15 +612,11 @@ const UI = {
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
-  myPageCreatedAtRow: document.getElementById('myPageCreatedAtRow'),
-  myPageCreatedAtValue: document.getElementById('myPageCreatedAtValue'),
   myPagePwCurrent: document.getElementById('myPagePwCurrent'),
   myPagePwNew: document.getElementById('myPagePwNew'),
   myPagePwConfirm: document.getElementById('myPagePwConfirm'),
   myPagePwSubmit: document.getElementById('myPagePwSubmit'),
   myPagePwError: document.getElementById('myPagePwError'),
-  myPageGoMySubBtn: document.getElementById('myPageGoMySubBtn'),
-  myPageLogoutBtn: document.getElementById('myPageLogoutBtn'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -672,14 +644,9 @@ const DATA_UI_CLASS_MAP = {
   'modal-body': UI_CLASSES.modalBodyText,
   'modal-primary': cx(UI_CLASSES.btnPrimary, 'spring-bounce neon-glow'),
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
-  'input-base': UI_CLASSES.inputBase,
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
-  'btn-base': UI_CLASSES.btnBase,
   'btn-primary': UI_CLASSES.btnPrimary,
-  'btn-secondary': UI_CLASSES.btnSecondary,
-  'btn-ghost': UI_CLASSES.btnGhost,
-  'btn-danger': UI_CLASSES.btnDanger,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
@@ -690,17 +657,10 @@ const DATA_UI_CLASS_MAP = {
   'page-overlay-root': UI_CLASSES.pageOverlayRoot,
   'page-overlay-container': UI_CLASSES.pageOverlayContainer,
   'page-card': UI_CLASSES.pageCard,
-  'section-card': UI_CLASSES.sectionCard,
-  'card-base': UI_CLASSES.cardBase,
-  'panel-subtle': UI_CLASSES.panelSubtle,
-  'chip-base': UI_CLASSES.chipBase,
-  'chip-active': UI_CLASSES.chipActive,
-  'chip-inactive': UI_CLASSES.chipInactive,
-  'toast-container': UI_CLASSES.toastContainer,
-  'toast-item': cx(UI_CLASSES.toastWrap, UI_CLASSES.toastBase),
 
   // Dynamic-only (JS-generated nodes)
   'pill-hint': UI_CLASSES.pillHint, // dynamic-only: card affordance hint
+  'btn-secondary': UI_CLASSES.btnSecondary, // dynamic-only: secondary CTAs injected by JS
 };
 
 // applyDataUiClasses: applies token classes to nodes annotated with data-ui.
@@ -1158,18 +1118,12 @@ const setupInfiniteObserver = (category) => {
    ========================= */
 
 function showToast(message, { type = 'info', duration = 2200 } = {}) {
-  const ensureToastContainer = () => {
-    let container = document.getElementById('toastContainer');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'toastContainer';
-      document.body.appendChild(container);
-    }
-    setClasses(container, UI_CLASSES.toastContainer);
-    return container;
-  };
-
-  const container = ensureToastContainer();
+  const container = document.getElementById('toastContainer');
+  if (!container) {
+    // graceful fallback (do not crash)
+    console.warn('Toast container missing:', message);
+    return;
+  }
 
   const prefix =
     type === 'success' ? '[성공] ' : type === 'error' ? '[오류] ' : '[알림] ';
@@ -1184,13 +1138,13 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
   setClasses(toast, UI_CLASSES.toastWrap);
 
   const inner = document.createElement('div');
-  const tone =
+  const toastTone =
     type === 'success'
       ? UI_CLASSES.toastSuccess
       : type === 'error'
       ? UI_CLASSES.toastError
-      : UI_CLASSES.toastInfo;
-  setClasses(inner, cx(UI_CLASSES.toastBase, tone));
+      : UI_CLASSES.toastSuccess;
+  setClasses(inner, toastTone);
   inner.textContent = `${prefix}${truncatedMessage}`;
 
   toast.appendChild(inner);
@@ -1991,14 +1945,11 @@ const renderRecentSearches = () => {
   }
 
   list.slice(0, MAX_RECENT_SEARCHES).forEach((query) => {
-    const wrapper = setClasses(
-      document.createElement('div'),
-      cx(UI_CLASSES.chipBase, UI_CLASSES.chipInactive)
-    );
+    const wrapper = setClasses(document.createElement('div'), UI_CLASSES.chip);
 
     const labelBtn = document.createElement('button');
     labelBtn.type = 'button';
-    labelBtn.className = 'flex-1 truncate text-left text-white';
+    labelBtn.className = 'truncate text-left';
     labelBtn.textContent = query;
     labelBtn.onclick = () => {
       if (UI.searchPageInput) {
@@ -2011,7 +1962,7 @@ const renderRecentSearches = () => {
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.setAttribute('aria-label', 'Remove recent search');
-    setClasses(deleteBtn, cx(UI_CLASSES.iconBtnSm, 'text-white/70 bg-white/10'));
+    deleteBtn.className = 'h-6 w-6 rounded-full bg-white/10 flex items-center justify-center text-white/70';
     deleteBtn.textContent = '×';
     deleteBtn.onclick = (evt) => {
       evt.stopPropagation();
@@ -2625,54 +2576,8 @@ function setupSearchHandlers() {
    My page
    ========================= */
 
-function formatKstDateTime(dt) {
-  if (!dt) return '';
-  try {
-    const date = new Date(dt);
-    if (Number.isNaN(date.getTime())) return '';
-
-    const parts = new Intl.DateTimeFormat('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })
-      .formatToParts(date)
-      .reduce((acc, part) => {
-        if (part.type !== 'literal') acc[part.type] = part.value;
-        return acc;
-      }, {});
-
-    const year = parts.year || '';
-    const month = parts.month || '';
-    const day = parts.day || '';
-    const hour = parts.hour || '';
-    const minute = parts.minute || '';
-    if (!year || !month || !day || !hour || !minute) return '';
-
-    return `${year}-${month}-${day} ${hour}:${minute}`;
-  } catch (e) {
-    console.warn('Failed to format datetime', dt, e);
-    return '';
-  }
-}
-
 function renderMyPageEmail(user = {}) {
   if (UI.myPageEmailValue) UI.myPageEmailValue.textContent = safeString(user?.email, '-') || '-';
-
-  if (UI.myPageCreatedAtRow && UI.myPageCreatedAtValue) {
-    const formatted = formatKstDateTime(user?.created_at);
-    if (formatted) {
-      UI.myPageCreatedAtValue.textContent = formatted;
-      UI.myPageCreatedAtRow.classList.remove('hidden');
-    } else {
-      UI.myPageCreatedAtValue.textContent = '';
-      UI.myPageCreatedAtRow.classList.add('hidden');
-    }
-  }
 }
 
 async function fetchMyPageUser() {
@@ -2839,20 +2744,6 @@ function setupMyPageHandlers() {
     UI.profileMenuMyPage.onclick = () => {
       closeProfileMenu();
       openMyPage();
-    };
-  }
-
-  if (UI.myPageGoMySubBtn) {
-    UI.myPageGoMySubBtn.onclick = () => {
-      closeMyPage({ fromPopstate: true });
-      updateTab('my');
-    };
-  }
-
-  if (UI.myPageLogoutBtn) {
-    UI.myPageLogoutBtn.onclick = () => {
-      closeMyPage({ fromPopstate: true });
-      logout();
     };
   }
 }
@@ -3307,10 +3198,7 @@ function renderL2Filters(tabId) {
   items.forEach((item) => {
     const el = document.createElement('button');
     const isActive = activeKey === item.id;
-    setClasses(
-      el,
-      cx(UI_CLASSES.chipBase, isActive ? UI_CLASSES.chipActive : UI_CLASSES.chipInactive, 'spring-bounce')
-    );
+    el.className = `l2-tab spring-bounce ${isActive ? 'active' : ''}`;
     el.textContent = item.label;
 
     el.onclick = () => {
