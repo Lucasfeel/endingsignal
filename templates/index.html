@@ -161,7 +161,7 @@
             </div>
         </header>
 
-        <div id="toastContainer" data-ui="toast-container"></div>
+        <div id="toastContainer" class="fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[480px] pointer-events-none"></div>
 
         <main class="min-h-screen pb-24 relative">
              <!-- Top Filters Container -->
@@ -226,7 +226,7 @@
                     <span id="subscribeStateDot" class="h-2 w-2 rounded-full bg-white/50"></span>
                     <span id="subscribeStateText"></span>
                 </div>
-                <p id="subscribeInlineError" data-ui="form-error" class="mt-2"></p>
+                <p id="subscribeInlineError" class="text-red-400 text-xs mt-2"></p>
                 <div class="flex justify-end gap-2">
                     <button id="subscribeButton" data-ui="modal-primary" onclick="toggleSubscriptionFromModal()">구독/해제</button>
                 </div>
@@ -316,7 +316,7 @@
                                         <h3 data-ui="section-title" class="text-white/80">구독</h3>
                                         <p class="text-sm text-white/60">구독한 작품을 한 번에 확인하세요.</p>
                                     </div>
-                                    <button id="myPageGoMySubBtn" data-ui="btn-primary" type="button" class="w-full">내 구독으로 이동</button>
+                                    <button id="myPageGoMySubBtn" data-ui="btn-primary" type="button" class="w-full h-11">내 구독으로 이동</button>
                                 </div>
                                 <div data-ui="page-card" class="space-y-4">
                                     <h3 data-ui="section-title" class="text-white/80">보안</h3>
@@ -333,16 +333,15 @@
                                         <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
                                         <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
                                     </div>
-                                    <p id="myPagePwError" data-ui="form-error"></p>
-                                    <button id="myPagePwSubmit" data-ui="btn-primary" type="button" class="w-full">비밀번호 변경</button>
+                                    <p id="myPagePwError" class="text-xs text-red-400 min-h-[16px]"></p>
+                                    <button id="myPagePwSubmit" data-ui="btn-primary" type="button" class="w-full h-11">비밀번호 변경</button>
                                 </div>
                                 <div data-ui="page-card" class="space-y-3">
                                     <h3 data-ui="section-title" class="text-white/80">로그아웃</h3>
                                     <button
                                         id="myPageLogoutBtn"
-                                        data-ui="btn-danger"
                                         type="button"
-                                        class="w-full"
+                                        class="w-full h-11 rounded-xl border border-red-400/40 bg-red-500/10 text-red-200 text-sm font-semibold hover:bg-red-500/20"
                                     >
                                         로그아웃
                                     </button>
