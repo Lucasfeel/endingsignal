@@ -128,6 +128,195 @@ const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
 )}`;
 
 /* =========================
+   UI state persistence (filters + scroll)
+   ========================= */
+
+// Storage helpers: JSON + schema versioning with defensive guards so blocked storage
+// (e.g., private mode) does not break the UI.
+const UI_STATE_KEYS = {
+  filters: {
+    source: 'endingsignal.filters.source', // localStorage: keep across reloads
+    status: 'endingsignal.filters.status', // localStorage: keep across reloads
+    day: 'endingsignal.filters.day', // sessionStorage: reset on new session
+  },
+  scroll: {
+    explore: 'endingsignal.scroll.explore',
+    search: 'endingsignal.scroll.search',
+    mysub: 'endingsignal.scroll.mysub',
+  },
+};
+
+const UI_STATE_DEFAULTS = {
+  filters: {
+    source: 'all',
+    status: 'ongoing',
+    day: 'all', // Day defaults to ALL on a fresh visit per product decision
+  },
+};
+
+const safeLoadStorage = (storageObj, key) => {
+  try {
+    const raw = storageObj?.getItem?.(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.v !== 1) return null;
+    return parsed.value;
+  } catch (e) {
+    console.warn('Failed to load storage key', key, e);
+    return null;
+  }
+};
+
+const safeSaveStorage = (storageObj, key, value) => {
+  try {
+    storageObj?.setItem?.(key, JSON.stringify({ v: 1, value }));
+  } catch (e) {
+    console.warn('Failed to save storage key', key, e);
+  }
+};
+
+const sanitizeFilterValue = (value, allowed, fallback) => {
+  const safeVal = typeof value === 'string' ? value : '';
+  return allowed.includes(safeVal) ? safeVal : fallback;
+};
+
+const getFilterTargetTab = () => {
+  if (STATE.activeTab === 'my') return STATE.lastBrowseTab || 'webtoon';
+  return STATE.activeTab || STATE.lastBrowseTab || 'webtoon';
+};
+
+const UIState = {
+  load() {
+    const savedSource = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.source);
+    const savedStatus = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.status);
+    const savedDay = safeLoadStorage(sessionStorage, UI_STATE_KEYS.filters.day);
+
+    return {
+      filters: {
+        source: sanitizeFilterValue(
+          savedSource,
+          ['all', 'naver_webtoon', 'kakaowebtoon', 'lezhin', 'laftel'],
+          UI_STATE_DEFAULTS.filters.source,
+        ),
+        status: sanitizeFilterValue(
+          savedStatus,
+          ['ongoing', 'completed'],
+          UI_STATE_DEFAULTS.filters.status,
+        ),
+        day: sanitizeFilterValue(
+          savedDay,
+          ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+          UI_STATE_DEFAULTS.filters.day,
+        ),
+      },
+    };
+  },
+
+  get() {
+    const tabId = getFilterTargetTab();
+    const fallbackFilters = UI_STATE_DEFAULTS.filters;
+    const tabFilters = STATE.filters?.[tabId] || {};
+    return {
+      filters: {
+        source: sanitizeFilterValue(
+          tabFilters.source,
+          ['all', 'naver_webtoon', 'kakaowebtoon', 'lezhin', 'laftel'],
+          fallbackFilters.source,
+        ),
+        status: sanitizeFilterValue(tabFilters.status, ['ongoing', 'completed'], fallbackFilters.status),
+        day: sanitizeFilterValue(
+          tabFilters.day,
+          ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+          fallbackFilters.day,
+        ),
+      },
+    };
+  },
+
+  apply(nextState, { rerender = true, fetch = false } = {}) {
+    const tabId = getFilterTargetTab();
+    if (!STATE.filters?.[tabId]) return;
+
+    const incoming = nextState?.filters || UI_STATE_DEFAULTS.filters;
+    const nextSource = sanitizeFilterValue(
+      incoming.source,
+      ['all', 'naver_webtoon', 'kakaowebtoon', 'lezhin', 'laftel'],
+      UI_STATE_DEFAULTS.filters.source,
+    );
+    const nextStatus = sanitizeFilterValue(
+      incoming.status,
+      ['ongoing', 'completed'],
+      UI_STATE_DEFAULTS.filters.status,
+    );
+    const nextDay = sanitizeFilterValue(
+      incoming.day,
+      ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+      UI_STATE_DEFAULTS.filters.day,
+    );
+
+    const current = STATE.filters[tabId];
+    const changed =
+      current.source !== nextSource || current.status !== nextStatus || current.day !== nextDay;
+
+    STATE.filters[tabId].source = nextSource;
+    STATE.filters[tabId].status = nextStatus;
+    STATE.filters[tabId].day = nextDay;
+
+    // Keep day/source in sync for novel, which shares the same filter surface.
+    ['webtoon', 'novel'].forEach((type) => {
+      if (!STATE.filters[type]) return;
+      STATE.filters[type].day = nextDay;
+      if (type === 'webtoon') STATE.filters[type].source = nextSource;
+    });
+
+    if (rerender) {
+      renderL1Filters(tabId);
+      renderL2Filters(tabId);
+    }
+
+    if (fetch && changed) {
+      fetchAndRenderContent(tabId);
+    }
+  },
+
+  save() {
+    const snapshot = this.get();
+    // Persist long-lived filters in localStorage; day lives in sessionStorage so it resets on
+    // a fresh session per product requirement.
+    safeSaveStorage(localStorage, UI_STATE_KEYS.filters.source, snapshot.filters.source);
+    safeSaveStorage(localStorage, UI_STATE_KEYS.filters.status, snapshot.filters.status);
+    safeSaveStorage(sessionStorage, UI_STATE_KEYS.filters.day, snapshot.filters.day);
+  },
+};
+
+const saveScroll = (viewKey) => {
+  const storageKey = UI_STATE_KEYS.scroll[viewKey];
+  if (!storageKey) return;
+  try {
+    safeSaveStorage(sessionStorage, storageKey, Math.max(0, Math.round(window.scrollY || 0)));
+  } catch (e) {
+    console.warn('Failed to save scroll', viewKey, e);
+  }
+};
+
+const restoreScroll = (viewKey) => {
+  const storageKey = UI_STATE_KEYS.scroll[viewKey];
+  if (!storageKey) return;
+
+  let scrollY = null;
+  try {
+    scrollY = safeLoadStorage(sessionStorage, storageKey);
+  } catch (e) {
+    console.warn('Failed to load scroll', viewKey, e);
+    return;
+  }
+
+  const targetY = Number.isFinite(scrollY) ? scrollY : 0;
+  const performRestore = () => window.scrollTo({ top: targetY });
+  requestAnimationFrame(() => requestAnimationFrame(performRestore));
+};
+
+/* =========================
    Application state
    ========================= */
 
@@ -217,6 +406,7 @@ const STATE = {
   searchAbortController: null,
   tabAbortController: null,
   isMySubOpen: false,
+  hasBootstrapped: false,
 };
 
 /* =========================
@@ -1388,6 +1578,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('Failed to preload subscriptions', e);
   }
 
+  const initialUIState = UIState.load();
+  UIState.apply(initialUIState, { rerender: false, fetch: false });
+
   renderBottomNav();
   updateTab('webtoon');
   setupScrollEffect();
@@ -2061,6 +2254,9 @@ function debouncedSearch(q) {
 function openSearchPage({ focus = true } = {}) {
   if (!UI.searchPage) return;
 
+  saveScroll('explore');
+  UIState.save();
+
   const wasOpen = STATE.search.pageOpen;
   if (!wasOpen) {
     STATE.search.pageOpen = true;
@@ -2083,6 +2279,8 @@ function openSearchPage({ focus = true } = {}) {
     showSearchIdle();
   }
 
+  restoreScroll('search');
+
   if (focus && UI.searchPageInput) {
     requestAnimationFrame(() => UI.searchPageInput.focus());
   }
@@ -2090,12 +2288,16 @@ function openSearchPage({ focus = true } = {}) {
 
 function closeSearchPage() {
   if (!STATE.search.pageOpen) return;
+  saveScroll('search');
   STATE.search.pageOpen = false;
   STATE.search.activeIndex = -1;
   setActiveSearchIndex(-1);
   if (UI.searchPage) UI.searchPage.classList.add('hidden');
   stopSearchViewportSync();
   unlockBodyScroll();
+
+  UIState.apply(UIState.load(), { rerender: true, fetch: false });
+  restoreScroll('explore');
 }
 
 function openSearchAndFocus() {
@@ -2644,11 +2846,18 @@ function renderBottomNav() {
   });
 }
 
-async function updateTab(tabId) {
+async function updateTab(tabId, { preserveScroll = true } = {}) {
+  const prevTab = STATE.activeTab || 'webtoon';
+  const prevViewKey = prevTab === 'my' ? 'mysub' : 'explore';
+  const nextViewKey = tabId === 'my' ? 'mysub' : 'explore';
+
+  if (preserveScroll && STATE.hasBootstrapped) saveScroll(prevViewKey);
+  UIState.save();
+
+  if (STATE.search.pageOpen) closeSearchPage();
   STATE.activeTab = tabId;
   if (tabId !== 'my') STATE.lastBrowseTab = tabId;
   STATE.isMySubOpen = tabId === 'my';
-  if (STATE.search.pageOpen) closeSearchPage();
 
   renderBottomNav();
   updateFilterVisibility(tabId);
@@ -2656,7 +2865,11 @@ async function updateTab(tabId) {
   renderL2Filters(tabId);
 
   await fetchAndRenderContent(tabId);
-  window.scrollTo({ top: 0 });
+
+  if (preserveScroll && STATE.hasBootstrapped) restoreScroll(nextViewKey);
+  else window.scrollTo({ top: 0 });
+
+  STATE.hasBootstrapped = true;
 }
 
 function updateFilterVisibility(tabId) {
@@ -2735,6 +2948,7 @@ function renderL1Filters(tabId) {
       STATE.filters[tabId].source = item.id;
       renderL1Filters(tabId);
       fetchAndRenderContent(tabId);
+      UIState.save();
     };
 
     UI.l1Filter.appendChild(el);
@@ -2792,6 +3006,7 @@ function renderL2Filters(tabId) {
 
       renderL2Filters(tabId);
       fetchAndRenderContent(tabId);
+      UIState.save();
     };
 
     UI.l2Filter.appendChild(el);
@@ -3390,6 +3605,10 @@ function getContentUrl(content) {
 }
 
 function openSubscribeModal(content, opts = {}) {
+  const viewKey = STATE.search.pageOpen ? 'search' : STATE.activeTab === 'my' ? 'mysub' : 'explore';
+  saveScroll(viewKey);
+  UIState.save();
+
   STATE.currentModalContent = content;
   STATE.subscribeModalOpen = true;
   STATE.subscribeToggleInFlight = false;
@@ -3471,6 +3690,7 @@ function closeSubscribeModal() {
   const modalEl = document.getElementById('subscribeModal');
   if (modalEl) closeModal(modalEl);
   STATE.currentModalContent = null;
+  restoreScroll(STATE.search.pageOpen ? 'search' : STATE.activeTab === 'my' ? 'mysub' : 'explore');
 }
 
 window.toggleSubscriptionFromModal = async function () {
