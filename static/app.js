@@ -197,9 +197,7 @@ const STATE = {
   isLoading: false,
   contentRequestSeq: 0,
   currentModalContent: null,
-  subscribeModalOpen: false,
-  subscribeToggleInFlight: false,
-  subscribeModalState: { isLoading: false, loadFailed: false },
+  exploreSnapshot: null,
 
   auth: {
     isAuthenticated: false,
@@ -313,15 +311,11 @@ const UI = {
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
-  myPageCreatedAtRow: document.getElementById('myPageCreatedAtRow'),
-  myPageCreatedAtValue: document.getElementById('myPageCreatedAtValue'),
   myPagePwCurrent: document.getElementById('myPagePwCurrent'),
   myPagePwNew: document.getElementById('myPagePwNew'),
   myPagePwConfirm: document.getElementById('myPagePwConfirm'),
   myPagePwSubmit: document.getElementById('myPagePwSubmit'),
   myPagePwError: document.getElementById('myPagePwError'),
-  myPageGoMySubBtn: document.getElementById('myPageGoMySubBtn'),
-  myPageLogoutBtn: document.getElementById('myPageLogoutBtn'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -1112,21 +1106,6 @@ const normalizeMeta = (input) => {
    ========================= */
 
 const safeString = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
-
-function formatKstDateTime(dt) {
-  if (!dt) return '';
-  const asDate = new Date(dt);
-  if (Number.isNaN(asDate.getTime())) return '';
-
-  const kstDate = new Date(asDate.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
-  const year = kstDate.getFullYear();
-  const month = String(kstDate.getMonth() + 1).padStart(2, '0');
-  const day = String(kstDate.getDate()).padStart(2, '0');
-  const hour = String(kstDate.getHours()).padStart(2, '0');
-  const minute = String(kstDate.getMinutes()).padStart(2, '0');
-
-  return `${year}-${month}-${day} ${hour}:${minute}`;
-}
 const safeBool = (v, fallback = false) =>
   typeof v === 'boolean' ? v : fallback;
 const safeObj = (v) => (v && typeof v === 'object' ? v : {});
@@ -2261,20 +2240,8 @@ function setupSearchHandlers() {
    My page
    ========================= */
 
-function renderMyPageProfile(user = {}) {
+function renderMyPageEmail(user = {}) {
   if (UI.myPageEmailValue) UI.myPageEmailValue.textContent = safeString(user?.email, '-') || '-';
-
-  const createdRow = UI.myPageCreatedAtRow;
-  const createdValue = UI.myPageCreatedAtValue;
-  if (!createdRow || !createdValue) return;
-
-  const formatted = formatKstDateTime(user?.created_at);
-  if (formatted) {
-    createdValue.textContent = formatted;
-    createdRow.classList.remove('hidden');
-  } else {
-    createdRow.classList.add('hidden');
-  }
 }
 
 async function fetchMyPageUser() {
@@ -2291,7 +2258,7 @@ async function fetchMyPageUser() {
 
     STATE.auth.user = user;
     STATE.auth.isAuthenticated = Boolean(user || token);
-    renderMyPageProfile(user || {});
+    renderMyPageEmail(user || {});
     updateProfileButtonState();
   } catch (e) {
     if (e?.httpStatus === 401 || e?.httpStatus === 403) {
@@ -2325,7 +2292,7 @@ function resetMyPagePasswordForm() {
 function setMyPagePwSubmitting(isSubmitting) {
   if (!UI.myPagePwSubmit) return;
   UI.myPagePwSubmit.disabled = isSubmitting;
-  UI.myPagePwSubmit.textContent = isSubmitting ? '변경 중...' : '비밀번호 변경';
+  UI.myPagePwSubmit.textContent = isSubmitting ? '변경 중...' : '변경하기';
 }
 
 async function handleMyPageChangePassword() {
@@ -2412,7 +2379,7 @@ function openMyPage() {
 
   UI.myPage.classList.remove('hidden');
 
-  if (STATE.auth.user) renderMyPageProfile(STATE.auth.user);
+  if (STATE.auth.user) renderMyPageEmail(STATE.auth.user);
   fetchMyPageUser();
 }
 
@@ -2432,20 +2399,6 @@ function setupMyPageHandlers() {
     UI.profileMenuMyPage.onclick = () => {
       closeProfileMenu();
       openMyPage();
-    };
-  }
-
-  if (UI.myPageGoMySubBtn) {
-    UI.myPageGoMySubBtn.onclick = () => {
-      closeMyPage();
-      updateTab('my');
-    };
-  }
-
-  if (UI.myPageLogoutBtn) {
-    UI.myPageLogoutBtn.onclick = () => {
-      logout();
-      closeMyPage();
     };
   }
 }
@@ -2935,9 +2888,10 @@ function renderBottomNav() {
 }
 
 async function updateTab(tabId) {
-  STATE.activeTab = tabId;
-  if (tabId !== 'my') STATE.lastBrowseTab = tabId;
-  STATE.isMySubOpen = tabId === 'my';
+  const normalized = normalizeTabId(tabId) || DEFAULT_EXPLORE_FILTERS.tab;
+  const previous = STATE.activeTab;
+  STATE.activeTab = normalized;
+  if (normalized !== 'my') STATE.lastBrowseTab = normalized;
   if (STATE.search.pageOpen) closeSearchPage();
 
   if (previous !== normalized) clearExploreSnapshot();
