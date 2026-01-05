@@ -612,11 +612,15 @@ const UI = {
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
+  myPageCreatedAtRow: document.getElementById('myPageCreatedAtRow'),
+  myPageCreatedAtValue: document.getElementById('myPageCreatedAtValue'),
   myPagePwCurrent: document.getElementById('myPagePwCurrent'),
   myPagePwNew: document.getElementById('myPagePwNew'),
   myPagePwConfirm: document.getElementById('myPagePwConfirm'),
   myPagePwSubmit: document.getElementById('myPagePwSubmit'),
   myPagePwError: document.getElementById('myPagePwError'),
+  myPageGoMySubBtn: document.getElementById('myPageGoMySubBtn'),
+  myPageLogoutBtn: document.getElementById('myPageLogoutBtn'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -2576,8 +2580,54 @@ function setupSearchHandlers() {
    My page
    ========================= */
 
+function formatKstDateTime(dt) {
+  if (!dt) return '';
+  try {
+    const date = new Date(dt);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const parts = new Intl.DateTimeFormat('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+      .formatToParts(date)
+      .reduce((acc, part) => {
+        if (part.type !== 'literal') acc[part.type] = part.value;
+        return acc;
+      }, {});
+
+    const year = parts.year || '';
+    const month = parts.month || '';
+    const day = parts.day || '';
+    const hour = parts.hour || '';
+    const minute = parts.minute || '';
+    if (!year || !month || !day || !hour || !minute) return '';
+
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+  } catch (e) {
+    console.warn('Failed to format datetime', dt, e);
+    return '';
+  }
+}
+
 function renderMyPageEmail(user = {}) {
   if (UI.myPageEmailValue) UI.myPageEmailValue.textContent = safeString(user?.email, '-') || '-';
+
+  if (UI.myPageCreatedAtRow && UI.myPageCreatedAtValue) {
+    const formatted = formatKstDateTime(user?.created_at);
+    if (formatted) {
+      UI.myPageCreatedAtValue.textContent = formatted;
+      UI.myPageCreatedAtRow.classList.remove('hidden');
+    } else {
+      UI.myPageCreatedAtValue.textContent = '';
+      UI.myPageCreatedAtRow.classList.add('hidden');
+    }
+  }
 }
 
 async function fetchMyPageUser() {
@@ -2744,6 +2794,20 @@ function setupMyPageHandlers() {
     UI.profileMenuMyPage.onclick = () => {
       closeProfileMenu();
       openMyPage();
+    };
+  }
+
+  if (UI.myPageGoMySubBtn) {
+    UI.myPageGoMySubBtn.onclick = () => {
+      closeMyPage({ fromPopstate: true });
+      updateTab('my');
+    };
+  }
+
+  if (UI.myPageLogoutBtn) {
+    UI.myPageLogoutBtn.onclick = () => {
+      closeMyPage({ fromPopstate: true });
+      logout();
     };
   }
 }
