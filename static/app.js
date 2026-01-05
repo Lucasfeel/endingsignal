@@ -15,61 +15,6 @@ const DEBUG_API = false;
 const DEBUG_TOOLS = false;
 window.__NAV_ICON_DEBUG__ = window.__NAV_ICON_DEBUG__ || false;
 const EXPLORE_FILTERS_KEY = 'es_explore_filters_v1';
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
-
-// Canonical UI tokens
-const BTN_BASE =
-  'h-11 inline-flex items-center justify-center gap-2 px-4 rounded-xl text-sm font-semibold transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed';
-const BTN_PRIMARY = cx(
-  BTN_BASE,
-  'bg-white/15 text-white hover:bg-white/20 active:bg-white/25',
-);
-const BTN_SECONDARY = cx(
-  BTN_BASE,
-  'bg-white/8 text-white/90 hover:bg-white/12 active:bg-white/15',
-);
-const BTN_GHOST = cx(
-  BTN_BASE,
-  'bg-transparent text-white/80 hover:bg-white/10 active:bg-white/15',
-);
-const BTN_DANGER = cx(
-  BTN_BASE,
-  'border border-red-400/40 bg-red-500/15 text-red-100 hover:bg-red-500/20 active:bg-red-500/25',
-);
-const BTN_DISABLED = 'opacity-50 cursor-not-allowed';
-
-const INPUT_BASE =
-  'w-full h-11 rounded-xl bg-white/5 border border-white/10 px-4 text-white text-base placeholder:text-white/45 transition-colors focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-0 focus:border-white/20 disabled:opacity-60 disabled:cursor-not-allowed';
-const INPUT_FOCUS = 'focus:ring-2 focus:ring-white/20 focus:border-white/20';
-const INPUT_DISABLED = 'opacity-60 cursor-not-allowed';
-
-const CARD_BASE =
-  'rounded-2xl bg-[#1E1E1E] border border-white/10 shadow-[0_24px_48px_-32px_rgba(0,0,0,0.8)]';
-const CARD_HEADER = 'flex items-center justify-between gap-2';
-const CARD_BODY = 'space-y-2 text-sm text-white/80';
-const CARD_INTERACTIVE =
-  'transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25';
-const CARD_SUBTLE = 'bg-white/5 border-white/5';
-
-const CHIP_BASE =
-  'inline-flex items-center gap-2 h-9 px-3 rounded-full text-sm font-medium text-white/85 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-white/20';
-const CHIP_ACTIVE = 'bg-[#4F46E5] text-white hover:bg-[#5B55E9] active:bg-[#4F46E5]';
-const CHIP_INACTIVE = 'bg-white/8 text-white/80 hover:bg-white/12 active:bg-white/15';
-
-const TOAST_CONTAINER =
-  'fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[480px] pointer-events-none flex flex-col items-center';
-const TOAST_BASE =
-  'pointer-events-auto inline-flex max-w-[420px] w-full sm:w-auto items-center gap-2 px-4 py-2 rounded-xl border shadow-xl backdrop-blur-md text-sm font-semibold text-white transition-all duration-300 opacity-0 -translate-y-2';
-const TOAST_SUCCESS = 'bg-[#16a34a]/80 border-[#16a34a]/50';
-const TOAST_ERROR = 'bg-[#ef4444]/80 border-[#ef4444]/50';
-const TOAST_INFO = 'bg-black/75 border-white/15';
 
 // Canonical UI tokens
 const BTN_BASE =
@@ -300,7 +245,6 @@ const STATE = {
     activeIndex: -1,
     recentlyOpened: [],
   },
-  overlayStack: [],
   isMyPageOpen: false,
   contents: {},
   isLoading: false,
@@ -632,26 +576,8 @@ let contentGridObserver = null;
    ========================= */
 const modalStack = [];
 const modalMeta = new Map();
-const overlayMeta = new Map();
 let bodyOverflowBackup = '';
 let scrollLockCount = 0;
-
-const getOverlayStack = () => STATE.overlayStack;
-const getTopOverlay = () => getOverlayStack()[getOverlayStack().length - 1] || null;
-
-const pushOverlay = ({ type, el, onClose }) => {
-  if (!el) return;
-  const stack = getOverlayStack();
-  if (stack.some((entry) => entry.el === el)) return;
-  stack.push({ type, el, onClose });
-};
-
-const popOverlay = (el) => {
-  if (!el) return;
-  const stack = getOverlayStack();
-  const idx = stack.findIndex((entry) => entry.el === el);
-  if (idx >= 0) stack.splice(idx, 1);
-};
 
 const lockBodyScroll = () => {
   if (scrollLockCount === 0) {
@@ -671,50 +597,15 @@ const unlockBodyScroll = () => {
 const isAnyModalOpen = () => modalStack.length > 0;
 const getTopModal = () => modalStack[modalStack.length - 1] || null;
 
-const getFocusable = (container) => {
-  if (!container) return [];
-  return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => {
-    if (el.hasAttribute('data-nofocus')) return false;
+const getFocusableElements = (modalEl) => {
+  if (!modalEl) return [];
+  const selectors =
+    'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(modalEl.querySelectorAll(selectors)).filter((el) => {
     const isHidden = el.getAttribute('aria-hidden') === 'true';
     return !isHidden && el.offsetParent !== null && el.tabIndex >= 0;
   });
 };
-
-function trapFocus(container, event) {
-  if (event.key !== 'Tab') return;
-  const list = getFocusable(container);
-  if (!list.length) return;
-  const first = list[0];
-  const last = list[list.length - 1];
-
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
-const rememberOverlayFocus = (el, { returnFocusEl } = {}) => {
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  overlayMeta.set(el, { opener, returnFocusEl: returnFocusEl instanceof HTMLElement ? returnFocusEl : null });
-};
-
-const restoreOverlayFocus = (el, fallback) => {
-  const meta = overlayMeta.get(el) || {};
-  overlayMeta.delete(el);
-  const preferred = meta.returnFocusEl || meta.opener;
-  const focusTarget =
-    (preferred && document.contains(preferred) && typeof preferred.focus === 'function' && preferred) || fallback;
-  if (focusTarget && document.contains(focusTarget) && typeof focusTarget.focus === 'function') {
-    focusTarget.focus();
-    return true;
-  }
-  return false;
-};
-
-const getFocusableElements = (modalEl) => getFocusable(modalEl);
 
 const focusFirstElement = (modalEl, initialFocusEl) => {
   const focusables = getFocusableElements(modalEl);
@@ -766,14 +657,10 @@ function openModal(modalEl, { initialFocusEl, returnFocusEl } = {}) {
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const focusReturnEl = returnFocusEl instanceof HTMLElement ? returnFocusEl : null;
 
-  rememberOverlayFocus(modalEl, { returnFocusEl: focusReturnEl });
-
   lockBodyScroll();
 
   modalStack.push(modalEl);
   modalMeta.set(modalEl, { opener, returnFocusEl: focusReturnEl });
-
-  pushOverlay({ type: 'modal', el: modalEl, onClose: () => closeModal(modalEl) });
 
   modalEl.classList.remove('hidden');
   modalEl.setAttribute('aria-hidden', 'false');
@@ -786,7 +673,6 @@ function closeModal(modalEl) {
   if (idx === -1) return;
 
   modalStack.splice(idx, 1);
-  popOverlay(modalEl);
   const meta = modalMeta.get(modalEl) || {};
   modalMeta.delete(modalEl);
 
@@ -870,17 +756,34 @@ function syncAllRenderedStarBadges() {
 document.addEventListener(
   'keydown',
   (evt) => {
-    const topOverlay = getTopOverlay();
-    if (!topOverlay?.el) return;
+    if (!isAnyModalOpen()) return;
+    const topModal = getTopModal();
+    if (!topModal) return;
 
     if (evt.key === 'Escape') {
       evt.preventDefault();
-      if (typeof topOverlay.onClose === 'function') topOverlay.onClose();
+      closeModal(topModal);
       return;
     }
 
     if (evt.key === 'Tab') {
-      trapFocus(topOverlay.el, evt);
+      const focusables = getFocusableElements(topModal);
+      if (!focusables.length) {
+        evt.preventDefault();
+        topModal.focus();
+        return;
+      }
+
+      const current = document.activeElement;
+      const currentIndex = focusables.indexOf(current);
+      const lastIndex = focusables.length - 1;
+      let nextIndex = currentIndex;
+
+      if (evt.shiftKey) nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1;
+      else nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+
+      evt.preventDefault();
+      focusables[nextIndex].focus();
     }
   },
   true
@@ -989,9 +892,6 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
   }
 
   setClasses(container, UI_CLASSES.toastContainer);
-  container.setAttribute('role', 'status');
-  container.setAttribute('aria-live', 'polite');
-  container.setAttribute('aria-atomic', 'true');
 
   const prefix =
     type === 'success' ? '[성공] ' : type === 'error' ? '[오류] ' : '[알림] ';
@@ -1011,13 +911,6 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
       : UI_CLASSES.toastInfo;
   setClasses(toast, cx(UI_CLASSES.toastBase, toastTone));
   toast.textContent = `${prefix}${truncatedMessage}`;
-  if (type === 'error') {
-    toast.setAttribute('role', 'alert');
-    toast.setAttribute('aria-live', 'assertive');
-  } else {
-    toast.setAttribute('role', 'status');
-    toast.setAttribute('aria-live', 'polite');
-  }
 
   container.appendChild(toast);
 
@@ -2297,8 +2190,6 @@ function openSearchPage({ focus = true } = {}) {
   const wasOpen = STATE.search.pageOpen;
   if (!wasOpen) {
     STATE.search.pageOpen = true;
-    rememberOverlayFocus(UI.searchPage);
-    pushOverlay({ type: 'search', el: UI.searchPage, onClose: () => closeSearchPage() });
     lockBodyScroll();
     startSearchViewportSync();
   } else {
@@ -2331,9 +2222,6 @@ function closeSearchPage() {
   if (UI.searchPage) UI.searchPage.classList.add('hidden');
   stopSearchViewportSync();
   unlockBodyScroll();
-  popOverlay(UI.searchPage);
-  const fallbackFocus = UI.searchButton || UI.searchInput;
-  restoreOverlayFocus(UI.searchPage, fallbackFocus);
   restoreExploreScrollIfNeeded();
 }
 
@@ -2413,7 +2301,7 @@ function setupSearchHandlers() {
   }
 
   document.addEventListener('keydown', (evt) => {
-    if (getTopOverlay()) {
+    if (isAnyModalOpen()) {
       if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'k') evt.preventDefault();
       return;
     }
@@ -2575,8 +2463,6 @@ function openMyPage() {
   if (!wasOpen) {
     snapshotExploreState('open-my-page');
     STATE.isMyPageOpen = true;
-    rememberOverlayFocus(UI.myPage);
-    pushOverlay({ type: 'my-page', el: UI.myPage, onClose: () => closeMyPage() });
     lockBodyScroll();
   } else {
     STATE.isMyPageOpen = true;
@@ -2586,11 +2472,6 @@ function openMyPage() {
 
   if (STATE.auth.user) renderMyPageProfile(STATE.auth.user);
   fetchMyPageUser();
-
-  requestAnimationFrame(() => {
-    const initialFocus = document.getElementById('myPageTitle') || getFocusable(UI.myPage)[0];
-    if (initialFocus && typeof initialFocus.focus === 'function') initialFocus.focus();
-  });
 }
 
 function closeMyPage() {
@@ -2598,9 +2479,7 @@ function closeMyPage() {
   STATE.isMyPageOpen = false;
   if (UI.myPage) UI.myPage.classList.add('hidden');
   unlockBodyScroll();
-  popOverlay(UI.myPage);
-  const fallbackFocus = UI.profileButton || document.getElementById('homeButton');
-  restoreOverlayFocus(UI.myPage, fallbackFocus);
+  if (UI.profileButton) UI.profileButton.focus();
   restoreExploreScrollIfNeeded();
 }
 
