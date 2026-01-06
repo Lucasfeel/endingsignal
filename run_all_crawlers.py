@@ -43,8 +43,9 @@ async def run_one_crawler(crawler_class):
     """
     단일 크롤러 인스턴스를 생성하고 실행한 뒤, 그 결과를 DB에 보고합니다.
     """
-    report = {'status': '성공', 'fetched_count': 0}
+    report = {'status': 'ok', 'fetched_count': 0}
     crawler_start_time = time.time()
+    report_status = 'ok'
 
     db_conn = None
     crawler_display_name = getattr(crawler_class, "DISPLAY_NAME", crawler_class.__name__)
@@ -59,8 +60,14 @@ async def run_one_crawler(crawler_class):
                 'status': '스킵',
                 'skip_reason': 'missing_required_env_vars',
                 'missing_env_vars': missing_env_vars,
-                'note': 'Set KAKAOWEBTOON_WEBID / KAKAOWEBTOON_T_ANO in Render env to enable this crawler.'
+                'note': 'Set KAKAOWEBTOON_WEBID / KAKAOWEBTOON_T_ANO in Render env to enable this crawler.',
+                'summary': {
+                    'crawler': crawler_display_name,
+                    'reason': 'missing_env',
+                    'message': 'crawler skipped due to missing required env vars',
+                },
             })
+            report_status = 'skip'
         else:
             try:
                 crawler_instance = crawler_class()
@@ -77,16 +84,25 @@ async def run_one_crawler(crawler_class):
                     'newly_completed_items': newly_completed_items,
                     'cdc_info': cdc_info,
                     'fetched_count': cdc_info.get('health', {}).get('fetched_count', 0),
+                    'summary': cdc_info.get('summary'),
                 })
+                report_status = cdc_info.get('status', 'ok')
 
             except Exception as e:
                 crawler_display_name = crawler_display_name.replace('_', ' ').title()
                 print(f"FATAL: [{crawler_display_name}] 크롤러 실행 중 치명적 오류 발생: {e}", file=sys.stderr)
-                report['status'] = '실패'
+                report['status'] = 'fail'
+                report_status = 'fail'
                 report['error_message'] = traceback.format_exc()
+                report['summary'] = {
+                    'crawler': crawler_display_name,
+                    'reason': 'exception',
+                    'message': str(e),
+                }
 
     finally:
         report['duration'] = time.time() - crawler_start_time
+        report['status'] = report_status
         report['crawler_name'] = crawler_display_name
         if db_conn:
             db_conn.close()
@@ -100,7 +116,7 @@ async def run_one_crawler(crawler_class):
                 INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
                 VALUES (%s, %s, %s)
                 """,
-                (crawler_display_name, report['status'], json.dumps(report))
+                (crawler_display_name, report_status, json.dumps(report))
             )
             report_conn.commit()
             report_cursor.close()
@@ -110,6 +126,15 @@ async def run_one_crawler(crawler_class):
         finally:
             if report_conn:
                 report_conn.close()
+
+        if report_status in ('fail', 'warn'):
+            summary = report.get('summary') or {}
+            reason = summary.get('reason') if isinstance(summary, dict) else None
+            message = summary.get('message') if isinstance(summary, dict) else None
+            print(
+                f"ERROR: [{crawler_display_name}] run status={report_status} reason={reason} message={message}",
+                file=sys.stderr,
+            )
 
         return report
 
@@ -183,18 +208,28 @@ async def main():
 
     naver_unique = 0
     kakao_unique = 0
+    kakao_status = None
+    kakao_summary = None
     for result in results:
         if isinstance(result, dict):
             name_lower = str(result.get('crawler_name', '')).lower()
             fetched = result.get('fetched_count') or 0
+            status_label = str(result.get('status') or '').lower()
             if 'naver' in name_lower:
                 naver_unique = fetched
             elif 'kakao' in name_lower:
                 kakao_unique = fetched
+                kakao_status = status_label
+                kakao_summary = result.get('summary')
 
     actual_total_unique = naver_unique + kakao_unique
     target_total_unique = 20000
-    warning = "TOTAL_UNIQUE_BELOW_TARGET" if actual_total_unique < target_total_unique else None
+    warning_reasons = []
+    if actual_total_unique < target_total_unique:
+        warning_reasons.append("TOTAL_UNIQUE_BELOW_TARGET")
+    if kakao_status in ('fail', 'warn'):
+        warning_reasons.append("KAKAO_FETCH_FAILED")
+    warning = ",".join(warning_reasons) if warning_reasons else None
 
     rollup = {
         "naver_unique": naver_unique,
@@ -203,6 +238,17 @@ async def main():
         "target_total_unique": target_total_unique,
         "warning": warning,
     }
+
+    if kakao_status in ('fail', 'warn'):
+        summary_reason = None
+        summary_message = None
+        if isinstance(kakao_summary, dict):
+            summary_reason = kakao_summary.get('reason')
+            summary_message = kakao_summary.get('message')
+        print(
+            f"ERROR: [Kakaowebtoon] rollup status={kakao_status} reason={summary_reason} message={summary_message}",
+            file=sys.stderr,
+        )
 
     print(
         f"Rollup uniques -> Naver: {naver_unique}, Kakao: {kakao_unique}, "
