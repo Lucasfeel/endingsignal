@@ -6,6 +6,7 @@ from itertools import product
 from typing import Dict, List, Set, Tuple
 
 import aiohttp
+from yarl import URL
 
 import config
 from database import get_cursor
@@ -73,6 +74,23 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                 return
         except Exception:
             return
+
+    def _seed_cookies(self, session: aiohttp.ClientSession) -> None:
+        cookies = {}
+        env_map = {
+            "webid": os.getenv("KAKAOWEBTOON_WEBID"),
+            "_T_ANO": os.getenv("KAKAOWEBTOON_T_ANO"),
+        }
+        for name, value in env_map.items():
+            if value:
+                cookies[name] = value
+
+        if cookies:
+            session.cookie_jar.update_cookies(cookies, response_url=URL("https://page.kakao.com/"))
+
+    def _cookie_names(self, session: aiohttp.ClientSession) -> List[str]:
+        filtered = session.cookie_jar.filter_cookies(URL("https://page.kakao.com/"))
+        return list(filtered.keys())
 
     @staticmethod
     def _normalize_weekdays(day_tab_uid: str) -> List[str]:
@@ -154,28 +172,41 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         connector = aiohttp.TCPConnector(limit=self.concurrency, ttl_dns_cache=120)
         param = {**DEFAULT_PARAM}
         section_id = build_section_id(
-            param["categoryUid"],
-            param["subcategoryUid"],
-            param["bmType"],
-            param["dayTabUid"],
-            param["screenUid"],
+            str(param["categoryUid"]),
+            str(param["subcategoryUid"]),
+            str(param["bmType"]),
+            str(param["dayTabUid"]),
+            str(param["screenUid"]),
         )
 
         async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=HEADERS) as session:
+            self._seed_cookies(session)
             await self._bootstrap_cookies(session)
+            cookie_names = self._cookie_names(session)
             items, meta = await self._fetch_section(session, section_id, param, fetch_meta, "verify:page1")
 
         seen_ids: Set[str] = set()
-        self._ingest_items(items, param.get("dayTabUid", "2"), ongoing_today, seen_ids)
+        day_tab_uid = str(param.get("dayTabUid", "2"))
+
+        filtered_items = [item for item in items if not item.get("isLegacy")]
+        filtered_ids = [item.get("series_id") for item in filtered_items if item.get("series_id")]
+        expected_raw = len(items)
+        expected_filtered = len(filtered_ids)
+
+        self._ingest_items(filtered_items, day_tab_uid, ongoing_today, seen_ids)
 
         expected_total = meta.get("totalCount") if isinstance(meta, dict) else None
         fetch_meta.update(
             {
-                "expected_count": len(seen_ids),
-                "fetched_ids": list(seen_ids)[:20],
-                "fetched_count": len(seen_ids),
+                "section_id_used": section_id,
+                "expected_count": expected_filtered,
+                "expected_count_raw": expected_raw,
+                "expected_count_filtered": expected_filtered,
+                "fetched_ids": filtered_ids[:20],
+                "fetched_count": expected_filtered,
                 "health_db_count": expected_total if isinstance(expected_total, int) and expected_total > 0 else None,
                 "force_no_ratio": not isinstance(expected_total, int) or expected_total <= 0,
+                "cookie_names": cookie_names,
             }
         )
 
@@ -193,15 +224,16 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         connector = aiohttp.TCPConnector(limit=config.CRAWLER_HTTP_CONCURRENCY_LIMIT, ttl_dns_cache=300)
 
         async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=HEADERS) as session:
+            self._seed_cookies(session)
             await self._bootstrap_cookies(session)
 
             param = {**DEFAULT_PARAM}
             section_id = build_section_id(
-                param["categoryUid"],
-                param["subcategoryUid"],
-                param["bmType"],
-                param["dayTabUid"],
-                param["screenUid"],
+                str(param["categoryUid"]),
+                str(param["subcategoryUid"]),
+                str(param["bmType"]),
+                str(param["dayTabUid"]),
+                str(param["screenUid"]),
             )
             items, meta = await self._fetch_section(session, section_id, param, fetch_meta, "collect:init")
             self._ingest_items(items, param.get("dayTabUid", "2"), ongoing_today, seen_ids)
@@ -225,11 +257,11 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                         "page": page,
                     }
                     section_id = build_section_id(
-                        current_param["categoryUid"],
-                        current_param["subcategoryUid"],
-                        current_param["bmType"],
-                        current_param["dayTabUid"],
-                        current_param["screenUid"],
+                        str(current_param["categoryUid"]),
+                        str(current_param["subcategoryUid"]),
+                        str(current_param["bmType"]),
+                        str(current_param["dayTabUid"]),
+                        str(current_param["screenUid"]),
                     )
                     label = f"collect:{bm_type}:{subcategory_uid}:{day_tab_uid}:p{page}"
                     fetch_meta["sections"] += 1
