@@ -22,8 +22,11 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
     """KakaoPage 기반 웹툰 크롤러 (verify/bootstrap 모드).
 
     기본 실행 예시:
+        # 일회성 초기화 + 부트스트랩 (레거시 KakaoWebtoon ID 전량 삭제 후 재수집)
+        KAKAO_LEGACY_PURGE=YES KAKAOPAGE_MODE=bootstrap python run_all_crawlers.py
+
+        # 일상 검증(완결 전이 감지)
         KAKAOPAGE_MODE=verify python run_all_crawlers.py
-        KAKAOPAGE_MODE=bootstrap python run_all_crawlers.py
     """
 
     DISPLAY_NAME = "KakaoPage Webtoon"
@@ -39,6 +42,8 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             config.KAKAOPAGE_VERIFY_JITTER_MIN_SECONDS,
             config.KAKAOPAGE_VERIFY_JITTER_MAX_SECONDS,
         )
+        self.purge_requested = os.getenv("KAKAO_LEGACY_PURGE", "").upper() == "YES"
+        self._purge_executed = False
 
     def _load_verify_target_ids(self) -> List[str]:
         """DB에서 verify 대상 content_id 목록을 조회합니다."""
@@ -152,13 +157,13 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
 
         all_content_today: Dict[str, Dict] = {}
         for cid, status in results:
-            if not cid:
+            if not cid or not status:
                 continue
             if status == "완결":
                 finished_today[cid] = {}
             elif status == "휴재":
                 hiatus_today[cid] = {}
-            elif status:
+            else:
                 ongoing_today[cid] = {}
             all_content_today[cid] = {}
 
@@ -234,15 +239,32 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                     cid = str(item.get("seriesId") or "").strip()
                     if not cid:
                         continue
+
                     status = self._extract_status_from_graphql(item)
                     title = (item.get("title") or "").strip() or None
                     if not title:
                         continue
+
                     author = (item.get("authorName") or "").strip() or None
+                    thumbnail = (
+                        item.get("thumbnailUrl")
+                        or item.get("thumbnail")
+                        or item.get("thumbnailImage")
+                        or None
+                    )
+                    if isinstance(thumbnail, dict):
+                        thumbnail = (
+                            thumbnail.get("url")
+                            or thumbnail.get("imageUrl")
+                            or thumbnail.get("link")
+                        )
+                    weekdays = item.get("weekdays") or ["daily"]
                     entry = {
                         "title": title,
                         "author": author,
                         "content_url": f"https://page.kakao.com/content/{cid}",
+                        "thumbnail_url": thumbnail,
+                        "weekdays": weekdays,
                     }
                     if status == "완결":
                         finished_today[cid] = entry
@@ -281,6 +303,12 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         cursor = get_cursor(conn)
         mode = "bootstrap" if self.mode == "bootstrap" else "verify"
 
+        if mode == "bootstrap" and self.purge_requested and not self._purge_executed:
+            cursor.execute("DELETE FROM subscriptions WHERE source=%s", (self.source_name,))
+            cursor.execute("DELETE FROM contents WHERE source=%s", (self.source_name,))
+            conn.commit()
+            self._purge_executed = True
+
         if not all_content_today:
             cursor.close()
             return 0
@@ -311,11 +339,14 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             normalized_authors = normalize_search_text(author) if author else None
             meta_data = None
             if isinstance(data, dict) and data:
+                weekdays = data.get("weekdays") or ["daily"]
                 meta_data = {
                     "common": {
                         "authors": [author] if author else [],
                         "content_url": data.get("content_url"),
-                    }
+                        "thumbnail_url": data.get("thumbnail_url"),
+                    },
+                    "attributes": {"weekdays": weekdays},
                 }
 
             if content_id in existing_ids:
