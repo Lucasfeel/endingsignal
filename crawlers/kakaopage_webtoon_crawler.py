@@ -1,31 +1,52 @@
 import asyncio
-import aiohttp
 import json
 import os
 import random
-from typing import Dict, List, Tuple
+from itertools import product
+from typing import Dict, List, Set, Tuple
+
+import aiohttp
 
 import config
-from .base_crawler import ContentCrawler
-from database import create_standalone_connection, get_cursor
+from database import get_cursor
+from services.kakaopage_graphql import (
+    build_section_id,
+    fetch_static_landing_section,
+    parse_section_payload,
+)
 from utils.text import normalize_search_text
+from .base_crawler import ContentCrawler
+
 
 HEADERS = {
     **config.CRAWLER_HEADERS,
-    "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+    "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
     "Referer": "https://page.kakao.com/",
     "Origin": "https://page.kakao.com",
 }
 
+DEFAULT_PARAM = {
+    "categoryUid": config.KAKAOPAGE_CATEGORY_UID,
+    "bmType": "A",
+    "subcategoryUid": "0",
+    "dayTabUid": "2",
+    "screenUid": config.KAKAOPAGE_DAYOFWEEK_SCREEN_UID,
+    "page": 1,
+}
+
 
 class KakaoPageWebtoonCrawler(ContentCrawler):
-    """KakaoPage 기반 웹툰 크롤러 (verify/bootstrap 모드).
+    """KakaoPage 기반 웹툰 크롤러.
 
-    기본 실행 예시:
-        # 일회성 초기화 + 부트스트랩 (레거시 KakaoWebtoon ID 전량 삭제 후 재수집)
-        KAKAO_LEGACY_PURGE=YES KAKAOPAGE_MODE=bootstrap python run_all_crawlers.py
+    Kakao 웹소스는 KakaoPage GraphQL(staticLandingDayOfWeekSection)에 기반하여 수집/검증합니다.
+    GraphQL endpoint: https://bff-page.kakao.com/graphql (operation: StaticLandingDayOfWeekSection).
+    Legacy KakaoWebtoon ID 검증(/content/{legacy_id}) 경로는 404를 유발하므로 제거되었습니다.
 
-        # 일상 검증(완결 전이 감지)
+    실행 예시:
+        # 일회성 초기화 + 부트스트랩(필요시 purge)
+        KAKAO_LEGACY_PURGE=YES KAKAOPAGE_MODE=collect python run_all_crawlers.py
+
+        # 파이프라인 헬스 체크(기본 페이지 1개 수집)
         KAKAOPAGE_MODE=verify python run_all_crawlers.py
     """
 
@@ -35,7 +56,8 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
     def __init__(self):
         super().__init__("kakaowebtoon")
         self.mode = os.getenv("KAKAOPAGE_MODE", config.KAKAOPAGE_MODE_DEFAULT).lower()
-        self.verify_only_subscribed = config.KAKAOPAGE_VERIFY_ONLY_SUBSCRIBED
+        if self.mode == "bootstrap":
+            self.mode = "collect"
         self.concurrency = config.KAKAOPAGE_VERIFY_CONCURRENCY
         self.timeout_seconds = config.KAKAOPAGE_VERIFY_TIMEOUT_SECONDS
         self.jitter_range = (
@@ -45,252 +67,207 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         self.purge_requested = os.getenv("KAKAO_LEGACY_PURGE", "").upper() == "YES"
         self._purge_executed = False
 
-    def _load_verify_target_ids(self) -> List[str]:
-        """DB에서 verify 대상 content_id 목록을 조회합니다."""
-        conn = create_standalone_connection()
-        cursor = None
+    async def _bootstrap_cookies(self, session: aiohttp.ClientSession):
         try:
-            cursor = get_cursor(conn)
-            preferred_sql = """
-                SELECT DISTINCT c.content_id
-                FROM contents c
-                JOIN subscriptions s ON (s.content_id = c.content_id AND s.source = c.source)
-                WHERE c.source = %s AND c.status != '완결'
-            """
-            fallback_sql = """
-                SELECT content_id
-                FROM contents
-                WHERE source = %s AND status != '완결'
-            """
-
-            target_ids: List[str] = []
-            if self.verify_only_subscribed:
-                cursor.execute(preferred_sql, (self.source_name,))
-                target_ids = [str(row["content_id"]) for row in cursor.fetchall()]
-
-            if not target_ids:
-                cursor.execute(fallback_sql, (self.source_name,))
-                target_ids = [str(row["content_id"]) for row in cursor.fetchall()]
-
-            return target_ids
-        finally:
-            if cursor:
-                try:
-                    cursor.close()
-                except Exception:
-                    pass
-            conn.close()
+            async with session.get(config.KAKAOPAGE_GRAPHQL_BOOTSTRAP_URL, headers=HEADERS):
+                return
+        except Exception:
+            return
 
     @staticmethod
-    def _parse_status_from_text(text: str) -> str:
-        if "완결" in text:
-            return "완결"
-        if "휴재" in text or "시즌완결" in text:
-            return "휴재"
-        return "연재중"
+    def _normalize_weekdays(day_tab_uid: str) -> List[str]:
+        mapping = {
+            "1": "mon",
+            "2": "tue",
+            "3": "wed",
+            "4": "thu",
+            "5": "fri",
+            "6": "sat",
+            "7": "sun",
+            "11": "daily",
+            "12": "daily",
+        }
+        normalized = mapping.get(str(day_tab_uid), "daily")
+        return [normalized]
 
-    async def _fetch_content_status(self, session: aiohttp.ClientSession, content_id: str, fetch_meta: Dict) -> Tuple[str, str]:
-        url = f"https://page.kakao.com/content/{content_id}?tab_type=about"
-        attempts = 3
-        for attempt in range(attempts):
-            try:
-                await asyncio.sleep(random.uniform(*self.jitter_range))
-                async with session.get(url, headers=HEADERS) as resp:
-                    if resp.status in {429} or 500 <= resp.status < 600:
-                        raise aiohttp.ClientResponseError(
-                            resp.request_info,
-                            resp.history,
-                            status=resp.status,
-                            message="retryable",
-                            headers=resp.headers,
-                        )
-
-                    if resp.status in {401, 403}:
-                        fetch_meta.setdefault("errors", []).append(
-                            f"fetch:{content_id}:http{resp.status}"
-                        )
-                        return content_id, ""
-
-                    if resp.status != 200:
-                        fetch_meta.setdefault("errors", []).append(
-                            f"fetch:{content_id}:http{resp.status}"
-                        )
-                        return content_id, ""
-
-                    text = await resp.text()
-                    status = self._parse_status_from_text(text)
-                    return content_id, status
-            except Exception as exc:  # noqa: PERF203
-                if attempt == attempts - 1:
-                    fetch_meta.setdefault("errors", []).append(f"fetch:{content_id}:{exc}")
-                    return content_id, ""
-                await asyncio.sleep(2 ** attempt)
-        return content_id, ""
-
-    async def _fetch_verify_mode(self):
-        target_ids = self._load_verify_target_ids()
-        fetch_meta = {
-            "mode": "verify",
-            "expected_count": len(target_ids),
-            "errors": [],
+    def _to_entry(self, series_id: str, title: str, thumbnail: str, day_tab_uid: str) -> Dict:
+        return {
+            "title": title,
+            "content_url": f"https://page.kakao.com/content/{series_id}",
+            "thumbnail_url": thumbnail,
+            "weekdays": self._normalize_weekdays(day_tab_uid),
+            "day_tab_uid": day_tab_uid,
         }
 
-        ongoing_today: Dict[str, Dict] = {}
-        hiatus_today: Dict[str, Dict] = {}
-        finished_today: Dict[str, Dict] = {}
-
-        if not target_ids:
-            return ongoing_today, hiatus_today, finished_today, {}, fetch_meta
-
-        timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
-        connector = aiohttp.TCPConnector(limit=self.concurrency, ttl_dns_cache=120)
-        semaphore = asyncio.Semaphore(self.concurrency)
-
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            async def worker(cid: str):
-                async with semaphore:
-                    return await self._fetch_content_status(session, cid, fetch_meta)
-
-            results = await asyncio.gather(
-                *(worker(cid) for cid in target_ids), return_exceptions=False
+    def _ingest_items(
+        self,
+        items: List[Dict],
+        day_tab_uid: str,
+        accumulator: Dict[str, Dict],
+        seen_ids: Set[str],
+    ) -> None:
+        for item in items:
+            if item.get("isLegacy"):
+                continue
+            series_id = str(item.get("series_id") or "").strip()
+            if not series_id or series_id in seen_ids:
+                continue
+            title = (item.get("title") or "").strip()
+            if not title:
+                continue
+            seen_ids.add(series_id)
+            accumulator[series_id] = self._to_entry(
+                series_id,
+                title,
+                item.get("thumbnail"),
+                day_tab_uid,
             )
 
-        all_content_today: Dict[str, Dict] = {}
-        for cid, status in results:
-            if not cid or not status:
-                continue
-            if status == "완결":
-                finished_today[cid] = {}
-            elif status == "휴재":
-                hiatus_today[cid] = {}
-            else:
-                ongoing_today[cid] = {}
-            all_content_today[cid] = {}
+    async def _fetch_section(
+        self,
+        session: aiohttp.ClientSession,
+        section_id: str,
+        param: Dict,
+        fetch_meta: Dict,
+        label: str,
+    ) -> Tuple[List[Dict], Dict]:
+        try:
+            data = await fetch_static_landing_section(session, section_id, param)
+            payload = data.get("staticLandingDayOfWeekSection") or {}
+            items, meta = parse_section_payload(payload)
+            fetch_meta.setdefault("pages", 0)
+            fetch_meta["pages"] += 1
+            return items, meta
+        except Exception as exc:  # noqa: PERF203
+            fetch_meta.setdefault("errors", []).append(
+                {"where": label, "message": str(exc)}
+            )
+            return [], {}
 
-        fetch_meta["fetched_ids"] = len(all_content_today)
-        return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
-
-    @staticmethod
-    def _extract_status_from_graphql(item: Dict) -> str:
-        status_raw = str(
-            item.get("state")
-            or item.get("status")
-            or item.get("restStatus")
-            or item.get("defaultSortStatus")
-            or ""
-        )
-        return KakaoPageWebtoonCrawler._parse_status_from_text(status_raw)
-
-    async def _fetch_bootstrap_mode(self):
-        fetch_meta = {"mode": "bootstrap", "errors": [], "pages": 0}
+    async def _run_verify_mode(self):
+        fetch_meta: Dict = {"mode": "verify", "errors": []}
         ongoing_today: Dict[str, Dict] = {}
         hiatus_today: Dict[str, Dict] = {}
         finished_today: Dict[str, Dict] = {}
 
-        query = """
-            query SearchKeyword($input: SearchKeywordInput!) {
-                searchKeyword(input: $input) {
-                    list {
-                        seriesId
-                        title
-                        status
-                        restStatus
-                        authorName
-                    }
-                    pageInfo {
-                        isEnd
-                        nextToken
-                    }
-                }
-            }
-        """
-
-        variables = {
-            "input": {
-                "keyword": ".",
-                "categoryUid": "10",
-                "page": 1,
-            }
-        }
-
         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
         connector = aiohttp.TCPConnector(limit=self.concurrency, ttl_dns_cache=120)
+        param = {**DEFAULT_PARAM}
+        section_id = build_section_id(
+            param["categoryUid"],
+            param["subcategoryUid"],
+            param["bmType"],
+            param["dayTabUid"],
+            param["screenUid"],
+        )
 
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            while True:
-                try:
-                    async with session.post(
-                        config.KAKAOPAGE_GRAPHQL_URL,
-                        json={"operationName": "SearchKeyword", "query": query, "variables": variables},
-                        headers={**HEADERS, "Content-Type": "application/json"},
-                    ) as resp:
-                        text = await resp.text()
-                        data = json.loads(text).get("data", {}) if text else {}
-                except Exception as exc:  # noqa: PERF203
-                    fetch_meta.setdefault("errors", []).append(f"graphql:{exc}")
-                    break
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=HEADERS) as session:
+            await self._bootstrap_cookies(session)
+            items, meta = await self._fetch_section(session, section_id, param, fetch_meta, "verify:page1")
 
-                fetch_meta["pages"] += 1
-                payload = data.get("searchKeyword") or {}
-                items = payload.get("list") or []
-                page_info = payload.get("pageInfo") or {}
+        seen_ids: Set[str] = set()
+        self._ingest_items(items, param.get("dayTabUid", "2"), ongoing_today, seen_ids)
 
-                for item in items:
-                    cid = str(item.get("seriesId") or "").strip()
-                    if not cid:
-                        continue
+        expected_total = meta.get("totalCount") if isinstance(meta, dict) else None
+        fetch_meta.update(
+            {
+                "expected_count": len(seen_ids),
+                "fetched_ids": list(seen_ids)[:20],
+                "fetched_count": len(seen_ids),
+                "health_db_count": expected_total if isinstance(expected_total, int) and expected_total > 0 else None,
+                "force_no_ratio": not isinstance(expected_total, int) or expected_total <= 0,
+            }
+        )
 
-                    status = self._extract_status_from_graphql(item)
-                    title = (item.get("title") or "").strip() or None
-                    if not title:
-                        continue
+        all_content_today = {**ongoing_today}
+        return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
 
-                    author = (item.get("authorName") or "").strip() or None
-                    thumbnail = (
-                        item.get("thumbnailUrl")
-                        or item.get("thumbnail")
-                        or item.get("thumbnailImage")
-                        or None
-                    )
-                    if isinstance(thumbnail, dict):
-                        thumbnail = (
-                            thumbnail.get("url")
-                            or thumbnail.get("imageUrl")
-                            or thumbnail.get("link")
-                        )
-                    weekdays = item.get("weekdays") or ["daily"]
-                    entry = {
-                        "title": title,
-                        "author": author,
-                        "content_url": f"https://page.kakao.com/content/{cid}",
-                        "thumbnail_url": thumbnail,
-                        "weekdays": weekdays,
+    async def _collect_sections(self):
+        fetch_meta: Dict = {"mode": "collect", "errors": [], "pages": 0, "sections": 0}
+        ongoing_today: Dict[str, Dict] = {}
+        hiatus_today: Dict[str, Dict] = {}
+        finished_today: Dict[str, Dict] = {}
+        seen_ids: Set[str] = set()
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+        connector = aiohttp.TCPConnector(limit=config.CRAWLER_HTTP_CONCURRENCY_LIMIT, ttl_dns_cache=300)
+
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=HEADERS) as session:
+            await self._bootstrap_cookies(session)
+
+            param = {**DEFAULT_PARAM}
+            section_id = build_section_id(
+                param["categoryUid"],
+                param["subcategoryUid"],
+                param["bmType"],
+                param["dayTabUid"],
+                param["screenUid"],
+            )
+            items, meta = await self._fetch_section(session, section_id, param, fetch_meta, "collect:init")
+            self._ingest_items(items, param.get("dayTabUid", "2"), ongoing_today, seen_ids)
+
+            bm_list = meta.get("businessModelList") or [param["bmType"]]
+            subcategory_list = meta.get("subcategoryList") or [param["subcategoryUid"]]
+            day_tab_list = meta.get("dayTabList") or [param["dayTabUid"]]
+
+            expected_total = 0
+            counted_sections: Set[Tuple[str, str, str]] = set()
+
+            for bm_type, subcategory_uid, day_tab_uid in product(bm_list, subcategory_list, day_tab_list):
+                page = 1
+                while True:
+                    current_param = {
+                        "categoryUid": param["categoryUid"],
+                        "bmType": bm_type,
+                        "subcategoryUid": subcategory_uid,
+                        "dayTabUid": day_tab_uid,
+                        "screenUid": param["screenUid"],
+                        "page": page,
                     }
-                    if status == "완결":
-                        finished_today[cid] = entry
-                    elif status == "휴재":
-                        hiatus_today[cid] = entry
-                    else:
-                        ongoing_today[cid] = entry
+                    section_id = build_section_id(
+                        current_param["categoryUid"],
+                        current_param["subcategoryUid"],
+                        current_param["bmType"],
+                        current_param["dayTabUid"],
+                        current_param["screenUid"],
+                    )
+                    label = f"collect:{bm_type}:{subcategory_uid}:{day_tab_uid}:p{page}"
+                    fetch_meta["sections"] += 1
+                    items, meta = await self._fetch_section(session, section_id, current_param, fetch_meta, label)
 
-                is_end = page_info.get("isEnd", False)
-                next_token = page_info.get("nextToken")
-                if is_end or not items or not next_token:
-                    break
+                    if meta:
+                        section_key = (bm_type, subcategory_uid, day_tab_uid)
+                        if section_key not in counted_sections:
+                            total_count = meta.get("totalCount")
+                            if isinstance(total_count, int) and total_count > 0:
+                                expected_total += total_count
+                            counted_sections.add(section_key)
 
-                variables["input"]["page"] = next_token
+                    self._ingest_items(items, day_tab_uid, ongoing_today, seen_ids)
 
-        all_content_today = {
-            **ongoing_today,
-            **hiatus_today,
-            **finished_today,
-        }
+                    is_end = meta.get("isEnd") if isinstance(meta, dict) else True
+                    if is_end or not items:
+                        break
+                    page += 1
+                    await asyncio.sleep(random.uniform(*self.jitter_range))
+
+        fetch_meta.update(
+            {
+                "expected_count": len(seen_ids),
+                "fetched_count": len(seen_ids),
+                "fetched_ids": list(seen_ids)[:20],
+                "health_db_count": expected_total if expected_total > 0 else None,
+                "force_no_ratio": expected_total <= 0,
+            }
+        )
+
+        all_content_today = {**ongoing_today}
         return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
 
     async def fetch_all_data(self):
-        if self.mode == "bootstrap":
-            return await self._fetch_bootstrap_mode()
-        return await self._fetch_verify_mode()
+        if self.mode == "collect":
+            return await self._collect_sections()
+        return await self._run_verify_mode()
 
     def synchronize_database(
         self,
@@ -301,9 +278,9 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         finished_today: Dict,
     ):
         cursor = get_cursor(conn)
-        mode = "bootstrap" if self.mode == "bootstrap" else "verify"
+        mode = "collect" if self.mode == "collect" else "verify"
 
-        if mode == "bootstrap" and self.purge_requested and not self._purge_executed:
+        if mode == "collect" and self.purge_requested and not self._purge_executed:
             cursor.execute("DELETE FROM subscriptions WHERE source=%s", (self.source_name,))
             cursor.execute("DELETE FROM contents WHERE source=%s", (self.source_name,))
             conn.commit()
@@ -313,14 +290,7 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             cursor.close()
             return 0
 
-        status_map = {}
-        for content_id in all_content_today.keys():
-            if content_id in finished_today:
-                status_map[content_id] = "완결"
-            elif content_id in hiatus_today:
-                status_map[content_id] = "휴재"
-            elif content_id in ongoing_today:
-                status_map[content_id] = "연재중"
+        status_map = {cid: "연재중" for cid in all_content_today.keys()}
 
         cursor.execute(
             "SELECT content_id FROM contents WHERE source = %s AND content_id = ANY(%s)",
@@ -346,12 +316,12 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                         "content_url": data.get("content_url"),
                         "thumbnail_url": data.get("thumbnail_url"),
                     },
-                    "attributes": {"weekdays": weekdays},
+                    "attributes": {"weekdays": weekdays, "day_tab_uid": data.get("day_tab_uid")},
                 }
 
             if content_id in existing_ids:
                 updates.append((status, content_id))
-            elif mode == "bootstrap":
+            elif mode == "collect":
                 inserts.append(
                     (
                         content_id,

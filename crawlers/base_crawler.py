@@ -146,13 +146,22 @@ class ContentCrawler(ABC):
             db_count = len(db_status_map)
             fetched_count = len(all_content_today)
 
+            if isinstance(fetch_meta, dict):
+                fetched_count_override = fetch_meta.get("fetched_count")
+                if isinstance(fetched_count_override, int) and fetched_count_override >= 0:
+                    fetched_count = fetched_count_override
+
             health_db_count = db_count
             if isinstance(fetch_meta, dict):
                 expected_count = fetch_meta.get("expected_count")
-                if isinstance(expected_count, int) and expected_count > 0:
+                health_db_override = fetch_meta.get("health_db_count")
+                if isinstance(health_db_override, int) and health_db_override > 0:
+                    health_db_count = health_db_override
+                elif isinstance(expected_count, int) and expected_count > 0:
                     health_db_count = expected_count
 
-            ratio = fetched_count / max(health_db_count, 1)
+            no_ratio = bool(fetch_meta.get("force_no_ratio")) if isinstance(fetch_meta, dict) else False
+            ratio = None if no_ratio or health_db_count is None else fetched_count / max(health_db_count, 1)
             health_info = {
                 "db_count": db_count,
                 "fetched_count": fetched_count,
@@ -168,7 +177,7 @@ class ContentCrawler(ABC):
             if fetch_errors:
                 is_degraded_fetch = True
                 skip_reason = "fetch_errors"
-            if ratio < config.CRAWLER_FETCH_HEALTH_MIN_RATIO:
+            if ratio is not None and ratio < config.CRAWLER_FETCH_HEALTH_MIN_RATIO:
                 is_degraded_fetch = True
                 skip_reason = skip_reason or "fetch_ratio_below_threshold"
 
