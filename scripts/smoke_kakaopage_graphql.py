@@ -7,20 +7,25 @@ No auth or secrets required; this only performs a public landing request.
 """
 
 import asyncio
+import os
 import pprint
+import sys
 
 import aiohttp
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import config
 from services.kakaopage_graphql import (
     build_section_id,
+    normalize_kakaopage_param,
     fetch_static_landing_section,
     parse_section_payload,
 )
 
 DEFAULT_PARAM = {
     "categoryUid": config.KAKAOPAGE_CATEGORY_UID,
-    "bmType": "A",
+    "bnType": "A",
     "subcategoryUid": "0",
     "dayTabUid": "2",
     "screenUid": config.KAKAOPAGE_DAYOFWEEK_SCREEN_UID,
@@ -33,14 +38,15 @@ HEADERS = {**config.CRAWLER_HEADERS, "Accept": "application/json"}
 async def main():
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
+        param = normalize_kakaopage_param(DEFAULT_PARAM)
         section_id = build_section_id(
-            DEFAULT_PARAM["categoryUid"],
-            DEFAULT_PARAM["subcategoryUid"],
-            DEFAULT_PARAM["bmType"],
-            DEFAULT_PARAM["dayTabUid"],
-            DEFAULT_PARAM["screenUid"],
+            param["categoryUid"],
+            param["subcategoryUid"],
+            param["bnType"],
+            param["dayTabUid"],
+            param["screenUid"],
         )
-        data = await fetch_static_landing_section(session, section_id, DEFAULT_PARAM)
+        data = await fetch_static_landing_section(session, section_id, param)
         payload = data.get("staticLandingDayOfWeekSection") or {}
         items, meta = parse_section_payload(payload)
         series_ids = [item["series_id"] for item in items if not item.get("isLegacy")]
