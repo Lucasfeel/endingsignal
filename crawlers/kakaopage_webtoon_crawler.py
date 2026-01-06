@@ -168,7 +168,13 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             "query": STATIC_LANDING_QUERY,
             "variables": {"sectionId": section_id, "param": normalized_param},
         }
-        headers = {**HEADERS, "Content-Type": "application/json"}
+        headers = {
+            **HEADERS,
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+            "Origin": "https://page.kakao.com",
+            "Referer": "https://page.kakao.com/",
+        }
         request_sample: Dict[str, Any] = {
             "endpoint": config.KAKAOPAGE_GRAPHQL_URL,
             "operation": "staticLandingDayOfWeekSection",
@@ -192,7 +198,7 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             ) as resp:
                 request_sample["http_status"] = resp.status
                 text = await resp.text()
-                request_sample["response_snippet"] = text[:600]
+                request_sample["response_snippet"] = text[:300]
                 response_errors = None
                 try:
                     data = json.loads(text)
@@ -234,7 +240,12 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                         },
                     )
                     print(
-                        f"ERROR: [Kakaowebtoon] fetch failed: {error_code} http={resp.status} op=staticLandingDayOfWeekSection msg={message}",
+                        (
+                            "ERROR: [Kakaowebtoon] fetch failed: "
+                            f"{error_code} http={resp.status} op=staticLandingDayOfWeekSection "
+                            f"dayTabUid={normalized_param.get('dayTabUid')} page={normalized_param.get('page')} "
+                            f"msg={message}"
+                        ),
                         file=sys.stderr,
                     )
                     return None
@@ -264,7 +275,11 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                 {"label": label, "operation": "staticLandingDayOfWeekSection"},
             )
             print(
-                f"ERROR: [Kakaowebtoon] fetch failed: HTTP_ERROR http={request_sample.get('http_status')} op=staticLandingDayOfWeekSection msg={message}",
+                (
+                    "ERROR: [Kakaowebtoon] fetch failed: "
+                    f"HTTP_ERROR http={request_sample.get('http_status')} op=staticLandingDayOfWeekSection "
+                    f"dayTabUid={normalized_param.get('dayTabUid')} page={normalized_param.get('page')} msg={message}"
+                ),
                 file=sys.stderr,
             )
             return None
