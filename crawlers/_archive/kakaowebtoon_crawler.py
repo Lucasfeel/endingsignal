@@ -1,3 +1,5 @@
+# DEPRECATED / ARCHIVED: do not import or execute. Kept only for reference.
+
 import asyncio
 import aiohttp
 import json
