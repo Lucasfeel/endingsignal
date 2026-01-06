@@ -91,6 +91,27 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             try:
                 await asyncio.sleep(random.uniform(*self.jitter_range))
                 async with session.get(url, headers=HEADERS) as resp:
+                    if resp.status in {429} or 500 <= resp.status < 600:
+                        raise aiohttp.ClientResponseError(
+                            resp.request_info,
+                            resp.history,
+                            status=resp.status,
+                            message="retryable",
+                            headers=resp.headers,
+                        )
+
+                    if resp.status in {401, 403}:
+                        fetch_meta.setdefault("errors", []).append(
+                            f"fetch:{content_id}:http{resp.status}"
+                        )
+                        return content_id, ""
+
+                    if resp.status != 200:
+                        fetch_meta.setdefault("errors", []).append(
+                            f"fetch:{content_id}:http{resp.status}"
+                        )
+                        return content_id, ""
+
                     text = await resp.text()
                     status = self._parse_status_from_text(text)
                     return content_id, status
@@ -215,6 +236,8 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                         continue
                     status = self._extract_status_from_graphql(item)
                     title = (item.get("title") or "").strip() or None
+                    if not title:
+                        continue
                     author = (item.get("authorName") or "").strip() or None
                     entry = {
                         "title": title,
@@ -313,7 +336,7 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
 
         if updates:
             cursor.executemany(
-                "UPDATE contents SET status=%s, updated_at=NOW() WHERE source=%s AND content_id=%s",
+                "UPDATE contents SET status=%s WHERE source=%s AND content_id=%s",
                 [(status, self.source_name, cid) for status, cid in updates],
             )
 
