@@ -4,12 +4,6 @@ from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
-import json
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
-
-import aiohttp
-
 import config
 
 
@@ -50,12 +44,48 @@ query staticLandingDayOfWeekSection($sectionId: ID!, $param: StaticLandingDayOfW
 """
 
 
+def normalize_kakaopage_param(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _to_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return int(default)
+
+    def _to_str(value: Any, default: str) -> str:
+        if value is None:
+            return str(default)
+        return str(value)
+
+    return {
+        "categoryUid": _to_int(raw.get("categoryUid", 0), 0),
+        "subcategoryUid": _to_str(raw.get("subcategoryUid", "0"), "0"),
+        "bnType": _to_str(raw.get("bnType", ""), ""),
+        "dayTabUid": _to_str(raw.get("dayTabUid", ""), ""),
+        "screenUid": _to_int(raw.get("screenUid", 0), 0),
+        "page": _to_int(raw.get("page", 1), 1),
+    }
+
+
 def build_section_id(
-    category_uid: str, subcategory_uid: str, bm_type: str, day_tab_uid: str, screen_uid: str
+    category_uid: Any,
+    subcategory_uid: Any,
+    bn_type: Any,
+    day_tab_uid: Any,
+    screen_uid: Any,
 ) -> str:
-    return (
-        "static-landing-DayOfWeek-section-Layout-"
-        f"{category_uid}-{subcategory_uid}-{bm_type}-{day_tab_uid}-{screen_uid}"
+    return "-".join(
+        [
+            "static",
+            "landing",
+            "DayOfWeek",
+            "section",
+            "layout",
+            str(category_uid),
+            str(subcategory_uid),
+            str(bn_type),
+            str(day_tab_uid),
+            str(screen_uid),
+        ]
     )
 
 
@@ -141,10 +171,11 @@ async def fetch_static_landing_section(
     section_id: str,
     param: Dict[str, Any],
 ) -> Dict[str, Any]:
+    normalized_param = normalize_kakaopage_param(param)
     payload = {
         "operationName": "staticLandingDayOfWeekSection",
         "query": STATIC_LANDING_QUERY,
-        "variables": {"sectionId": section_id, "param": param},
+        "variables": {"sectionId": section_id, "param": normalized_param},
     }
 
     headers = {
