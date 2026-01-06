@@ -1,5 +1,6 @@
 import json
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
@@ -7,7 +8,7 @@ import config
 
 
 STATIC_LANDING_QUERY = """
-query StaticLandingDayOfWeekSection($sectionId: String!, $param: StaticLandingDayOfWeekSectionParam!) {
+query staticLandingDayOfWeekSection($sectionId: ID!, $param: StaticLandingDayOfWeekParamInput!) {
   staticLandingDayOfWeekSection(sectionId: $sectionId, param: $param) {
     isEnd
     totalCount
@@ -43,20 +44,29 @@ query StaticLandingDayOfWeekSection($sectionId: String!, $param: StaticLandingDa
 """
 
 
-def build_section_id(category_uid: str, subcategory_uid: str, bm_type: str, day_tab_uid: str, screen_uid: str) -> str:
-    return f"static-landing-DayOfWeek-section-Layout-{category_uid}-{subcategory_uid}-{bm_type}-{day_tab_uid}-{screen_uid}"
+def build_section_id(
+    category_uid: str, subcategory_uid: str, bm_type: str, day_tab_uid: str, screen_uid: str
+) -> str:
+    return (
+        "static-landing-DayOfWeek-section-Layout-"
+        f"{category_uid}-{subcategory_uid}-{bm_type}-{day_tab_uid}-{screen_uid}"
+    )
 
 
 def _parse_series_id(item: Dict[str, Any]) -> Optional[str]:
-    event_meta = (
-        (item.get("eventLog") or {})
-        .get("eventMeta", {})
-        .get("series_id")
-    )
+    event_meta = ((item.get("eventLog") or {}).get("eventMeta", {}) or {}).get("series_id")
     if event_meta:
         return str(event_meta)
 
     scheme = item.get("scheme") or ""
+    try:
+        parsed = urlparse(scheme)
+        query_series_id = parse_qs(parsed.query).get("series_id")
+        if query_series_id and query_series_id[0]:
+            return str(query_series_id[0])
+    except Exception:
+        return None
+
     if "series_id=" in scheme:
         try:
             return scheme.split("series_id=")[-1].split("&")[0]
@@ -126,16 +136,19 @@ async def fetch_static_landing_section(
     param: Dict[str, Any],
 ) -> Dict[str, Any]:
     payload = {
-        "operationName": "StaticLandingDayOfWeekSection",
+        "operationName": "staticLandingDayOfWeekSection",
         "query": STATIC_LANDING_QUERY,
         "variables": {"sectionId": section_id, "param": param},
     }
 
-    async with session.post(
-        config.KAKAOPAGE_GRAPHQL_URL,
-        json=payload,
-        headers={**config.CRAWLER_HEADERS, "Content-Type": "application/json"},
-    ) as resp:
+    headers = {
+        **config.CRAWLER_HEADERS,
+        "Content-Type": "application/json",
+        "origin": "https://page.kakao.com",
+        "referer": "https://page.kakao.com/",
+    }
+
+    async with session.post(config.KAKAOPAGE_GRAPHQL_URL, json=payload, headers=headers) as resp:
         resp.raise_for_status()
         text = await resp.text()
         data = json.loads(text)
