@@ -2,14 +2,15 @@ import asyncio
 import json
 import os
 import random
+from datetime import datetime, timedelta
 from itertools import product
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import aiohttp
 from yarl import URL
 
 import config
-from database import get_cursor
+from database import create_standalone_connection, get_cursor
 from services.kakaopage_graphql import (
     build_section_id,
     fetch_static_landing_section,
@@ -67,6 +68,8 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         )
         self.purge_requested = os.getenv("KAKAO_LEGACY_PURGE", "").upper() == "YES"
         self._purge_executed = False
+        self._db_count_after_sync: Optional[int] = None
+        self._last_fetch_meta: Dict = {}
 
     async def _bootstrap_cookies(self, session: aiohttp.ClientSession):
         try:
@@ -296,10 +299,183 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         all_content_today = {**ongoing_today}
         return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
 
+    def _get_db_count(self, conn) -> Optional[int]:
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM contents WHERE source=%s",
+                (self.source_name,),
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            return int(row["cnt"]) if row else 0
+        except Exception:
+            return None
+
+    def _load_recent_bootstrap_reports(
+        self, conn, limit: int = 10
+    ) -> Sequence[Tuple[datetime, bool, Optional[bool]]]:
+        cursor = get_cursor(conn)
+        cursor.execute(
+            """
+            SELECT created_at, report_data
+            FROM daily_crawler_reports
+            WHERE lower(crawler_name) = lower(%s)
+              AND (report_data->'cdc_info'->'fetch_meta'->>'bootstrap_attempted') IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (self.source_name.replace("_", " ").title(), limit),
+        )
+
+        attempts = []
+        for row in cursor.fetchall():
+            meta = (
+                (row.get("report_data") or {})
+                .get("cdc_info", {})
+                .get("fetch_meta", {})
+            )
+            attempted = bool(meta.get("bootstrap_attempted"))
+            success_value = meta.get("bootstrap_success")
+            if success_value is None:
+                bootstrap_success = None
+            else:
+                bootstrap_success = bool(success_value)
+            attempts.append((row.get("created_at"), attempted, bootstrap_success))
+
+        cursor.close()
+        return attempts
+
+    def _evaluate_circuit_breaker(
+        self, db_count_before: Optional[int]
+    ) -> Tuple[bool, Optional[str]]:
+        if db_count_before and db_count_before > 0:
+            return False, None
+
+        if config.KAKAOPAGE_FORCE_BOOTSTRAP:
+            return False, None
+
+        if not config.KAKAOPAGE_AUTO_BOOTSTRAP:
+            return True, "auto_bootstrap_disabled"
+
+        conn = None
+        try:
+            conn = create_standalone_connection()
+            attempts = self._load_recent_bootstrap_reports(conn, limit=10)
+        except Exception:
+            attempts = []
+        finally:
+            if conn:
+                conn.close()
+
+        consecutive_failures = 0
+        last_attempt_time: Optional[datetime] = None
+
+        for created_at, attempted, success in attempts:
+            if attempted:
+                if last_attempt_time is None:
+                    last_attempt_time = created_at
+                if success:
+                    break
+                consecutive_failures += 1
+            else:
+                continue
+
+        if (
+            config.KAKAOPAGE_BOOTSTRAP_MAX_CONSECUTIVE_FAILURES >= 0
+            and consecutive_failures
+            >= config.KAKAOPAGE_BOOTSTRAP_MAX_CONSECUTIVE_FAILURES
+        ):
+            return True, "bootstrap_circuit_breaker_tripped"
+
+        if last_attempt_time:
+            cooldown_until = last_attempt_time + timedelta(
+                hours=config.KAKAOPAGE_BOOTSTRAP_COOLDOWN_HOURS
+            )
+            if datetime.utcnow() < cooldown_until:
+                return True, "bootstrap_cooldown_active"
+
+        return False, None
+
     async def fetch_all_data(self):
-        if self.mode == "collect":
-            return await self._collect_sections()
-        return await self._run_verify_mode()
+        requested_mode = self.mode
+        effective_mode = requested_mode
+        bootstrap_attempted = False
+        bootstrap_success = False
+        bootstrap_skipped_reason: Optional[str] = None
+        db_count_before: Optional[int] = None
+
+        db_conn = None
+        try:
+            db_conn = create_standalone_connection()
+            db_count_before = self._get_db_count(db_conn)
+        except Exception:
+            db_count_before = None
+        finally:
+            if db_conn:
+                db_conn.close()
+
+        bootstrap_needed = db_count_before == 0 if db_count_before is not None else False
+
+        if requested_mode != "collect" and bootstrap_needed:
+            skip_bootstrap, reason = self._evaluate_circuit_breaker(db_count_before)
+            if skip_bootstrap:
+                bootstrap_skipped_reason = reason
+            else:
+                effective_mode = "collect"
+                bootstrap_attempted = True
+
+        if requested_mode == "collect" and bootstrap_needed:
+            bootstrap_attempted = True
+
+        self.mode = effective_mode
+
+        if bootstrap_attempted:
+            print(
+                "INFO: [KakaoPage] Auto bootstrap triggered (empty DB detected, running collect)."
+            )
+        elif bootstrap_skipped_reason:
+            print(
+                f"INFO: [KakaoPage] Bootstrap skipped ({bootstrap_skipped_reason}); running {effective_mode}."
+            )
+
+        if effective_mode == "collect":
+            (
+                ongoing_today,
+                hiatus_today,
+                finished_today,
+                all_content_today,
+                fetch_meta,
+            ) = await self._collect_sections()
+        else:
+            (
+                ongoing_today,
+                hiatus_today,
+                finished_today,
+                all_content_today,
+                fetch_meta,
+            ) = await self._run_verify_mode()
+
+        fetched_count = len(all_content_today)
+        if bootstrap_attempted and fetched_count <= 0:
+            fetch_meta.setdefault("errors", []).append("bootstrap_fetch_empty")
+        if bootstrap_attempted:
+            bootstrap_success = fetched_count > 0 and not fetch_meta.get("errors")
+
+        fetch_meta.update(
+            {
+                "mode_requested": requested_mode,
+                "mode_effective": effective_mode,
+                "bootstrap_needed": bootstrap_needed,
+                "bootstrap_attempted": bootstrap_attempted,
+                "bootstrap_success": bootstrap_success,
+                "bootstrap_skipped_reason": bootstrap_skipped_reason,
+                "db_count_before": db_count_before,
+            }
+        )
+
+        self._last_fetch_meta = fetch_meta
+        return ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta
 
     def synchronize_database(
         self,
@@ -320,6 +496,14 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
 
         if not all_content_today:
             cursor.close()
+            if self._last_fetch_meta is not None:
+                try:
+                    db_count_before = self._last_fetch_meta.get("db_count_before")
+                    if isinstance(db_count_before, int):
+                        self._db_count_after_sync = db_count_before
+                        self._last_fetch_meta["db_count_after"] = self._db_count_after_sync
+                except Exception:
+                    pass
             return 0
 
         status_map = {cid: "연재중" for cid in all_content_today.keys()}
@@ -384,4 +568,14 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             )
 
         cursor.close()
-        return len(inserts)
+        inserted_count = len(inserts)
+        if self._last_fetch_meta is not None:
+            try:
+                db_count_before = self._last_fetch_meta.get("db_count_before")
+                if isinstance(db_count_before, int):
+                    self._db_count_after_sync = db_count_before + inserted_count
+                    self._last_fetch_meta["db_count_after"] = self._db_count_after_sync
+            except Exception:
+                pass
+
+        return inserted_count
