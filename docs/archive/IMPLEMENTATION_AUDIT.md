@@ -14,8 +14,8 @@ This audit re-checks the current code against the supplied v2.01 specification t
 
 ### 3) Crawlers & CDC (Change Detection)
 - **Naver crawler**: Performs paginated async fetches across weekday and finished endpoints, normalizes weekday lists, snapshots DB state, detects newly completed titles, issues notifications, and syncs DB with structured `meta.common/attributes`.【F:crawlers/naver_webtoon_crawler.py†L23-L189】
-- **Kakao crawler**: Enforces cookie requirements via env vars, fetches weekday and completed feeds concurrently with retries, maps status (ongoing/hiatus/finished), normalizes authors/thumbnails/weekdays into the same `meta` shape, runs CDC comparison, sends notifications, and syncs the database.【F:crawlers/kakaowebtoon_crawler.py†L23-L186】
-- **Retry & pagination**: Both crawlers apply `tenacity` retries to API calls and iterate paginated data where required (Naver finished list, Kakao completed list), matching the resiliency and completeness notes.【F:crawlers/naver_webtoon_crawler.py†L25-L58】【F:crawlers/kakaowebtoon_crawler.py†L29-L75】
+- **Kakao crawler (archived)**: Enforces cookie requirements via env vars, fetches weekday and completed feeds concurrently with retries, maps status (ongoing/hiatus/finished), normalizes authors/thumbnails/weekdays into the same `meta` shape, runs CDC comparison, sends notifications, and syncs the database.【F:crawlers/_archive/kakaowebtoon_crawler.py†L3-L187】
+- **Retry & pagination**: Both crawlers apply `tenacity` retries to API calls and iterate paginated data where required (Naver finished list, Kakao completed list), matching the resiliency and completeness notes.【F:crawlers/naver_webtoon_crawler.py†L25-L58】【F:crawlers/_archive/kakaowebtoon_crawler.py†L9-L77】
 
 ### 4) Notification & Email Strategy
 - **Pluggable providers**: `EMAIL_PROVIDER` switches between SMTP and SendGrid without code changes via `get_email_service`, consistent with the spec’s strategy/factory approach.【F:services/email.py†L1-L17】【F:config.py†L18-L24】
@@ -40,7 +40,7 @@ This audit re-checks the current code against the supplied v2.01 specification t
 
 ## Gaps & Risks to Address
 - **Template Method 구현**: 공통 일일 점검 흐름을 `ContentCrawler.run_daily_check`에 템플릿 메서드로 올려 하위 크롤러는 수집/동기화만 오버라이드하도록 맞췄습니다.【F:crawlers/base_crawler.py†L1-L41】
-- **제목 정규화 후 알림 발송**: 모든 크롤러가 `title` 필드를 채우고 알림 시 `title`→`titleName`→`content.title` 순으로 폴백하여 플랫폼 간 제목 누락 없이 이메일을 전송합니다.【F:crawlers/naver_webtoon_crawler.py†L53-L103】【F:crawlers/kakaowebtoon_crawler.py†L110-L140】【F:services/notification_service.py†L13-L35】
+- **제목 정규화 후 알림 발송**: 모든 크롤러가 `title` 필드를 채우고 알림 시 `title`→`titleName`→`content.title` 순으로 폴백하여 플랫폼 간 제목 누락 없이 이메일을 전송합니다.【F:crawlers/naver_webtoon_crawler.py†L53-L103】【F:crawlers/_archive/kakaowebtoon_crawler.py†L102-L132】【F:services/notification_service.py†L13-L35】
 - **크롤러별 DB 커넥션 분리**: `run_all_crawlers.py`가 각 크롤러 실행마다 별도 연결을 생성/종료해 한 연결 장애가 다른 크롤러로 전파되지 않도록 격리했습니다.【F:run_all_crawlers.py†L20-L73】
 
 ## Overall Assessment
