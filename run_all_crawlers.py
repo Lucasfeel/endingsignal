@@ -16,9 +16,27 @@ from services.cdc_event_service import record_due_scheduled_completions
 from utils.time import now_kst_naive
 
 ALL_CRAWLERS = [
+    # Kakao now uses the KakaoPage-backed crawler for the "kakaowebtoon" source.
     NaverWebtoonCrawler,
     KakaoPageWebtoonCrawler,
 ]
+
+
+def _ensure_unique_sources(crawler_classes):
+    source_map = {}
+    for crawler_class in crawler_classes:
+        instance = crawler_class()
+        source_name = getattr(instance, "source_name", None)
+        source_map.setdefault(source_name, []).append(crawler_class.__name__)
+
+    duplicates = {k: v for k, v in source_map.items() if k and len(v) > 1}
+    if duplicates:
+        raise ValueError(
+            f"Duplicate crawler registrations detected for sources: {duplicates}."
+        )
+
+
+_ensure_unique_sources(ALL_CRAWLERS)
 
 
 async def run_one_crawler(crawler_class):
