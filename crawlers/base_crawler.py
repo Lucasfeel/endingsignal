@@ -145,10 +145,18 @@ class ContentCrawler(ABC):
 
             db_count = len(db_status_map)
             fetched_count = len(all_content_today)
-            ratio = fetched_count / max(db_count, 1)
+
+            health_db_count = db_count
+            if isinstance(fetch_meta, dict):
+                expected_count = fetch_meta.get("expected_count")
+                if isinstance(expected_count, int) and expected_count > 0:
+                    health_db_count = expected_count
+
+            ratio = fetched_count / max(health_db_count, 1)
             health_info = {
                 "db_count": db_count,
                 "fetched_count": fetched_count,
+                "health_db_count": health_db_count,
                 "fetch_ratio": ratio,
                 "min_ratio_threshold": config.CRAWLER_FETCH_HEALTH_MIN_RATIO,
             }
