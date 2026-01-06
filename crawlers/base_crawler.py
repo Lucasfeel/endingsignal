@@ -181,8 +181,32 @@ class ContentCrawler(ABC):
                 is_degraded_fetch = True
                 skip_reason = skip_reason or "fetch_ratio_below_threshold"
 
+            if isinstance(fetch_meta, dict):
+                if fetch_meta.get("is_suspicious_empty"):
+                    health_info["is_suspicious_empty"] = True
+                    if ratio is None:
+                        ratio = 0.0
+                        health_info["fetch_ratio"] = ratio
+                notes = fetch_meta.get("health_notes")
+                if isinstance(notes, list):
+                    health_info["notes"] = notes
+
             fetch_meta["is_degraded_fetch"] = is_degraded_fetch
             fetch_meta["fetch_health"] = health_info
+
+            status_label = "ok"
+            summary = None
+            if isinstance(fetch_meta, dict):
+                status_label = fetch_meta.get("status") or status_label
+                summary = fetch_meta.get("summary")
+            if is_degraded_fetch and status_label == "ok":
+                status_label = "warn"
+            if summary is None:
+                summary = {
+                    "crawler": self.source_name,
+                    "reason": status_label,
+                    "message": "crawler run completed",
+                }
 
             if not is_degraded_fetch:
                 for content_id, final_completed_at, resolved_by in pending_cdc_records:
@@ -207,6 +231,8 @@ class ContentCrawler(ABC):
                 "skip_reason": skip_reason,
                 "health": health_info,
                 "fetch_meta": fetch_meta,
+                "status": status_label,
+                "summary": summary,
             }
 
             # 8) DB sync (commit is enforced here, not in crawler implementations)
