@@ -15,6 +15,7 @@ import config
 from database import create_standalone_connection, get_cursor
 from services.kakaopage_graphql import (
     build_section_id,
+    normalize_kakaopage_param,
     parse_section_payload,
     STATIC_LANDING_QUERY,
 )
@@ -37,7 +38,7 @@ HEADERS = {
 
 DEFAULT_PARAM = {
     "categoryUid": config.KAKAOPAGE_CATEGORY_UID,
-    "bmType": "A",
+    "bnType": "A",
     "subcategoryUid": "0",
     "dayTabUid": "2",
     "screenUid": config.KAKAOPAGE_DAYOFWEEK_SCREEN_UID,
@@ -161,12 +162,19 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         label: str,
         attempt: int,
     ) -> Optional[Dict[str, Any]]:
+        normalized_param = normalize_kakaopage_param(param)
         payload = {
             "operationName": "staticLandingDayOfWeekSection",
             "query": STATIC_LANDING_QUERY,
-            "variables": {"sectionId": section_id, "param": param},
+            "variables": {"sectionId": section_id, "param": normalized_param},
         }
-        headers = {**HEADERS, "Content-Type": "application/json"}
+        headers = {
+            **HEADERS,
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+            "Origin": "https://page.kakao.com",
+            "Referer": "https://page.kakao.com/",
+        }
         request_sample: Dict[str, Any] = {
             "endpoint": config.KAKAOPAGE_GRAPHQL_URL,
             "operation": "staticLandingDayOfWeekSection",
@@ -190,17 +198,40 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             ) as resp:
                 request_sample["http_status"] = resp.status
                 text = await resp.text()
-                request_sample["response_snippet"] = text[:600]
+                request_sample["response_snippet"] = text[:300]
+                response_errors = None
+                try:
+                    data = json.loads(text)
+                    response_errors = data.get("errors") if isinstance(data, dict) else None
+                except Exception:
+                    data = None
 
-                data = json.loads(text)
-                if "errors" in data and data["errors"]:
-                    message = str(data["errors"])[:300]
-                    request_sample["error_type"] = "GraphQLError"
+                if resp.status >= 400 or (response_errors):
+                    message = str(response_errors or text)[:300]
+                    request_sample["error_type"] = "GraphQLError" if response_errors else "HttpError"
                     request_sample["error_message"] = message
                     add_request_sample(fetch_meta, request_sample)
+                    self._record_graphql_failure(
+                        fetch_meta=fetch_meta,
+                        section_id=section_id,
+                        operation_name="staticLandingDayOfWeekSection",
+                        normalized_param=normalized_param,
+                        response_errors=response_errors,
+                        response_text=text,
+                        status=resp.status,
+                        headers=headers,
+                    )
+                    error_code = "HTTP_ERROR"
+                    if response_errors:
+                        error_code = "GRAPHQL_ERROR"
+                        if any(
+                            "GRAPHQL_VALIDATION_FAILED" in str(err)
+                            for err in response_errors
+                        ):
+                            error_code = "GRAPHQL_VALIDATION_FAILED"
                     append_error(
                         fetch_meta,
-                        "GRAPHQL_ERROR",
+                        error_code,
                         message,
                         {
                             "label": label,
@@ -209,19 +240,34 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                         },
                     )
                     print(
-                        f"ERROR: [Kakaowebtoon] fetch failed: GRAPHQL_ERROR http={resp.status} op=staticLandingDayOfWeekSection msg={message}",
+                        (
+                            "ERROR: [Kakaowebtoon] fetch failed: "
+                            f"{error_code} http={resp.status} op=staticLandingDayOfWeekSection "
+                            f"dayTabUid={normalized_param.get('dayTabUid')} page={normalized_param.get('page')} "
+                            f"msg={message}"
+                        ),
                         file=sys.stderr,
                     )
                     return None
 
                 add_request_sample(fetch_meta, request_sample)
-                return data.get("data", {})
+                return data.get("data", {}) if isinstance(data, dict) else {}
 
         except Exception as exc:  # noqa: PERF203
             message = str(exc)
             request_sample["error_type"] = exc.__class__.__name__
             request_sample["error_message"] = message
             add_request_sample(fetch_meta, request_sample)
+            self._record_graphql_failure(
+                fetch_meta=fetch_meta,
+                section_id=section_id,
+                operation_name="staticLandingDayOfWeekSection",
+                normalized_param=normalized_param,
+                response_errors=None,
+                response_text=message,
+                status=request_sample.get("http_status"),
+                headers=headers,
+            )
             append_error(
                 fetch_meta,
                 "HTTP_ERROR",
@@ -229,12 +275,54 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                 {"label": label, "operation": "staticLandingDayOfWeekSection"},
             )
             print(
-                f"ERROR: [Kakaowebtoon] fetch failed: HTTP_ERROR http={request_sample.get('http_status')} op=staticLandingDayOfWeekSection msg={message}",
+                (
+                    "ERROR: [Kakaowebtoon] fetch failed: "
+                    f"HTTP_ERROR http={request_sample.get('http_status')} op=staticLandingDayOfWeekSection "
+                    f"dayTabUid={normalized_param.get('dayTabUid')} page={normalized_param.get('page')} msg={message}"
+                ),
                 file=sys.stderr,
             )
             return None
         finally:
             request_sample["duration_ms"] = int((time.monotonic() - started_monotonic) * 1000)
+
+    def _record_graphql_failure(
+        self,
+        *,
+        fetch_meta: Dict[str, Any],
+        section_id: str,
+        operation_name: str,
+        normalized_param: Dict[str, Any],
+        response_errors: Optional[Any],
+        response_text: str,
+        status: Optional[int],
+        headers: Dict[str, Any],
+    ) -> None:
+        preview = (response_text or "")[:2000]
+        header_subset = {}
+        for key in ("user-agent", "origin", "referer"):
+            for candidate in headers.keys():
+                if candidate.lower() == key:
+                    header_subset[key] = headers.get(candidate)
+                    break
+
+        failure_payload = {
+            "timestamp": now_iso(),
+            "http_status": status,
+            "operationName": operation_name,
+            "sectionId": section_id,
+            "variables_param": normalized_param,
+            "response_errors": response_errors,
+            "response_text_preview": preview,
+            "request_headers_used": header_subset,
+        }
+
+        failures = fetch_meta.setdefault("graphql_failures", [])
+        failures.append(failure_payload)
+        fetch_meta["last_graphql_failure"] = failure_payload
+
+        if config.DEBUG_KAKAOPAGE_GRAPHQL:
+            print(json.dumps({"kakaopage_graphql_failure": failure_payload}, ensure_ascii=False))
 
 
     async def _fetch_section(
@@ -285,13 +373,13 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
 
         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
         connector = aiohttp.TCPConnector(limit=self.concurrency, ttl_dns_cache=120)
-        param = {**DEFAULT_PARAM}
+        param = normalize_kakaopage_param({**DEFAULT_PARAM})
         section_id = build_section_id(
-            str(param["categoryUid"]),
-            str(param["subcategoryUid"]),
-            str(param["bmType"]),
-            str(param["dayTabUid"]),
-            str(param["screenUid"]),
+            param["categoryUid"],
+            param["subcategoryUid"],
+            param["bnType"],
+            param["dayTabUid"],
+            param["screenUid"],
         )
 
         async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=HEADERS) as session:
@@ -350,48 +438,50 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
             self._seed_cookies(session)
             await self._bootstrap_cookies(session)
 
-            param = {**DEFAULT_PARAM}
+            param = normalize_kakaopage_param({**DEFAULT_PARAM})
             section_id = build_section_id(
-                str(param["categoryUid"]),
-                str(param["subcategoryUid"]),
-                str(param["bmType"]),
-                str(param["dayTabUid"]),
-                str(param["screenUid"]),
+                param["categoryUid"],
+                param["subcategoryUid"],
+                param["bnType"],
+                param["dayTabUid"],
+                param["screenUid"],
             )
             items, meta = await self._fetch_section(session, section_id, param, fetch_meta, "collect:init")
             self._ingest_items(items, param.get("dayTabUid", "2"), ongoing_today, seen_ids)
 
-            bm_list = meta.get("businessModelList") or [param["bmType"]]
+            bn_list = meta.get("businessModelList") or [param["bnType"]]
             subcategory_list = meta.get("subcategoryList") or [param["subcategoryUid"]]
             day_tab_list = meta.get("dayTabList") or [param["dayTabUid"]]
 
             expected_total = 0
             counted_sections: Set[Tuple[str, str, str]] = set()
 
-            for bm_type, subcategory_uid, day_tab_uid in product(bm_list, subcategory_list, day_tab_list):
+            for bn_type, subcategory_uid, day_tab_uid in product(bn_list, subcategory_list, day_tab_list):
                 page = 1
                 while True:
-                    current_param = {
-                        "categoryUid": param["categoryUid"],
-                        "bmType": bm_type,
-                        "subcategoryUid": subcategory_uid,
-                        "dayTabUid": day_tab_uid,
-                        "screenUid": param["screenUid"],
-                        "page": page,
-                    }
-                    section_id = build_section_id(
-                        str(current_param["categoryUid"]),
-                        str(current_param["subcategoryUid"]),
-                        str(current_param["bmType"]),
-                        str(current_param["dayTabUid"]),
-                        str(current_param["screenUid"]),
+                    current_param = normalize_kakaopage_param(
+                        {
+                            "categoryUid": param["categoryUid"],
+                            "bnType": bn_type,
+                            "subcategoryUid": subcategory_uid,
+                            "dayTabUid": day_tab_uid,
+                            "screenUid": param["screenUid"],
+                            "page": page,
+                        }
                     )
-                    label = f"collect:{bm_type}:{subcategory_uid}:{day_tab_uid}:p{page}"
+                    section_id = build_section_id(
+                        current_param["categoryUid"],
+                        current_param["subcategoryUid"],
+                        current_param["bnType"],
+                        current_param["dayTabUid"],
+                        current_param["screenUid"],
+                    )
+                    label = f"collect:{bn_type}:{subcategory_uid}:{day_tab_uid}:p{page}"
                     fetch_meta["sections"] += 1
                     items, meta = await self._fetch_section(session, section_id, current_param, fetch_meta, label)
 
                     if meta:
-                        section_key = (bm_type, subcategory_uid, day_tab_uid)
+                        section_key = (bn_type, subcategory_uid, day_tab_uid)
                         if section_key not in counted_sections:
                             total_count = meta.get("totalCount")
                             if isinstance(total_count, int) and total_count > 0:
@@ -590,7 +680,10 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         if not isinstance(expected_count, int):
             expected_count = None
 
-        is_suspicious_empty = fetched_count == 0 and (expected_count is None or expected_count == 0)
+        errors = fetch_meta.get("errors") or []
+        is_suspicious_empty = (
+            fetched_count == 0 and (expected_count is None or expected_count == 0) and not errors
+        )
         health_notes = fetch_meta.get("health_notes") or []
         if is_suspicious_empty:
             fetch_meta["is_suspicious_empty"] = True
@@ -619,7 +712,6 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         status = "ok"
         reason = "ok"
         message = "Fetch completed successfully"
-        errors = fetch_meta.get("errors") or []
         if errors:
             last_error = errors[-1]
             status = "fail"

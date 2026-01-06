@@ -1,12 +1,5 @@
 import json
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
-
-import aiohttp
-
-import json
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
@@ -16,33 +9,38 @@ import config
 STATIC_LANDING_QUERY = """
 query staticLandingDayOfWeekSection($sectionId: ID!, $param: StaticLandingDayOfWeekParamInput!) {
   staticLandingDayOfWeekSection(sectionId: $sectionId, param: $param) {
+    id
+    uid
+    type
+    title
     isEnd
     totalCount
     param {
-      page
-      size
-    }
-    businessModelList {
-      param
-    }
-    subcategoryList {
-      param
-    }
-    dayTabList {
-      param
-    }
-    groups {
-      items {
-        title
-        thumbnail
-        scheme
-        isLegacy
-        eventLog {
-          eventMeta {
-            series_id
-            name
-          }
+      categoryUid
+      businessModel {
+        name
+        param {
+          uid
         }
+      }
+      subcategory {
+        name
+        param {
+          uid
+        }
+      }
+      dayTab {
+        name
+        param {
+          uid
+        }
+      }
+    }
+    items {
+      id
+      content {
+        id
+        title
       }
     }
   }
@@ -50,34 +48,59 @@ query staticLandingDayOfWeekSection($sectionId: ID!, $param: StaticLandingDayOfW
 """
 
 
+def normalize_kakaopage_param(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _to_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return int(default)
+
+    def _to_str(value: Any, default: str) -> str:
+        if value is None:
+            return str(default)
+        return str(value)
+
+    return {
+        "categoryUid": _to_int(raw.get("categoryUid", 0), 0),
+        "subcategoryUid": _to_str(raw.get("subcategoryUid", "0"), "0"),
+        "bnType": _to_str(raw.get("bnType", ""), ""),
+        "dayTabUid": _to_str(raw.get("dayTabUid", ""), ""),
+        "screenUid": _to_int(raw.get("screenUid", 0), 0),
+        "page": _to_int(raw.get("page", 1), 1),
+    }
+
+
 def build_section_id(
-    category_uid: str, subcategory_uid: str, bm_type: str, day_tab_uid: str, screen_uid: str
+    category_uid: Any,
+    subcategory_uid: Any,
+    bn_type: Any,
+    day_tab_uid: Any,
+    screen_uid: Any,
 ) -> str:
-    return (
-        "static-landing-DayOfWeek-section-Layout-"
-        f"{category_uid}-{subcategory_uid}-{bm_type}-{day_tab_uid}-{screen_uid}"
+    return "-".join(
+        [
+            "static",
+            "landing",
+            "DayOfWeek",
+            "section",
+            "layout",
+            str(category_uid),
+            str(subcategory_uid),
+            str(bn_type),
+            str(day_tab_uid),
+            str(screen_uid),
+        ]
     )
 
 
 def _parse_series_id(item: Dict[str, Any]) -> Optional[str]:
-    event_meta = ((item.get("eventLog") or {}).get("eventMeta", {}) or {}).get("series_id")
-    if event_meta:
-        return str(event_meta)
+    content = item.get("content") or {}
+    content_id = content.get("id")
+    if content_id is not None:
+        return str(content_id)
 
-    scheme = item.get("scheme") or ""
-    try:
-        parsed = urlparse(scheme)
-        query_series_id = parse_qs(parsed.query).get("series_id")
-        if query_series_id and query_series_id[0]:
-            return str(query_series_id[0])
-    except Exception:
-        return None
-
-    if "series_id=" in scheme:
-        try:
-            return scheme.split("series_id=")[-1].split("&")[0]
-        except Exception:
-            return None
+    if "id" in item:
+        return str(item.get("id"))
     return None
 
 
@@ -99,39 +122,46 @@ def parse_section_payload(section_payload: Dict[str, Any]) -> Tuple[List[Dict[st
     meta: Dict[str, Any] = {
         "isEnd": section_payload.get("isEnd"),
         "totalCount": section_payload.get("totalCount"),
+        "title": section_payload.get("title"),
+        "uid": section_payload.get("uid"),
+        "type": section_payload.get("type"),
     }
 
-    meta["businessModelList"] = [
-        str(entry.get("param"))
-        for entry in (section_payload.get("businessModelList") or [])
-        if entry.get("param") is not None
-    ]
-    meta["subcategoryList"] = [
-        str(entry.get("param"))
-        for entry in (section_payload.get("subcategoryList") or [])
-        if entry.get("param") is not None
-    ]
-    meta["dayTabList"] = [
-        str(entry.get("param"))
-        for entry in (section_payload.get("dayTabList") or [])
-        if entry.get("param") is not None
-    ]
+    param = section_payload.get("param") or {}
+    meta["businessModelList"] = []
+    if param.get("businessModel"):
+        bm_param = (param.get("businessModel") or {}).get("param") or {}
+        if bm_param.get("uid") is not None:
+            meta["businessModelList"].append(str(bm_param.get("uid")))
 
-    for group in section_payload.get("groups", []) or []:
-        for item in group.get("items", []) or []:
-            series_id = _parse_series_id(item)
-            if not series_id:
-                continue
-            items.append(
-                {
-                    "series_id": series_id,
-                    "title": (item.get("title") or "").strip(),
-                    "thumbnail": _parse_thumbnail(item.get("thumbnail")),
-                    "scheme": item.get("scheme"),
-                    "isLegacy": bool(item.get("isLegacy")),
-                    "eventMeta": (item.get("eventLog") or {}).get("eventMeta"),
-                }
-            )
+    meta["subcategoryList"] = []
+    if param.get("subcategory"):
+        sub_param = (param.get("subcategory") or {}).get("param") or {}
+        if sub_param.get("uid") is not None:
+            meta["subcategoryList"].append(str(sub_param.get("uid")))
+
+    meta["dayTabList"] = []
+    if param.get("dayTab"):
+        day_param = (param.get("dayTab") or {}).get("param") or {}
+        if day_param.get("uid") is not None:
+            meta["dayTabList"].append(str(day_param.get("uid")))
+
+    for item in section_payload.get("items", []) or []:
+        series_id = _parse_series_id(item)
+        if not series_id:
+            continue
+        content = item.get("content") or {}
+        title = (content.get("title") or item.get("title") or "").strip()
+        if not title:
+            continue
+        items.append(
+            {
+                "series_id": series_id,
+                "title": title,
+                "thumbnail": _parse_thumbnail(item.get("thumbnail")),
+                "isLegacy": bool(item.get("isLegacy")),
+            }
+        )
 
     return items, meta
 
@@ -141,15 +171,17 @@ async def fetch_static_landing_section(
     section_id: str,
     param: Dict[str, Any],
 ) -> Dict[str, Any]:
+    normalized_param = normalize_kakaopage_param(param)
     payload = {
         "operationName": "staticLandingDayOfWeekSection",
         "query": STATIC_LANDING_QUERY,
-        "variables": {"sectionId": section_id, "param": param},
+        "variables": {"sectionId": section_id, "param": normalized_param},
     }
 
     headers = {
         **config.CRAWLER_HEADERS,
         "Content-Type": "application/json",
+        "Accept": "*/*",
         "origin": "https://page.kakao.com",
         "referer": "https://page.kakao.com/",
     }
