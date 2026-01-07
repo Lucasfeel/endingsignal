@@ -142,18 +142,30 @@ class KakaoWebtoonCrawler(ContentCrawler):
         authors = self._normalize_authors(content.get("authors") or [])
         thumbnail_url = self._select_thumbnail_url(content)
         thumbnail_url = self._normalize_kakao_asset_url(thumbnail_url) if thumbnail_url else None
+        kakao_bg = self._normalize_kakao_asset_url(content.get("backgroundImage"))
+        kakao_c2 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageB"))
+        kakao_t2 = self._normalize_kakao_asset_url(content.get("titleImageB"))
+        kakao_assets = {
+            "bg": kakao_bg,
+            "c2": kakao_c2,
+            "t2": kakao_t2,
+        }
+        kakao_assets = {key: value for key, value in kakao_assets.items() if value}
         seo_id = content.get("seoId") or content.get("seo_id") or content.get("seoID")
         slug = seo_id or title or content_id
         content_url = (
             f"https://webtoon.kakao.com/content/{urllib.parse.quote(str(slug))}/{content_id}"
         )
-        return {
+        entry = {
             "content_id": content_id,
             "title": title,
             "authors": authors,
             "thumbnail_url": thumbnail_url,
             "content_url": content_url,
         }
+        if kakao_assets:
+            entry["assets"] = {"kakao": kakao_assets}
+        return entry
 
     def _parse_timetable_payload(self, payload: Dict) -> List[Dict]:
         entries: List[Dict] = []
@@ -341,6 +353,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
                     "weekdays": webtoon_data.get("weekdays", []),
                 },
             }
+            kakao_assets = (webtoon_data.get("assets") or {}).get("kakao")
+            if kakao_assets:
+                meta_data["assets"] = {"kakao": kakao_assets}
 
             if content_id in db_existing_ids:
                 record = (

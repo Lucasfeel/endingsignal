@@ -100,6 +100,11 @@ const UI_CLASSES = {
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
+  thumbBg: 'block w-full h-full object-cover z-0',
+  thumbChar:
+    'absolute right-0 bottom-0 h-[115%] w-auto object-contain pointer-events-none select-none z-[2]',
+  thumbTitle:
+    'absolute left-2 bottom-2 max-w-[70%] h-auto object-contain pointer-events-none select-none z-[2] drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]',
   cardTextWrap: 'px-0.5',
   cardTitle: 'font-bold text-[13px] text-white leading-[1.4] truncate',
   cardMeta: 'text-[11px] text-[#A8A8A8] mt-0.5 truncate',
@@ -3750,6 +3755,11 @@ function createCard(content, tabId, aspectClass) {
   const authors = Array.isArray(meta?.common?.authors)
     ? meta.common.authors.join(', ')
     : '';
+  const isKakao = content?.source === 'kakaowebtoon';
+  const kakaoAssets = meta?.assets?.kakao || null;
+  const kakaoBg = kakaoAssets?.bg || meta?.common?.thumbnail_url || thumb;
+  const kakaoC2 = kakaoAssets?.c2;
+  const kakaoT2 = kakaoAssets?.t2;
 
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
@@ -3766,26 +3776,6 @@ function createCard(content, tabId, aspectClass) {
   affordHint.textContent = 'Open';
   setClasses(affordHint, cx(UI_CLASSES.pillHint, UI_CLASSES.affordHint));
 
-  const imgEl = document.createElement('img');
-  imgEl.referrerPolicy = 'no-referrer';
-  imgEl.setAttribute('referrerpolicy', 'no-referrer');
-  imgEl.loading = 'lazy';
-  imgEl.decoding = 'async';
-  imgEl.fetchPriority = 'low';
-  imgEl.src = thumb;
-  imgEl.onerror = () => {
-    if (imgEl.dataset.fallbackApplied === '1') return;
-    if (DEBUG_RUNTIME) {
-      console.warn('[thumb:error]', {
-        src: imgEl.currentSrc || imgEl.src,
-        content_id: content?.content_id ?? content?.contentId ?? content?.id,
-        source: content?.source,
-        title: content?.title,
-      });
-    }
-    imgEl.dataset.fallbackApplied = '1';
-    imgEl.src = FALLBACK_THUMB;
-  };
   const thumbSizeMap = {
     'aspect-[3/4]': { width: 300, height: 400 },
     'aspect-[1/1.4]': { width: 280, height: 392 },
@@ -3793,10 +3783,89 @@ function createCard(content, tabId, aspectClass) {
     default: { width: 300, height: 400 },
   };
   const { width, height } = thumbSizeMap[aspectClass] || thumbSizeMap.default;
-  imgEl.width = width;
-  imgEl.height = height;
-  setClasses(imgEl, UI_CLASSES.cardImage);
-  cardContainer.appendChild(imgEl);
+
+  const applyNoReferrer = (img) => {
+    img.referrerPolicy = 'no-referrer';
+    img.setAttribute('referrerpolicy', 'no-referrer');
+  };
+
+  if (isKakao) {
+    const bgEl = document.createElement('img');
+    applyNoReferrer(bgEl);
+    bgEl.loading = 'lazy';
+    bgEl.decoding = 'async';
+    bgEl.fetchPriority = 'low';
+    bgEl.src = kakaoBg;
+    bgEl.onerror = () => {
+      if (bgEl.dataset.fallbackApplied === '1') return;
+      if (DEBUG_RUNTIME) {
+        console.warn('[thumb:error]', {
+          src: bgEl.currentSrc || bgEl.src,
+          content_id: content?.content_id ?? content?.contentId ?? content?.id,
+          source: content?.source,
+          title: content?.title,
+        });
+      }
+      bgEl.dataset.fallbackApplied = '1';
+      bgEl.src = FALLBACK_THUMB;
+    };
+    bgEl.width = width;
+    bgEl.height = height;
+    setClasses(bgEl, cx(UI_CLASSES.cardImage, UI_CLASSES.thumbBg));
+    cardContainer.appendChild(bgEl);
+
+    if (kakaoC2) {
+      const charEl = document.createElement('img');
+      applyNoReferrer(charEl);
+      charEl.loading = 'lazy';
+      charEl.decoding = 'async';
+      charEl.fetchPriority = 'low';
+      charEl.src = kakaoC2;
+      charEl.onerror = () => {
+        charEl.style.display = 'none';
+      };
+      setClasses(charEl, UI_CLASSES.thumbChar);
+      cardContainer.appendChild(charEl);
+    }
+
+    if (kakaoT2) {
+      const titleEl = document.createElement('img');
+      applyNoReferrer(titleEl);
+      titleEl.loading = 'lazy';
+      titleEl.decoding = 'async';
+      titleEl.fetchPriority = 'low';
+      titleEl.src = kakaoT2;
+      titleEl.onerror = () => {
+        titleEl.style.display = 'none';
+      };
+      setClasses(titleEl, UI_CLASSES.thumbTitle);
+      cardContainer.appendChild(titleEl);
+    }
+  } else {
+    const imgEl = document.createElement('img');
+    applyNoReferrer(imgEl);
+    imgEl.loading = 'lazy';
+    imgEl.decoding = 'async';
+    imgEl.fetchPriority = 'low';
+    imgEl.src = thumb;
+    imgEl.onerror = () => {
+      if (imgEl.dataset.fallbackApplied === '1') return;
+      if (DEBUG_RUNTIME) {
+        console.warn('[thumb:error]', {
+          src: imgEl.currentSrc || imgEl.src,
+          content_id: content?.content_id ?? content?.contentId ?? content?.id,
+          source: content?.source,
+          title: content?.title,
+        });
+      }
+      imgEl.dataset.fallbackApplied = '1';
+      imgEl.src = FALLBACK_THUMB;
+    };
+    imgEl.width = width;
+    imgEl.height = height;
+    setClasses(imgEl, UI_CLASSES.cardImage);
+    cardContainer.appendChild(imgEl);
+  }
 
   // Badge logic
   if (tabId === 'my') {
