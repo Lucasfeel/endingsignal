@@ -100,6 +100,10 @@ const UI_CLASSES = {
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
+  thumbStack: 'thumbStack kakaoStack',
+  thumbBg: 'thumbBg',
+  thumbChar: 'thumbChar',
+  thumbTitle: 'thumbTitle',
   cardTextWrap: 'px-0.5',
   cardTitle: 'font-bold text-[13px] text-white leading-[1.4] truncate',
   cardMeta: 'text-[11px] text-[#A8A8A8] mt-0.5 truncate',
@@ -1714,6 +1718,7 @@ const formatDateKST = (isoString) => {
 
 async function initApp() {
   applyDataUiClasses();
+  ensureKakaoThumbStyles();
   setupAuthModalListeners();
   setupProfileButton();
   updateProfileButtonState();
@@ -1789,6 +1794,64 @@ const MAX_RECENT_SEARCHES = 10;
 const RECENTLY_OPENED_KEY = 'es_recently_opened';
 const MAX_RECENTLY_OPENED = 12;
 const POPULAR_GRID_LIMIT = 9;
+const KAKAO_THUMB_STYLE_ID = 'kakao-thumb-styles';
+
+function ensureKakaoThumbStyles() {
+  if (document.getElementById(KAKAO_THUMB_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = KAKAO_THUMB_STYLE_ID;
+  style.textContent = `
+.kakaoStack {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+.kakaoStack::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 45%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  pointer-events: none;
+  z-index: 1;
+}
+.kakaoStack .thumbBg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+.kakaoStack .thumbChar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  pointer-events: none;
+  z-index: 2;
+}
+.kakaoStack .thumbTitle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 36%;
+  object-fit: contain;
+  object-position: center bottom;
+  pointer-events: none;
+  z-index: 3;
+  padding: 0 6px 6px 6px;
+  box-sizing: border-box;
+}
+`;
+  document.head.appendChild(style);
+}
 
 const getSearchType = () =>
   STATE.activeTab === 'my'
@@ -3725,6 +3788,85 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
    Cards
    ========================= */
 
+const applyNoReferrer = (img) => {
+  img.referrerPolicy = 'no-referrer';
+  img.setAttribute('referrerpolicy', 'no-referrer');
+};
+
+const hexToRgb = (hex) => {
+  if (!hex || typeof hex !== 'string') return null;
+  let normalized = hex.trim();
+  if (!normalized) return null;
+  if (normalized.startsWith('#')) normalized = normalized.slice(1);
+  if (normalized.length === 3) {
+    normalized = normalized
+      .split('')
+      .map((ch) => ch + ch)
+      .join('');
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
+  const intVal = parseInt(normalized, 16);
+  return {
+    r: (intVal >> 16) & 255,
+    g: (intVal >> 8) & 255,
+    b: intVal & 255,
+  };
+};
+
+const buildPicture = ({
+  webp,
+  fallbackUrl,
+  fallbackType,
+  imgClass,
+  imgStyle,
+  wrapperClass,
+  noReferrer,
+  altText,
+}) => {
+  const picture = document.createElement('picture');
+  if (wrapperClass) setClasses(picture, wrapperClass);
+  picture.style.pointerEvents = 'none';
+
+  const webpSource = webp ? document.createElement('source') : null;
+  if (webpSource) {
+    webpSource.type = 'image/webp';
+    webpSource.srcset = webp;
+    picture.appendChild(webpSource);
+  }
+
+  if (fallbackUrl) {
+    const fallbackSource = document.createElement('source');
+    fallbackSource.type = fallbackType;
+    fallbackSource.srcset = fallbackUrl;
+    picture.appendChild(fallbackSource);
+  }
+
+  const img = document.createElement('img');
+  if (noReferrer) applyNoReferrer(img);
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.fetchPriority = 'low';
+  img.alt = altText || '';
+  img.src = fallbackUrl || webp || FALLBACK_THUMB;
+  if (imgClass) setClasses(img, imgClass);
+  if (imgStyle) Object.assign(img.style, imgStyle);
+  img.onerror = () => {
+    if (img.dataset.fallbackStage === 'fallback') {
+      img.src = FALLBACK_THUMB;
+      return;
+    }
+    if (fallbackUrl && img.src !== fallbackUrl) {
+      if (webpSource) webpSource.remove();
+      img.dataset.fallbackStage = 'fallback';
+      img.src = fallbackUrl;
+      return;
+    }
+    img.src = FALLBACK_THUMB;
+  };
+  picture.appendChild(img);
+  return picture;
+};
+
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
   setClasses(el, UI_CLASSES.cardRoot);
@@ -3750,6 +3892,8 @@ function createCard(content, tabId, aspectClass) {
   const authors = Array.isArray(meta?.common?.authors)
     ? meta.common.authors.join(', ')
     : '';
+  const isKakaoWebtoon = String(content?.source || '').toLowerCase() === 'kakaowebtoon';
+  const kakaoAssets = meta?.common?.kakao_assets || null;
 
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
@@ -3766,26 +3910,6 @@ function createCard(content, tabId, aspectClass) {
   affordHint.textContent = 'Open';
   setClasses(affordHint, cx(UI_CLASSES.pillHint, UI_CLASSES.affordHint));
 
-  const imgEl = document.createElement('img');
-  imgEl.referrerPolicy = 'no-referrer';
-  imgEl.setAttribute('referrerpolicy', 'no-referrer');
-  imgEl.loading = 'lazy';
-  imgEl.decoding = 'async';
-  imgEl.fetchPriority = 'low';
-  imgEl.src = thumb;
-  imgEl.onerror = () => {
-    if (imgEl.dataset.fallbackApplied === '1') return;
-    if (DEBUG_RUNTIME) {
-      console.warn('[thumb:error]', {
-        src: imgEl.currentSrc || imgEl.src,
-        content_id: content?.content_id ?? content?.contentId ?? content?.id,
-        source: content?.source,
-        title: content?.title,
-      });
-    }
-    imgEl.dataset.fallbackApplied = '1';
-    imgEl.src = FALLBACK_THUMB;
-  };
   const thumbSizeMap = {
     'aspect-[3/4]': { width: 300, height: 400 },
     'aspect-[1/1.4]': { width: 280, height: 392 },
@@ -3793,10 +3917,109 @@ function createCard(content, tabId, aspectClass) {
     default: { width: 300, height: 400 },
   };
   const { width, height } = thumbSizeMap[aspectClass] || thumbSizeMap.default;
-  imgEl.width = width;
-  imgEl.height = height;
-  setClasses(imgEl, UI_CLASSES.cardImage);
-  cardContainer.appendChild(imgEl);
+
+  const hasKakaoComposite =
+    isKakaoWebtoon &&
+    kakaoAssets?.bg?.webp &&
+    (kakaoAssets?.character_a ||
+      kakaoAssets?.character_b ||
+      kakaoAssets?.title_a ||
+      kakaoAssets?.title_b);
+
+  if (hasKakaoComposite) {
+    const stack = document.createElement('div');
+    setClasses(stack, 'absolute inset-0');
+
+    const bgPicture = buildPicture({
+      webp: kakaoAssets?.bg?.webp,
+      fallbackUrl: kakaoAssets?.bg?.jpg,
+      fallbackType: 'image/jpeg',
+      imgClass: 'w-full h-full object-cover origin-top',
+      imgStyle: { transform: 'scale(1.35) translateY(-8%)' },
+      wrapperClass: 'absolute inset-0 w-full h-full overflow-hidden',
+      noReferrer: true,
+      altText: content?.title || '',
+    });
+    bgPicture.style.zIndex = '0';
+    stack.appendChild(bgPicture);
+
+    const characterSource = kakaoAssets?.character_b || kakaoAssets?.character_a;
+    if (characterSource?.webp || characterSource?.png) {
+      const charPicture = buildPicture({
+        webp: characterSource?.webp,
+        fallbackUrl: characterSource?.png,
+        fallbackType: 'image/png',
+        imgClass: 'w-full h-full object-cover object-top',
+        wrapperClass: 'absolute inset-0 w-full h-full',
+        noReferrer: true,
+        altText: `${content?.title || ''} character`,
+      });
+      charPicture.style.zIndex = '1';
+      stack.appendChild(charPicture);
+    }
+
+    const bgRgb = hexToRgb(kakaoAssets?.bg_color || '');
+    if (bgRgb) {
+      const gradientEl = document.createElement('div');
+      setClasses(gradientEl, 'absolute left-0 bottom-0 w-full h-1/2');
+      gradientEl.style.backgroundImage = `linear-gradient(rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0) 0%, rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0.5) 33.04%, rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0.9) 66.09%, rgb(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}) 100%)`;
+      gradientEl.style.pointerEvents = 'none';
+      gradientEl.style.zIndex = '2';
+      stack.appendChild(gradientEl);
+    } else {
+      const gradientEl = document.createElement('div');
+      setClasses(gradientEl, UI_CLASSES.cardGradient);
+      gradientEl.style.zIndex = '2';
+      stack.appendChild(gradientEl);
+    }
+
+    const titleSource = kakaoAssets?.title_b || kakaoAssets?.title_a;
+    if (titleSource?.webp || titleSource?.png) {
+      const titleWrap = document.createElement('div');
+      setClasses(titleWrap, 'absolute left-0 bottom-4 w-full flex items-center justify-center px-2 pb-1');
+      titleWrap.style.pointerEvents = 'none';
+      titleWrap.style.zIndex = '3';
+
+      const titlePicture = buildPicture({
+        webp: titleSource?.webp,
+        fallbackUrl: titleSource?.png,
+        fallbackType: 'image/png',
+        imgClass: 'object-contain',
+        imgStyle: { width: '82%', maxWidth: '150px', height: 'auto' },
+        wrapperClass: 'flex items-center justify-center',
+        noReferrer: true,
+        altText: `${content?.title || ''} title`,
+      });
+      titleWrap.appendChild(titlePicture);
+      stack.appendChild(titleWrap);
+    }
+
+    cardContainer.appendChild(stack);
+  } else {
+    const imgEl = document.createElement('img');
+    if (isKakaoWebtoon) applyNoReferrer(imgEl);
+    imgEl.loading = 'lazy';
+    imgEl.decoding = 'async';
+    imgEl.fetchPriority = 'low';
+    imgEl.src = thumb;
+    imgEl.onerror = () => {
+      if (imgEl.dataset.fallbackApplied === '1') return;
+      if (DEBUG_RUNTIME) {
+        console.warn('[thumb:error]', {
+          src: imgEl.currentSrc || imgEl.src,
+          content_id: content?.content_id ?? content?.contentId ?? content?.id,
+          source: content?.source,
+          title: content?.title,
+        });
+      }
+      imgEl.dataset.fallbackApplied = '1';
+      imgEl.src = FALLBACK_THUMB;
+    };
+    imgEl.width = width;
+    imgEl.height = height;
+    setClasses(imgEl, UI_CLASSES.cardImage);
+    cardContainer.appendChild(imgEl);
+  }
 
   // Badge logic
   if (tabId === 'my') {
@@ -3837,9 +4060,11 @@ function createCard(content, tabId, aspectClass) {
     cardContainer.appendChild(badgeEl);
   }
 
-  const gradient = document.createElement('div');
-  setClasses(gradient, UI_CLASSES.cardGradient);
-  cardContainer.appendChild(gradient);
+  if (!hasKakaoComposite) {
+    const gradient = document.createElement('div');
+    setClasses(gradient, UI_CLASSES.cardGradient);
+    cardContainer.appendChild(gradient);
+  }
 
   cardContainer.appendChild(affordOverlay);
   cardContainer.appendChild(affordHint);
