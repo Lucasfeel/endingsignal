@@ -74,16 +74,26 @@ def test_thumbnail_prefers_background_image():
         {
             "backgroundImage": "https://example.com/bg-no-ext",
             "featuredCharacterImageA": "https://example.com/char.png",
+            "featuredCharacterImageB": "https://example.com/char-b-no-ext",
             "titleImageA": "https://example.com/title.webp",
+            "titleImageB": "https://example.com/title-b-no-ext",
         },
     )
 
     entries = crawler._parse_timetable_payload(payload)
 
+    kakao_assets = entries[0]["kakao_assets"]
     assert entries[0]["thumbnail_url"] == "https://example.com/bg-no-ext.webp"
-    assert entries[0]["assets"]["kakao"]["bg"] == "https://example.com/bg-no-ext.webp"
-    assert entries[0]["assets"]["kakao"]["c1"] == "https://example.com/char.png"
-    assert entries[0]["assets"]["kakao"]["t1"] == "https://example.com/title.webp"
+    assert kakao_assets["bg"]["webp"] == "https://example.com/bg-no-ext.webp"
+    assert kakao_assets["bg"]["jpg"] == "https://example.com/bg-no-ext.jpg"
+    assert kakao_assets["character_a"]["webp"] == "https://example.com/char.webp"
+    assert kakao_assets["character_a"]["png"] == "https://example.com/char.png"
+    assert kakao_assets["character_b"]["webp"] == "https://example.com/char-b-no-ext.webp"
+    assert kakao_assets["character_b"]["png"] == "https://example.com/char-b-no-ext.png"
+    assert kakao_assets["title_a"]["webp"] == "https://example.com/title.webp"
+    assert kakao_assets["title_a"]["png"] == "https://example.com/title.png"
+    assert kakao_assets["title_b"]["webp"] == "https://example.com/title-b-no-ext.webp"
+    assert kakao_assets["title_b"]["png"] == "https://example.com/title-b-no-ext.png"
 
 
 def test_thumbnail_fallbacks_when_background_missing():
@@ -109,14 +119,6 @@ def test_normalize_kakao_asset_bg_webp():
     assert crawler._normalize_kakao_asset_url(url) == "https://example.com/bg/asset.webp"
 
 
-def test_normalize_kakao_asset_c1_png():
-    crawler = KakaoWebtoonCrawler()
-
-    url = "https://example.com/c1/asset"
-
-    assert crawler._normalize_kakao_asset_url(url) == "https://example.com/c1/asset.png"
-
-
 def test_normalize_kakao_asset_t1_webp():
     crawler = KakaoWebtoonCrawler()
 
@@ -131,3 +133,14 @@ def test_normalize_kakao_asset_keeps_extension():
     url = "https://example.com/bg/asset.jpg"
 
     assert crawler._normalize_kakao_asset_url(url) == "https://example.com/bg/asset.jpg"
+
+
+def test_build_asset_variants_strips_extension():
+    crawler = KakaoWebtoonCrawler()
+
+    url = "https://example.com/bg/asset.jpeg"
+
+    assert crawler._build_asset_variants(url, "webp", "jpg") == {
+        "webp": "https://example.com/bg/asset.webp",
+        "jpg": "https://example.com/bg/asset.jpg",
+    }

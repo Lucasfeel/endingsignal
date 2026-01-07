@@ -3730,6 +3730,85 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
    Cards
    ========================= */
 
+const applyNoReferrer = (img) => {
+  img.referrerPolicy = 'no-referrer';
+  img.setAttribute('referrerpolicy', 'no-referrer');
+};
+
+const hexToRgb = (hex) => {
+  if (!hex || typeof hex !== 'string') return null;
+  let normalized = hex.trim();
+  if (!normalized) return null;
+  if (normalized.startsWith('#')) normalized = normalized.slice(1);
+  if (normalized.length === 3) {
+    normalized = normalized
+      .split('')
+      .map((ch) => ch + ch)
+      .join('');
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
+  const intVal = parseInt(normalized, 16);
+  return {
+    r: (intVal >> 16) & 255,
+    g: (intVal >> 8) & 255,
+    b: intVal & 255,
+  };
+};
+
+const buildPicture = ({
+  webp,
+  fallbackUrl,
+  fallbackType,
+  imgClass,
+  imgStyle,
+  wrapperClass,
+  noReferrer,
+  altText,
+}) => {
+  const picture = document.createElement('picture');
+  if (wrapperClass) setClasses(picture, wrapperClass);
+  picture.style.pointerEvents = 'none';
+
+  const webpSource = webp ? document.createElement('source') : null;
+  if (webpSource) {
+    webpSource.type = 'image/webp';
+    webpSource.srcset = webp;
+    picture.appendChild(webpSource);
+  }
+
+  if (fallbackUrl) {
+    const fallbackSource = document.createElement('source');
+    fallbackSource.type = fallbackType;
+    fallbackSource.srcset = fallbackUrl;
+    picture.appendChild(fallbackSource);
+  }
+
+  const img = document.createElement('img');
+  if (noReferrer) applyNoReferrer(img);
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.fetchPriority = 'low';
+  img.alt = altText || '';
+  img.src = fallbackUrl || webp || FALLBACK_THUMB;
+  if (imgClass) setClasses(img, imgClass);
+  if (imgStyle) Object.assign(img.style, imgStyle);
+  img.onerror = () => {
+    if (img.dataset.fallbackStage === 'fallback') {
+      img.src = FALLBACK_THUMB;
+      return;
+    }
+    if (fallbackUrl && img.src !== fallbackUrl) {
+      if (webpSource) webpSource.remove();
+      img.dataset.fallbackStage = 'fallback';
+      img.src = fallbackUrl;
+      return;
+    }
+    img.src = FALLBACK_THUMB;
+  };
+  picture.appendChild(img);
+  return picture;
+};
+
 function createCard(content, tabId, aspectClass) {
   const el = document.createElement('div');
   setClasses(el, UI_CLASSES.cardRoot);
@@ -3755,11 +3834,8 @@ function createCard(content, tabId, aspectClass) {
   const authors = Array.isArray(meta?.common?.authors)
     ? meta.common.authors.join(', ')
     : '';
-  const isKakao = content?.source === 'kakaowebtoon';
-  const kakaoAssets = meta?.assets?.kakao || null;
-  const kakaoBg = kakaoAssets?.bg || meta?.common?.thumbnail_url || thumb;
-  const kakaoC1 = kakaoAssets?.c1;
-  const kakaoT1 = kakaoAssets?.t1;
+  const isKakaoWebtoon = String(content?.source || '').toLowerCase() === 'kakaowebtoon';
+  const kakaoAssets = meta?.common?.kakao_assets || null;
 
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
@@ -3784,66 +3860,86 @@ function createCard(content, tabId, aspectClass) {
   };
   const { width, height } = thumbSizeMap[aspectClass] || thumbSizeMap.default;
 
-  const applyNoReferrer = (img) => {
-    img.referrerPolicy = 'no-referrer';
-    img.setAttribute('referrerpolicy', 'no-referrer');
-  };
+  const hasKakaoComposite =
+    isKakaoWebtoon &&
+    kakaoAssets?.bg?.webp &&
+    (kakaoAssets?.character_a ||
+      kakaoAssets?.character_b ||
+      kakaoAssets?.title_a ||
+      kakaoAssets?.title_b);
 
-  if (isKakao) {
-    const bgEl = document.createElement('img');
-    applyNoReferrer(bgEl);
-    bgEl.loading = 'lazy';
-    bgEl.decoding = 'async';
-    bgEl.fetchPriority = 'low';
-    bgEl.src = kakaoBg;
-    bgEl.onerror = () => {
-      if (bgEl.dataset.fallbackApplied === '1') return;
-      if (DEBUG_RUNTIME) {
-        console.warn('[thumb:error]', {
-          src: bgEl.currentSrc || bgEl.src,
-          content_id: content?.content_id ?? content?.contentId ?? content?.id,
-          source: content?.source,
-          title: content?.title,
-        });
-      }
-      bgEl.dataset.fallbackApplied = '1';
-      bgEl.src = FALLBACK_THUMB;
-    };
-    bgEl.width = width;
-    bgEl.height = height;
-    setClasses(bgEl, cx(UI_CLASSES.cardImage, UI_CLASSES.thumbBg));
-    cardContainer.appendChild(bgEl);
+  if (hasKakaoComposite) {
+    const stack = document.createElement('div');
+    setClasses(stack, 'absolute inset-0');
 
-    if (kakaoC1) {
-      const charEl = document.createElement('img');
-      applyNoReferrer(charEl);
-      charEl.loading = 'lazy';
-      charEl.decoding = 'async';
-      charEl.fetchPriority = 'low';
-      charEl.src = kakaoC1;
-      charEl.onerror = () => {
-        charEl.style.display = 'none';
-      };
-      setClasses(charEl, UI_CLASSES.thumbChar);
-      cardContainer.appendChild(charEl);
+    const bgPicture = buildPicture({
+      webp: kakaoAssets?.bg?.webp,
+      fallbackUrl: kakaoAssets?.bg?.jpg,
+      fallbackType: 'image/jpeg',
+      imgClass: 'w-full h-full object-cover origin-top',
+      imgStyle: { transform: 'scale(1.35)' },
+      wrapperClass: 'absolute inset-0 w-full h-full overflow-hidden',
+      noReferrer: true,
+      altText: content?.title || '',
+    });
+    bgPicture.style.zIndex = '0';
+    stack.appendChild(bgPicture);
+
+    const characterSource = kakaoAssets?.character_b || kakaoAssets?.character_a;
+    if (characterSource?.webp || characterSource?.png) {
+      const charPicture = buildPicture({
+        webp: characterSource?.webp,
+        fallbackUrl: characterSource?.png,
+        fallbackType: 'image/png',
+        imgClass: 'w-full h-full object-cover object-top',
+        wrapperClass: 'absolute inset-0 w-full h-full',
+        noReferrer: true,
+        altText: `${content?.title || ''} character`,
+      });
+      charPicture.style.zIndex = '1';
+      stack.appendChild(charPicture);
     }
 
-    if (kakaoT1) {
-      const titleEl = document.createElement('img');
-      applyNoReferrer(titleEl);
-      titleEl.loading = 'lazy';
-      titleEl.decoding = 'async';
-      titleEl.fetchPriority = 'low';
-      titleEl.src = kakaoT1;
-      titleEl.onerror = () => {
-        titleEl.style.display = 'none';
-      };
-      setClasses(titleEl, UI_CLASSES.thumbTitle);
-      cardContainer.appendChild(titleEl);
+    const bgRgb = hexToRgb(kakaoAssets?.bg_color || '');
+    if (bgRgb) {
+      const gradientEl = document.createElement('div');
+      setClasses(gradientEl, 'absolute left-0 bottom-0 w-full h-1/2');
+      gradientEl.style.backgroundImage = `linear-gradient(rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0) 0%, rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0.5) 33.04%, rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0.9) 66.09%, rgb(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}) 100%)`;
+      gradientEl.style.pointerEvents = 'none';
+      gradientEl.style.zIndex = '2';
+      stack.appendChild(gradientEl);
+    } else {
+      const gradientEl = document.createElement('div');
+      setClasses(gradientEl, UI_CLASSES.cardGradient);
+      gradientEl.style.zIndex = '2';
+      stack.appendChild(gradientEl);
     }
+
+    const titleSource = kakaoAssets?.title_b || kakaoAssets?.title_a;
+    if (titleSource?.webp || titleSource?.png) {
+      const titleWrap = document.createElement('div');
+      setClasses(titleWrap, 'absolute left-0 bottom-10 w-full flex items-center justify-center');
+      titleWrap.style.pointerEvents = 'none';
+      titleWrap.style.zIndex = '3';
+
+      const titlePicture = buildPicture({
+        webp: titleSource?.webp,
+        fallbackUrl: titleSource?.png,
+        fallbackType: 'image/png',
+        imgClass: 'object-contain',
+        imgStyle: { width: '82%', maxWidth: '150px', height: 'auto' },
+        wrapperClass: 'flex items-center justify-center',
+        noReferrer: true,
+        altText: `${content?.title || ''} title`,
+      });
+      titleWrap.appendChild(titlePicture);
+      stack.appendChild(titleWrap);
+    }
+
+    cardContainer.appendChild(stack);
   } else {
     const imgEl = document.createElement('img');
-    applyNoReferrer(imgEl);
+    if (isKakaoWebtoon) applyNoReferrer(imgEl);
     imgEl.loading = 'lazy';
     imgEl.decoding = 'async';
     imgEl.fetchPriority = 'low';
@@ -3906,9 +4002,11 @@ function createCard(content, tabId, aspectClass) {
     cardContainer.appendChild(badgeEl);
   }
 
-  const gradient = document.createElement('div');
-  setClasses(gradient, UI_CLASSES.cardGradient);
-  cardContainer.appendChild(gradient);
+  if (!hasKakaoComposite) {
+    const gradient = document.createElement('div');
+    setClasses(gradient, UI_CLASSES.cardGradient);
+    cardContainer.appendChild(gradient);
+  }
 
   cardContainer.appendChild(affordOverlay);
   cardContainer.appendChild(affordHint);
