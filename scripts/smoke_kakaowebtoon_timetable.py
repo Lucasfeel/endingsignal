@@ -20,10 +20,13 @@ async def main():
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         for placement in placements:
             entries, meta, error = await crawler._fetch_placement_entries(session, placement, headers)
-            label = "weekday" if placement.startswith("timetable_") else "completed"
+            label = "completed" if placement == config.KAKAOWEBTOON_PLACEMENT_COMPLETED else "weekday"
             print(f"\n[{label}:{placement}] http={meta.get('http_status')} count={meta.get('count')} error={error}")
             for entry in entries[:3]:
-                print(f"  - {entry['title']} ({entry['content_id']})")
+                print(
+                    f"  - {entry['title']} ({entry['content_id']}) "
+                    f"thumbnail_url={entry.get('thumbnail_url')}"
+                )
 
 
 if __name__ == "__main__":

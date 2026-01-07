@@ -44,7 +44,8 @@ KAKAOWEBTOON_PLACEMENTS_WEEKDAYS = [
     ).split(",")
     if placement.strip()
 ]
-KAKAOWEBTOON_PLACEMENT_COMPLETED = os.getenv("KAKAOWEBTOON_PLACEMENT_COMPLETED", "completed")
+KAKAOWEBTOON_PLACEMENT_COMPLETED = os.getenv("KAKAOWEBTOON_PLACEMENT_COMPLETED", "timetable_completed")
+KAKAOWEBTOON_COMPLETED_GENRE = os.getenv("KAKAOWEBTOON_COMPLETED_GENRE", "all")
 
 # --- Webtoon API ---
 NAVER_API_URL = "https://comic.naver.com/api/webtoon/titlelist"

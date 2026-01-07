@@ -71,7 +71,33 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
     @staticmethod
     def _select_thumbnail_url(content: Dict) -> Optional[str]:
-        for key in ("thumbnailUrl", "thumbnail_url", "featuredImageUrl", "posterImageUrl", "coverImageUrl"):
+        priority_keys = (
+            "backgroundImage",
+            "featuredCharacterImageA",
+            "featuredCharacterImageB",
+            "featuredCharacterAnimationFirstFrame",
+            "titleImageA",
+            "titleImageB",
+        )
+        for key in priority_keys:
+            value = content.get(key)
+            if value:
+                return value
+
+        anchor_clip = content.get("anchorClip")
+        if isinstance(anchor_clip, dict):
+            clip_value = anchor_clip.get("clipFirstFrame")
+            if clip_value:
+                return clip_value
+
+        fallback_keys = (
+            "thumbnailUrl",
+            "thumbnail_url",
+            "featuredImageUrl",
+            "posterImageUrl",
+            "coverImageUrl",
+        )
+        for key in fallback_keys:
             value = content.get(key)
             if value:
                 return value
@@ -147,8 +173,13 @@ class KakaoWebtoonCrawler(ContentCrawler):
         meta = {"http_status": None, "count": 0, "stopped_reason": None}
         error = None
         url = config.KAKAOWEBTOON_TIMETABLE_BASE_URL
+        params = {"placement": placement}
+        if placement == config.KAKAOWEBTOON_PLACEMENT_COMPLETED:
+            completed_genre = config.KAKAOWEBTOON_COMPLETED_GENRE
+            if completed_genre:
+                params["genre"] = completed_genre
         try:
-            async with session.get(url, headers=headers, params={"placement": placement}) as response:
+            async with session.get(url, headers=headers, params=params) as response:
                 meta["http_status"] = response.status
                 text = await response.text()
                 if response.status >= 400:
@@ -231,6 +262,8 @@ class KakaoWebtoonCrawler(ContentCrawler):
         all_map = {**ongoing_map, **finished_map}
         fetch_meta["fetched_count"] = len(all_map)
         fetch_meta["is_suspicious_empty"] = total_parsed == 0
+        if not finished_map:
+            fetch_meta.setdefault("health_notes", []).append("finished_count_zero")
 
         print(f"수집 완료: ongoing={len(ongoing_map)} finished={len(finished_map)} total={len(all_map)}")
         return ongoing_map, hiatus_map, finished_map, all_map, fetch_meta
