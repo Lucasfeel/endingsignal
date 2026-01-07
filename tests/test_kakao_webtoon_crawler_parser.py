@@ -20,7 +20,7 @@ def _build_payload(author_order, content_overrides=None):
                                     "title": "테스트웹툰",
                                     "seoId": "test-seo",
                                     "authors": author_order,
-                                    "backgroundImage": "https://example.com/bg.jpg",
+                                    "backgroundImage": "https://example.com/bg-no-ext",
                                     **content_overrides,
                                 }
                             }
@@ -54,7 +54,7 @@ def test_parse_timetable_payload_and_weekday_union():
     assert entry["content_id"] == "1001"
     assert entry["title"] == "테스트웹툰"
     assert entry["authors"] == ["작가A", "작가B"]
-    assert entry["thumbnail_url"] == "https://example.com/bg.jpg"
+    assert entry["thumbnail_url"] == "https://example.com/bg-no-ext"
     assert entry["weekdays"] == {"tue", "fri"}
 
 
@@ -65,3 +65,34 @@ def test_parse_completed_payload_shape():
 
     assert len(entries) == 1
     assert entries[0]["content_id"] == "1001"
+
+
+def test_thumbnail_prefers_background_image():
+    crawler = KakaoWebtoonCrawler()
+    payload = _build_payload(
+        [{"name": "작가A"}],
+        {
+            "backgroundImage": "https://example.com/bg-no-ext",
+            "featuredCharacterImageA": "https://example.com/char.png",
+            "titleImageA": "https://example.com/title.webp",
+        },
+    )
+
+    entries = crawler._parse_timetable_payload(payload)
+
+    assert entries[0]["thumbnail_url"] == "https://example.com/bg-no-ext"
+
+
+def test_thumbnail_fallbacks_when_background_missing():
+    crawler = KakaoWebtoonCrawler()
+    payload = _build_payload(
+        [{"name": "작가A"}],
+        {
+            "backgroundImage": None,
+            "featuredCharacterImageA": "https://example.com/char.png",
+        },
+    )
+
+    entries = crawler._parse_timetable_payload(payload)
+
+    assert entries[0]["thumbnail_url"] == "https://example.com/char.png"
