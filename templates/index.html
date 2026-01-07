@@ -11,13 +11,13 @@
             --bg-app: #121212;
             --bg-card: #1E1E1E;
             --bg-overlay: rgba(30, 30, 30, 0.85);
-            --brand-primary: #4F46E5;
-            --brand-secondary: #FACC15;
+            --brand-primary: #FFFFFF;
+            --brand-secondary: #FFFFFF;
             --text-white: #FFFFFF;
             --text-gray-100: #E5E5E5;
             --text-gray-400: #A3A3A3;
             --text-gray-600: #D4D4D4;
-            --brand-glow: 0 0 10px rgba(79, 70, 229, 0.5);
+            --brand-glow: 0 0 12px rgba(255, 255, 255, 0.2);
         }
 
         body {
@@ -56,10 +56,10 @@
             box-shadow: var(--brand-glow);
         }
         .neon-text-glow {
-            text-shadow: 0 0 8px rgba(79, 70, 229, 0.6);
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
         }
         .neon-drop-shadow {
-            filter: drop-shadow(0 0 5px rgba(79, 70, 229, 0.6));
+            filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
         }
 
         /* Glassmorphism - Updated to match unified BG #121212 */
@@ -78,9 +78,9 @@
             font-size: 10px; font-weight: bold; color: #fff;
         }
         .l1-logo.active {
-            border: 2px solid var(--brand-primary);
+            border: 2px solid rgba(255, 255, 255, 0.6);
             opacity: 1;
-            box-shadow: var(--brand-glow);
+            box-shadow: none;
         }
         .l1-logo.inactive { opacity: 0.4; filter: grayscale(100%); }
 
@@ -96,8 +96,8 @@
         }
         .l2-tab.active {
             color: var(--text-white);
-            border-bottom-color: var(--brand-primary);
-            text-shadow: 0 0 5px rgba(255,255,255,0.3);
+            border-bottom-color: rgba(255, 255, 255, 0.7);
+            text-shadow: 0 0 5px rgba(255,255,255,0.4);
         }
 
         /* Skeleton Loading */
@@ -132,7 +132,13 @@
         <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 glass-bg border-b border-white/5 flex items-center justify-between transition-all duration-300 relative">
             <div id="homeButton" class="flex items-center cursor-pointer spring-bounce">
                 <h1 class="text-[22px] font-black text-white tracking-tighter flex items-center">
-                    EN<span class="text-[#FACC15] text-[20px] ml-0.5 -rotate-15 transform block">🔔</span>
+                    EN
+                    <span class="ml-1 flex items-center text-white">
+                        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M15 17H9c-1.7 0-3-1.3-3-3v-3a6 6 0 0 1 12 0v3c0 1.7-1.3 3-3 3z"></path>
+                            <path d="M9.5 17a2.5 2.5 0 0 0 5 0"></path>
+                        </svg>
+                    </span>
                 </h1>
             </div>
             <div class="flex items-center gap-4">
@@ -226,7 +232,7 @@
                     <span id="subscribeStateDot" class="h-2 w-2 rounded-full bg-white/50"></span>
                     <span id="subscribeStateText"></span>
                 </div>
-                <p id="subscribeInlineError" class="text-red-400 text-xs mt-2"></p>
+                <p id="subscribeInlineError" class="text-white/80 text-xs mt-2"></p>
                 <div class="flex justify-end gap-2">
                     <button id="subscribeButton" data-ui="modal-primary" onclick="toggleSubscriptionFromModal()">구독/해제</button>
                 </div>
@@ -333,14 +339,14 @@
                                         <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
                                         <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
                                     </div>
-                                    <p id="myPagePwError" class="text-xs text-red-400 min-h-[16px]"></p>
+                                    <p id="myPagePwError" class="text-xs text-white/80 min-h-[16px]"></p>
                                     <button id="myPagePwSubmit" data-ui="btn-primary" type="button" class="w-full h-11">변경하기</button>
                                 </div>
 
                                 <div data-ui="page-card" class="space-y-3">
                                     <h3 data-ui="section-title">로그아웃</h3>
                                     <p class="text-xs text-white/60">계정에서 안전하게 로그아웃합니다.</p>
-                                    <button id="myPageLogoutBtn" data-ui="btn-secondary" type="button" class="w-full h-11 text-red-300 border-red-400/50">로그아웃</button>
+                                    <button id="myPageLogoutBtn" data-ui="btn-secondary" type="button" class="w-full h-11 text-white/90 border-white/30">로그아웃</button>
                                 </div>
                             </div>
                         </div>
@@ -360,7 +366,7 @@
                         <label data-ui="input-label">비밀번호 확인</label>
                         <input id="authPasswordConfirm" data-ui="input-sm" type="password" class="px-4 py-3 rounded-xl" placeholder="비밀번호를 다시 입력" />
                     </div>
-                    <p id="authError" class="text-red-400 text-xs min-h-[16px]"></p>
+                    <p id="authError" class="text-white/80 text-xs min-h-[16px]"></p>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
                     <button id="authCloseBtn" data-ui="modal-secondary">닫기</button>
@@ -368,7 +374,7 @@
                 </div>
                 <div class="mt-4 text-center text-xs text-gray-400">
                     <span id="authModeHintText">계정이 없으신가요?</span>
-                    <button id="authToggleModeBtn" type="button" class="ml-1 text-[#4F46E5] font-bold hover:underline">회원가입</button>
+                    <button id="authToggleModeBtn" type="button" class="ml-1 text-white/90 font-bold hover:text-white hover:underline">회원가입</button>
                 </div>
             </div>
         </div>
