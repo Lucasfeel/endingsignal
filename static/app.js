@@ -96,7 +96,7 @@ const UI_CLASSES = {
 
   // Cards
   cardRoot:
-    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5',
+    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:bg-white/5 focus-visible:shadow-sm',
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
@@ -2218,7 +2218,7 @@ function buildSearchEmptyActions() {
   return [clearAction, recommendAction];
 }
 
-const SEARCH_ACTIVE_CLASSES = ['ring-2', 'ring-white/50', 'bg-white/5'];
+const SEARCH_ACTIVE_CLASSES = ['bg-white/5', 'shadow-sm'];
 
 const getSearchResultElements = () => {
   if (!UI.searchPageResults) return [];
@@ -3541,7 +3541,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       if (!token) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">로그인하기</button></div>';
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#3F3F46] text-white text-xs font-bold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10">로그인하기</button></div>';
 
           const loginBtn = document.getElementById('myTabLoginButton');
           if (loginBtn) {
