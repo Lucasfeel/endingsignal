@@ -8,16 +8,16 @@
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
     <style>
         :root {
-            --bg-app: #121212;
-            --bg-card: #1E1E1E;
-            --bg-overlay: rgba(30, 30, 30, 0.85);
-            --brand-primary: #4F46E5;
-            --brand-secondary: #FACC15;
+            --bg-app: #0B0B0B;
+            --bg-card: #141414;
+            --bg-overlay: rgba(20, 20, 20, 0.9);
+            --brand-primary: #FFFFFF;
+            --brand-secondary: #FFFFFF;
             --text-white: #FFFFFF;
-            --text-gray-100: #E5E5E5;
-            --text-gray-400: #A3A3A3;
-            --text-gray-600: #D4D4D4;
-            --brand-glow: 0 0 10px rgba(79, 70, 229, 0.5);
+            --text-gray-100: #D6D6D6;
+            --text-gray-400: #A8A8A8;
+            --text-gray-600: #D6D6D6;
+            --brand-glow: 0 0 12px rgba(255, 255, 255, 0.14);
         }
 
         body {
@@ -56,15 +56,15 @@
             box-shadow: var(--brand-glow);
         }
         .neon-text-glow {
-            text-shadow: 0 0 8px rgba(79, 70, 229, 0.6);
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
         }
         .neon-drop-shadow {
-            filter: drop-shadow(0 0 5px rgba(79, 70, 229, 0.6));
+            filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.16));
         }
 
         /* Glassmorphism - Updated to match unified BG #121212 */
         .glass-bg {
-            background-color: rgba(18, 18, 18, 0.95); /* #121212 with slight transparency */
+            background-color: rgba(11, 11, 11, 0.95); /* #0B0B0B with slight transparency */
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
@@ -76,18 +76,21 @@
             background-color: #333; /* Placeholder for logo img */
             display: flex; align-items: center; justify-content: center;
             font-size: 10px; font-weight: bold; color: #fff;
+            border: none !important;
         }
         .l1-logo.active {
-            border: 2px solid var(--brand-primary);
             opacity: 1;
-            box-shadow: var(--brand-glow);
+            box-shadow: none;
+            background-color: rgba(255, 255, 255, 0.06);
         }
-        .l1-logo.inactive { opacity: 0.4; filter: grayscale(100%); }
+        .l1-logo.inactive { opacity: 1; filter: none; }
+        .l1-logo.is-bright { opacity: 1; filter: none; }
+        .l1-logo.is-dim { opacity: 0.28; }
 
         /* L2 Text Tab Styles */
         .l2-tab {
             font-size: 13px; font-weight: 500;
-            color: var(--text-gray-600);
+            color: #FFFFFF;
             padding: 8px 0;
             margin-right: 20px;
             white-space: nowrap;
@@ -96,8 +99,8 @@
         }
         .l2-tab.active {
             color: var(--text-white);
-            border-bottom-color: var(--brand-primary);
-            text-shadow: 0 0 5px rgba(255,255,255,0.3);
+            border-bottom-color: #FFFFFF;
+            text-shadow: 0 0 5px rgba(255,255,255,0.2);
         }
 
         /* Skeleton Loading */
@@ -129,29 +132,30 @@
 
     <div id="app-root">
         <!-- 3.1 Sticky Header -->
-        <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 glass-bg border-b border-white/5 flex items-center justify-between transition-all duration-300 relative">
+        <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 glass-bg border-b border-white/10 flex items-center justify-between transition-all duration-300 relative">
             <div id="homeButton" class="flex items-center cursor-pointer spring-bounce">
                 <h1 class="text-[22px] font-black text-white tracking-tighter flex items-center">
-                    EN<span class="text-[#FACC15] text-[20px] ml-0.5 -rotate-15 transform block">🔔</span>
+                    EN
+                    <span class="ml-1 flex items-center text-white">
+                        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M15 17H9c-1.7 0-3-1.3-3-3v-3a6 6 0 0 1 12 0v3c0 1.7-1.3 3-3 3z"></path>
+                            <path d="M9.5 17a2.5 2.5 0 0 0 5 0"></path>
+                        </svg>
+                    </span>
                 </h1>
             </div>
             <div class="flex items-center gap-4">
                 <div id="headerSearchWrap" class="relative flex items-center">
-                    <button id="searchButton" data-ui="header-btn" class="h-10 w-10">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <button id="searchButton" data-ui="header-search-icon" aria-label="검색">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <line x1="16.65" y1="16.65" x2="21" y2="21"></line>
+                        </svg>
                     </button>
-                    <input
-                        id="searchInput"
-                        type="text"
-                        data-ui="search-trigger"
-                        class="ml-2 w-[180px]"
-                        placeholder="검색"
-                        readonly
-                    />
                 </div>
-                <button id="profileButton" data-ui="header-btn" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap">
+                <button id="profileButton" data-ui="header-profile-icon" aria-haspopup="menu" aria-expanded="false">
                     <span class="sr-only">프로필</span>
-                    <span id="profileButtonText">Login</span>
+                    <span id="profileButtonText"></span>
                 </button>
                 <div id="profileMenu" data-ui="menu-wrap" class="hidden absolute right-4 top-[48px] z-[130] w-40" role="menu" aria-label="프로필 메뉴">
                     <button id="profileMenuMy" data-ui="menu-item" role="menuitem">내 구독</button>
@@ -165,7 +169,7 @@
 
         <main class="min-h-screen pb-24 relative">
              <!-- Top Filters Container -->
-            <div id="filtersWrapper" class="sticky top-[56px] z-40 bg-[#121212] transition-colors duration-300">
+            <div id="filtersWrapper" class="sticky top-[56px] z-40 bg-[#0B0B0B] transition-colors duration-300">
                 <!-- Tab 5 Specific: Segmented Toggle -->
                 <div id="mySubToggleContainer" class="hidden px-4 py-3 h-[68px] items-center">
                     <div class="w-full bg-[#2A2A2A] h-[44px] rounded-lg p-1 flex relative">
@@ -186,7 +190,7 @@
                 <div id="l1FilterContainer" class="h-[60px] flex items-center px-4 overflow-x-auto hide-scrollbar gap-3 hidden"></div>
 
                 <!-- L2 Filter (Detail Categories) -->
-                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b border-white/5 hidden"></div>
+                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b border-white/10 hidden"></div>
             </div>
 
             <!-- Content Grid -->
@@ -211,7 +215,7 @@
         </main>
 
         <!-- 3.2 Bottom Navigation -->
-        <nav id="bottomNav" class="fixed bottom-0 max-w-[480px] w-full mx-auto glass-bg border-t border-white/5 z-50 pb-safe h-[64px] grid grid-cols-5">
+        <nav id="bottomNav" class="fixed bottom-0 max-w-[480px] w-full mx-auto glass-bg border-t border-white/10 z-50 pb-safe h-[64px] grid grid-cols-5">
             <!-- Icons injected via JS -->
         </nav>
 
@@ -222,11 +226,11 @@
                 <h2 id="subscribeModalTitle" data-ui="modal-title">완결 알림 받기</h2>
                 <p id="modalWebtoonTitle" data-ui="modal-body" class="mb-4"></p>
                 <div id="modalWebtoonLinkContainer" class="mb-6 text-sm"></div>
-                <div id="subscribeStateLine" class="flex items-center gap-2 text-white/70 text-sm mb-2">
+                <div id="subscribeStateLine" class="flex items-center gap-2 text-white/85 text-sm mb-2">
                     <span id="subscribeStateDot" class="h-2 w-2 rounded-full bg-white/50"></span>
                     <span id="subscribeStateText"></span>
                 </div>
-                <p id="subscribeInlineError" class="text-red-400 text-xs mt-2"></p>
+                <p id="subscribeInlineError" class="text-white/90 text-xs mt-2"></p>
                 <div class="flex justify-end gap-2">
                     <button id="subscribeButton" data-ui="modal-primary" onclick="toggleSubscriptionFromModal()">구독/해제</button>
                 </div>
@@ -256,7 +260,7 @@
                                 <div id="searchPageLoading" data-ui="grid-2to3" class="hidden"></div>
                                 <div id="searchPageResults" data-ui="grid-2to3"></div>
 
-                                <div id="searchPageEmpty" class="hidden flex flex-col items-center gap-3 rounded-xl border border-white/5 bg-white/5 px-4 py-10 text-center">
+                                <div id="searchPageEmpty" class="hidden flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-10 text-center">
                                     <div id="searchEmptyTitle" data-ui="search-empty-title">검색 결과가 없어요</div>
                                     <div id="searchEmptySubtitle" data-ui="search-empty-msg" class="max-w-[320px] text-center text-sm text-white/70">
                                         다른 키워드로 검색해보세요.
@@ -333,14 +337,14 @@
                                         <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
                                         <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
                                     </div>
-                                    <p id="myPagePwError" class="text-xs text-red-400 min-h-[16px]"></p>
+                                    <p id="myPagePwError" class="text-xs text-white/90 min-h-[16px]"></p>
                                     <button id="myPagePwSubmit" data-ui="btn-primary" type="button" class="w-full h-11">변경하기</button>
                                 </div>
 
                                 <div data-ui="page-card" class="space-y-3">
                                     <h3 data-ui="section-title">로그아웃</h3>
                                     <p class="text-xs text-white/60">계정에서 안전하게 로그아웃합니다.</p>
-                                    <button id="myPageLogoutBtn" data-ui="btn-secondary" type="button" class="w-full h-11 text-red-300 border-red-400/50">로그아웃</button>
+                                    <button id="myPageLogoutBtn" data-ui="btn-secondary" type="button" class="w-full h-11 text-white border-white/30">로그아웃</button>
                                 </div>
                             </div>
                         </div>
@@ -350,7 +354,7 @@
         </div>
         <div id="authModal" data-ui="modal-wrap" class="fixed inset-0 z-[120] hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" tabindex="-1">
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-modal-overlay="true"></div>
-            <div class="relative z-10 border border-white/5" data-ui="modal-card">
+            <div class="relative z-10 border border-white/10" data-ui="modal-card">
                 <h2 id="authTitle" data-ui="modal-title">로그인</h2>
                 <p data-ui="modal-body" class="mb-4">이메일과 비밀번호를 입력해주세요.</p>
                 <div class="space-y-3">
@@ -360,7 +364,7 @@
                         <label data-ui="input-label">비밀번호 확인</label>
                         <input id="authPasswordConfirm" data-ui="input-sm" type="password" class="px-4 py-3 rounded-xl" placeholder="비밀번호를 다시 입력" />
                     </div>
-                    <p id="authError" class="text-red-400 text-xs min-h-[16px]"></p>
+                    <p id="authError" class="text-white/90 text-xs min-h-[16px]"></p>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
                     <button id="authCloseBtn" data-ui="modal-secondary">닫기</button>
@@ -368,7 +372,7 @@
                 </div>
                 <div class="mt-4 text-center text-xs text-gray-400">
                     <span id="authModeHintText">계정이 없으신가요?</span>
-                    <button id="authToggleModeBtn" type="button" class="ml-1 text-[#4F46E5] font-bold hover:underline">회원가입</button>
+                    <button id="authToggleModeBtn" type="button" class="ml-1 text-white font-bold hover:text-white hover:underline">회원가입</button>
                 </div>
             </div>
         </div>
