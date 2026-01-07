@@ -32,6 +32,20 @@ KAKAOPAGE_VERIFY_TIMEOUT_SECONDS = int(os.getenv("KAKAOPAGE_VERIFY_TIMEOUT_SECON
 KAKAOPAGE_VERIFY_JITTER_MIN_SECONDS = float(os.getenv("KAKAOPAGE_VERIFY_JITTER_MIN_SECONDS", 0.05))
 KAKAOPAGE_VERIFY_JITTER_MAX_SECONDS = float(os.getenv("KAKAOPAGE_VERIFY_JITTER_MAX_SECONDS", 0.25))
 
+# --- Kakao Webtoon Timetable ---
+KAKAOWEBTOON_TIMETABLE_BASE_URL = os.getenv(
+    "KAKAOWEBTOON_TIMETABLE_BASE_URL", "https://gateway-kw.kakao.com/section/v2/timetables/days"
+)
+KAKAOWEBTOON_PLACEMENTS_WEEKDAYS = [
+    placement.strip()
+    for placement in os.getenv(
+        "KAKAOWEBTOON_PLACEMENTS_WEEKDAYS",
+        "timetable_mon,timetable_tue,timetable_wed,timetable_thu,timetable_fri,timetable_sat,timetable_sun",
+    ).split(",")
+    if placement.strip()
+]
+KAKAOWEBTOON_PLACEMENT_COMPLETED = os.getenv("KAKAOWEBTOON_PLACEMENT_COMPLETED", "completed")
+
 # --- Webtoon API ---
 NAVER_API_URL = "https://comic.naver.com/api/webtoon/titlelist"
 WEEKDAYS = {

@@ -11,14 +11,13 @@ load_dotenv()
 
 from database import create_standalone_connection, get_cursor
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
-from crawlers.kakaopage_webtoon_crawler import KakaoPageWebtoonCrawler
+from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
 from services.cdc_event_service import record_due_scheduled_completions
 from utils.time import now_kst_naive
 
 ALL_CRAWLERS = [
-    # Kakao now uses the KakaoPage-backed crawler for the "kakaowebtoon" source.
     NaverWebtoonCrawler,
-    KakaoPageWebtoonCrawler,
+    KakaoWebtoonCrawler,
 ]
 
 
