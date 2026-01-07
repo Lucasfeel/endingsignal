@@ -2483,11 +2483,6 @@ async function performSearch(q) {
     const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
     let normalizedItems = items;
 
-    if (normalizedQuery) {
-      const filtered = items.filter((item) => matchesSearchQuery(item, normalizedQuery));
-      if (filtered.length) normalizedItems = filtered;
-    }
-
     if ((!normalizedItems.length && hasWhitespace) || (!items.length && hasWhitespace)) {
       const pool = Array.isArray(STATE.rendering?.list) ? STATE.rendering.list : [];
       const fallbackResults = pool.filter((item) => matchesSearchQuery(item, normalizedQuery));

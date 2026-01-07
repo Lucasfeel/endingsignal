@@ -99,6 +99,9 @@ def search_contents():
         normalized_query = normalize_search_text(query)
         content_type = request.args.get('type', 'webtoon')
         source = request.args.get('source', 'all')
+        allowed_types = {'webtoon', 'novel', 'ott', 'series'}
+        if not content_type or content_type == 'all' or content_type not in allowed_types:
+            content_type = None
 
         if not normalized_query:
             return jsonify([])
@@ -128,11 +131,12 @@ def search_contents():
 
         thresholds = compute_thresholds(q_len)
 
-        where_clauses = [
-            "content_type = %s",
-            f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))",
-        ]
-        params = [content_type, like_param, like_param]
+        where_clauses = [f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))"]
+        params = [like_param, like_param]
+
+        if content_type:
+            where_clauses.insert(0, "content_type = %s")
+            params.insert(0, content_type)
 
         if source != 'all':
             where_clauses.append("source = %s")
@@ -146,7 +150,7 @@ def search_contents():
             params.extend([normalized_query, title_threshold, normalized_query, author_threshold])
 
         search_query = f"""
-            SELECT content_id, title, status, meta, source
+            SELECT content_id, title, status, meta, source, content_type
             FROM contents
             WHERE {' AND '.join(where_clauses)}
             ORDER BY
