@@ -100,11 +100,10 @@ const UI_CLASSES = {
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
-  thumbBg: 'block w-full h-full object-cover z-0',
-  thumbChar:
-    'absolute right-0 bottom-0 h-[115%] w-auto object-contain pointer-events-none select-none z-[2]',
-  thumbTitle:
-    'absolute left-2 bottom-2 max-w-[70%] h-auto object-contain pointer-events-none select-none z-[2] drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]',
+  thumbStack: 'thumbStack kakaoStack',
+  thumbBg: 'thumbBg',
+  thumbChar: 'thumbChar',
+  thumbTitle: 'thumbTitle',
   cardTextWrap: 'px-0.5',
   cardTitle: 'font-bold text-[13px] text-white leading-[1.4] truncate',
   cardMeta: 'text-[11px] text-[#A8A8A8] mt-0.5 truncate',
@@ -1719,6 +1718,7 @@ const formatDateKST = (isoString) => {
 
 async function initApp() {
   applyDataUiClasses();
+  ensureKakaoThumbStyles();
   setupAuthModalListeners();
   setupProfileButton();
   updateProfileButtonState();
@@ -1794,6 +1794,64 @@ const MAX_RECENT_SEARCHES = 10;
 const RECENTLY_OPENED_KEY = 'es_recently_opened';
 const MAX_RECENTLY_OPENED = 12;
 const POPULAR_GRID_LIMIT = 9;
+const KAKAO_THUMB_STYLE_ID = 'kakao-thumb-styles';
+
+function ensureKakaoThumbStyles() {
+  if (document.getElementById(KAKAO_THUMB_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = KAKAO_THUMB_STYLE_ID;
+  style.textContent = `
+.kakaoStack {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+.kakaoStack::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 45%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  pointer-events: none;
+  z-index: 1;
+}
+.kakaoStack .thumbBg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+.kakaoStack .thumbChar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  pointer-events: none;
+  z-index: 2;
+}
+.kakaoStack .thumbTitle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 36%;
+  object-fit: contain;
+  object-position: center bottom;
+  pointer-events: none;
+  z-index: 3;
+  padding: 0 6px 6px 6px;
+  box-sizing: border-box;
+}
+`;
+  document.head.appendChild(style);
+}
 
 const getSearchType = () =>
   STATE.activeTab === 'my'
