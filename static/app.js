@@ -60,26 +60,26 @@ const ICONS = {
 const UI_CLASSES = {
   // Buttons
   btnPrimary:
-    'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
+    'h-10 px-4 rounded-xl bg-white/16 text-white text-sm font-semibold hover:bg-white/22 active:bg-white/28 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
-    'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
+    'h-10 px-4 rounded-xl bg-white/10 text-white text-sm hover:bg-white/14 active:bg-white/18 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
   // Icon buttons
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
   iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
   headerBtn:
-    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/15 text-xs text-white hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.18)] spring-bounce',
+    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/20 text-xs text-white hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.18)] spring-bounce',
 
   // Chips & empty states
-  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
+  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white hover:bg-white/8 active:bg-white/10',
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
-  emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
+  emptyMsg: 'mt-2 text-sm text-[#D6D6D6] max-w-md',
 
   // Typography helpers
-  sectionTitle: 'text-base font-semibold text-white/90',
-  sectionSubtle: 'text-sm text-white/70',
+  sectionTitle: 'text-base font-semibold text-white',
+  sectionSubtle: 'text-sm text-[#D6D6D6]',
 
   // Card overlays/badges
   starBadge:
@@ -90,7 +90,7 @@ const UI_CLASSES = {
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100',
   affordHint:
     'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
-  pillHint: 'text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1',
+  pillHint: 'text-[11px] text-white bg-black/40 rounded-full px-2 py-1',
 
   // Cards
   cardRoot:
@@ -99,24 +99,24 @@ const UI_CLASSES = {
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
   cardTextWrap: 'px-0.5',
-  cardTitle: 'font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate',
-  cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
+  cardTitle: 'font-bold text-[13px] text-white leading-[1.4] truncate',
+  cardMeta: 'text-[11px] text-[#A8A8A8] mt-0.5 truncate',
 
   // Inputs
   inputBase:
     'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/15 text-sm text-white focus:outline-none focus:border-white/30',
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/18 text-sm text-white focus:outline-none focus:border-white/30',
   searchTrigger:
-    'transition-all duration-200 bg-[#1E1E1E] border border-white/15 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
-  inputLabel: 'block text-sm font-medium text-gray-300',
+    'transition-all duration-200 bg-[#1E1E1E] border border-white/18 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
+  inputLabel: 'block text-sm font-medium text-[#D6D6D6]',
 
   // Modal
   modalWrap: 'flex items-center justify-center',
   modalCard:
     'relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
   modalTitle: 'text-xl font-bold mb-1 text-white',
-  modalBodyText: 'text-gray-400 text-sm',
+  modalBodyText: 'text-[#A8A8A8] text-sm',
 
   // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
@@ -124,18 +124,18 @@ const UI_CLASSES = {
   // Pages & overlays
   pageOverlayRoot: 'bg-[#121212] text-white',
   pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
-  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/18 p-4 backdrop-blur-sm',
 
   // Menus
-  menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
+  menuWrap: 'rounded-xl bg-black/90 border border-white/18 shadow-2xl overflow-hidden py-2',
   menuItem:
     'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
   menuItemDanger:
-    'w-full text-left px-4 py-3 text-sm text-white/90 hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
+    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
 
   // Pagination controls
   loadMoreBtn:
-    'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-white/40 transition-colors',
+    'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-[#D6D6D6] font-semibold hover:border-white/30 transition-colors',
 
   // Toasts
   toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
@@ -1633,9 +1633,9 @@ function syncSubscribeModalUI(content) {
     UI.subscribeStateText.textContent = showLoadingState ? '불러오는 중' : showSubscribedState ? '구독 중' : '';
   }
   if (UI.subscribeStateDot) {
-    UI.subscribeStateDot.classList.remove('bg-white/80', 'bg-white/50');
-    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-white/80');
-    else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/50');
+    UI.subscribeStateDot.classList.remove('bg-white', 'bg-white/60');
+    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-white');
+    else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/60');
   }
 
   if (UI.subscribeButton) {
@@ -3087,7 +3087,7 @@ function renderBottomNav() {
     const btn = document.createElement('button');
     const isActive = STATE.activeTab === tab.id;
     btn.className = `flex flex-col items-center justify-center w-full spring-bounce ${
-      isActive ? 'text-white' : 'text-[#525252]'
+      isActive ? 'text-white' : 'text-[#8A8A8A]'
     }`;
 
     const iconClass = isActive ? 'scale-110 neon-drop-shadow' : 'scale-100';
@@ -3452,7 +3452,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       if (!token) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-white/15 border border-white/20 text-white text-xs font-bold">로그인하기</button></div>';
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">로그인하기</button></div>';
 
           const loginBtn = document.getElementById('myTabLoginButton');
           if (loginBtn) {
@@ -3469,7 +3469,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       } catch (e) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-white/15 border border-white/20 text-white text-xs font-bold">다시 시도</button></div>';
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">다시 시도</button></div>';
 
           const retryBtn = document.getElementById('mySubRetryButton');
           if (retryBtn) {
@@ -3920,7 +3920,7 @@ function openSubscribeModal(content, opts = {}) {
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.className =
-        'inline-block text-white/90 underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
+        'inline-block text-white underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
       titleEl.textContent = titleText;
