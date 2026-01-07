@@ -3769,7 +3769,6 @@ function createCard(content, tabId, aspectClass) {
   const imgEl = document.createElement('img');
   imgEl.referrerPolicy = 'no-referrer';
   imgEl.setAttribute('referrerpolicy', 'no-referrer');
-  imgEl.crossOrigin = 'anonymous';
   imgEl.loading = 'lazy';
   imgEl.decoding = 'async';
   imgEl.fetchPriority = 'low';

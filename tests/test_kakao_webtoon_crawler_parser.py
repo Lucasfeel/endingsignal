@@ -54,7 +54,7 @@ def test_parse_timetable_payload_and_weekday_union():
     assert entry["content_id"] == "1001"
     assert entry["title"] == "테스트웹툰"
     assert entry["authors"] == ["작가A", "작가B"]
-    assert entry["thumbnail_url"] == "https://example.com/bg-no-ext"
+    assert entry["thumbnail_url"] == "https://example.com/bg-no-ext.webp"
     assert entry["weekdays"] == {"tue", "fri"}
 
 
@@ -80,7 +80,7 @@ def test_thumbnail_prefers_background_image():
 
     entries = crawler._parse_timetable_payload(payload)
 
-    assert entries[0]["thumbnail_url"] == "https://example.com/bg-no-ext"
+    assert entries[0]["thumbnail_url"] == "https://example.com/bg-no-ext.webp"
 
 
 def test_thumbnail_fallbacks_when_background_missing():
@@ -96,3 +96,27 @@ def test_thumbnail_fallbacks_when_background_missing():
     entries = crawler._parse_timetable_payload(payload)
 
     assert entries[0]["thumbnail_url"] == "https://example.com/char.png"
+
+
+def test_normalize_kakao_asset_bg_webp():
+    crawler = KakaoWebtoonCrawler()
+
+    url = "https://example.com/bg/asset"
+
+    assert crawler._normalize_kakao_asset_url(url) == "https://example.com/bg/asset.webp"
+
+
+def test_normalize_kakao_asset_c1_png():
+    crawler = KakaoWebtoonCrawler()
+
+    url = "https://example.com/c1/asset"
+
+    assert crawler._normalize_kakao_asset_url(url) == "https://example.com/c1/asset.png"
+
+
+def test_normalize_kakao_asset_keeps_extension():
+    crawler = KakaoWebtoonCrawler()
+
+    url = "https://example.com/bg/asset.jpg"
+
+    assert crawler._normalize_kakao_asset_url(url) == "https://example.com/bg/asset.jpg"

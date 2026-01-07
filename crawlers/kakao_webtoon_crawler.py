@@ -110,6 +110,28 @@ class KakaoWebtoonCrawler(ContentCrawler):
                 return value
         return None
 
+    @staticmethod
+    def _normalize_kakao_asset_url(url: Optional[str]) -> Optional[str]:
+        if not isinstance(url, str):
+            return url
+        trimmed = url.strip()
+        if not trimmed:
+            return trimmed
+        lowered = trimmed.lower()
+        if lowered.endswith((".webp", ".png", ".jpg", ".jpeg", ".gif")):
+            return trimmed
+        if "/bg/" in trimmed:
+            return f"{trimmed}.webp"
+        if "/c1/" in trimmed or "/c2/" in trimmed:
+            return f"{trimmed}.png"
+        if "/t1/" in trimmed or "/t2/" in trimmed:
+            return f"{trimmed}.webp"
+        if "/c1a/" in trimmed:
+            return f"{trimmed}.webp"
+        if "/aclip/" in trimmed:
+            return f"{trimmed}.webp"
+        return f"{trimmed}.webp"
+
     def _build_entry(self, content: Dict) -> Optional[Dict]:
         content_id = str(content.get("id") or "").strip()
         if not content_id:
@@ -119,6 +141,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
             return None
         authors = self._normalize_authors(content.get("authors") or [])
         thumbnail_url = self._select_thumbnail_url(content)
+        thumbnail_url = self._normalize_kakao_asset_url(thumbnail_url) if thumbnail_url else None
         seo_id = content.get("seoId") or content.get("seo_id") or content.get("seoID")
         slug = seo_id or title or content_id
         content_url = (
