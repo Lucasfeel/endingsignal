@@ -3758,8 +3758,8 @@ function createCard(content, tabId, aspectClass) {
   const isKakao = content?.source === 'kakaowebtoon';
   const kakaoAssets = meta?.assets?.kakao || null;
   const kakaoBg = kakaoAssets?.bg || meta?.common?.thumbnail_url || thumb;
-  const kakaoC2 = kakaoAssets?.c2;
-  const kakaoT2 = kakaoAssets?.t2;
+  const kakaoC1 = kakaoAssets?.c1;
+  const kakaoT1 = kakaoAssets?.t1;
 
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
@@ -3814,13 +3814,13 @@ function createCard(content, tabId, aspectClass) {
     setClasses(bgEl, cx(UI_CLASSES.cardImage, UI_CLASSES.thumbBg));
     cardContainer.appendChild(bgEl);
 
-    if (kakaoC2) {
+    if (kakaoC1) {
       const charEl = document.createElement('img');
       applyNoReferrer(charEl);
       charEl.loading = 'lazy';
       charEl.decoding = 'async';
       charEl.fetchPriority = 'low';
-      charEl.src = kakaoC2;
+      charEl.src = kakaoC1;
       charEl.onerror = () => {
         charEl.style.display = 'none';
       };
@@ -3828,13 +3828,13 @@ function createCard(content, tabId, aspectClass) {
       cardContainer.appendChild(charEl);
     }
 
-    if (kakaoT2) {
+    if (kakaoT1) {
       const titleEl = document.createElement('img');
       applyNoReferrer(titleEl);
       titleEl.loading = 'lazy';
       titleEl.decoding = 'async';
       titleEl.fetchPriority = 'low';
-      titleEl.src = kakaoT2;
+      titleEl.src = kakaoT1;
       titleEl.onerror = () => {
         titleEl.style.display = 'none';
       };

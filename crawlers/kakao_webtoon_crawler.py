@@ -143,12 +143,12 @@ class KakaoWebtoonCrawler(ContentCrawler):
         thumbnail_url = self._select_thumbnail_url(content)
         thumbnail_url = self._normalize_kakao_asset_url(thumbnail_url) if thumbnail_url else None
         kakao_bg = self._normalize_kakao_asset_url(content.get("backgroundImage"))
-        kakao_c2 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageB"))
-        kakao_t2 = self._normalize_kakao_asset_url(content.get("titleImageB"))
+        kakao_c1 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageA"))
+        kakao_t1 = self._normalize_kakao_asset_url(content.get("titleImageA"))
         kakao_assets = {
             "bg": kakao_bg,
-            "c2": kakao_c2,
-            "t2": kakao_t2,
+            "c1": kakao_c1,
+            "t1": kakao_t1,
         }
         kakao_assets = {key: value for key, value in kakao_assets.items() if value}
         seo_id = content.get("seoId") or content.get("seo_id") or content.get("seoID")
