@@ -1860,13 +1860,13 @@ function ensureKakaoThumbStyles() {
 }
 .kakaoTitleImg {
   width: 100%;
-  max-width: 115px;
+  max-width: 138px;
   height: auto;
   display: block;
 }
 @media (min-width: 1024px) {
   .kakaoTitleImg {
-    max-width: 150px;
+    max-width: 180px;
   }
 }
 `;
@@ -4013,11 +4013,12 @@ function createCard(content, tabId, aspectClass) {
       setClasses(titleWrap, 'absolute w-full');
       titleWrap.style.left = '0';
       titleWrap.style.right = '0';
-      titleWrap.style.bottom = '40px';
+      titleWrap.style.bottom = '26px';
       titleWrap.style.display = 'flex';
       titleWrap.style.justifyContent = 'center';
       titleWrap.style.alignItems = 'center';
       titleWrap.style.padding = '0 8px';
+      titleWrap.style.paddingBottom = '2px';
       titleWrap.style.boxSizing = 'border-box';
       titleWrap.style.pointerEvents = 'none';
       titleWrap.style.zIndex = '3';
@@ -4027,7 +4028,7 @@ function createCard(content, tabId, aspectClass) {
         fallbackUrl: titleSource?.png,
         fallbackType: 'image/png',
         imgClass: 'object-contain kakaoTitleImg',
-        imgStyle: { width: '100%', maxWidth: '115px', height: 'auto', display: 'block' },
+        imgStyle: { width: '100%', maxWidth: '138px', height: 'auto', display: 'block' },
         wrapperClass: 'flex items-center justify-center',
         noReferrer: true,
         altText: `${content?.title || ''} title`,
