@@ -1849,6 +1849,17 @@ function ensureKakaoThumbStyles() {
   padding: 0 6px 6px 6px;
   box-sizing: border-box;
 }
+.kakaoTitleImg {
+  width: 100%;
+  max-width: 115px;
+  height: auto;
+  display: block;
+}
+@media (min-width: 1024px) {
+  .kakaoTitleImg {
+    max-width: 150px;
+  }
+}
 `;
   document.head.appendChild(style);
 }
@@ -3935,7 +3946,7 @@ function createCard(content, tabId, aspectClass) {
       fallbackUrl: kakaoAssets?.bg?.jpg,
       fallbackType: 'image/jpeg',
       imgClass: 'w-full h-full object-cover origin-top',
-      imgStyle: { transform: 'scale(1.35) translateY(-8%)' },
+      imgStyle: { transform: 'scale(1.35) translateY(8%)' },
       wrapperClass: 'absolute inset-0 w-full h-full overflow-hidden',
       noReferrer: true,
       altText: content?.title || '',
@@ -3979,9 +3990,10 @@ function createCard(content, tabId, aspectClass) {
       setClasses(titleWrap, 'absolute w-full');
       titleWrap.style.left = '0';
       titleWrap.style.right = '0';
-      titleWrap.style.bottom = '6px';
+      titleWrap.style.bottom = '40px';
       titleWrap.style.display = 'flex';
       titleWrap.style.justifyContent = 'center';
+      titleWrap.style.alignItems = 'center';
       titleWrap.style.padding = '0 8px';
       titleWrap.style.boxSizing = 'border-box';
       titleWrap.style.pointerEvents = 'none';
@@ -3991,8 +4003,8 @@ function createCard(content, tabId, aspectClass) {
         webp: titleSource?.webp,
         fallbackUrl: titleSource?.png,
         fallbackType: 'image/png',
-        imgClass: 'object-contain',
-        imgStyle: { width: '82%', maxWidth: '150px', height: 'auto' },
+        imgClass: 'object-contain kakaoTitleImg',
+        imgStyle: { width: '100%', maxWidth: '115px', height: 'auto', display: 'block' },
         wrapperClass: 'flex items-center justify-center',
         noReferrer: true,
         altText: `${content?.title || ''} title`,
