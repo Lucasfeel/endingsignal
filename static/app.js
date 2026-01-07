@@ -108,7 +108,7 @@ const UI_CLASSES = {
   inputBase:
     'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/18 text-sm text-white focus:outline-none focus:border-white/30',
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border-0 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/7',
   searchTrigger:
     'transition-all duration-200 bg-[#1E1E1E] border border-white/18 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
   inputLabel: 'block text-sm font-medium text-[#D6D6D6]',
