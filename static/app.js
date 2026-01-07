@@ -96,7 +96,7 @@ const UI_CLASSES = {
 
   // Cards
   cardRoot:
-    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:bg-white/5 focus-visible:shadow-sm',
+    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:shadow-sm',
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
@@ -2281,7 +2281,7 @@ function buildSearchEmptyActions() {
   return [clearAction, recommendAction];
 }
 
-const SEARCH_ACTIVE_CLASSES = ['bg-white/5', 'shadow-sm'];
+const SEARCH_ACTIVE_CLASSES = ['shadow-sm'];
 
 const getSearchResultElements = () => {
   if (!UI.searchPageResults) return [];
@@ -3935,7 +3935,7 @@ function createCard(content, tabId, aspectClass) {
       fallbackUrl: kakaoAssets?.bg?.jpg,
       fallbackType: 'image/jpeg',
       imgClass: 'w-full h-full object-cover origin-top',
-      imgStyle: { transform: 'scale(1.35)' },
+      imgStyle: { transform: 'scale(1.35) translateY(-8%)' },
       wrapperClass: 'absolute inset-0 w-full h-full overflow-hidden',
       noReferrer: true,
       altText: content?.title || '',
