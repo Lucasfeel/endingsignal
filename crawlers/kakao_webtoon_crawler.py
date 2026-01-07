@@ -120,16 +120,6 @@ class KakaoWebtoonCrawler(ContentCrawler):
         lowered = trimmed.lower()
         if lowered.endswith((".webp", ".png", ".jpg", ".jpeg", ".gif")):
             return trimmed
-        if "/bg/" in trimmed:
-            return f"{trimmed}.webp"
-        if "/c1/" in trimmed or "/c2/" in trimmed:
-            return f"{trimmed}.png"
-        if "/t1/" in trimmed or "/t2/" in trimmed:
-            return f"{trimmed}.webp"
-        if "/c1a/" in trimmed:
-            return f"{trimmed}.webp"
-        if "/aclip/" in trimmed:
-            return f"{trimmed}.webp"
         return f"{trimmed}.webp"
 
     def _build_entry(self, content: Dict) -> Optional[Dict]:
@@ -143,12 +133,17 @@ class KakaoWebtoonCrawler(ContentCrawler):
         thumbnail_url = self._select_thumbnail_url(content)
         thumbnail_url = self._normalize_kakao_asset_url(thumbnail_url) if thumbnail_url else None
         kakao_bg = self._normalize_kakao_asset_url(content.get("backgroundImage"))
+        thumbnail_url = kakao_bg or thumbnail_url
         kakao_c1 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageA"))
+        kakao_c2 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageB"))
         kakao_t1 = self._normalize_kakao_asset_url(content.get("titleImageA"))
+        kakao_t2 = self._normalize_kakao_asset_url(content.get("titleImageB"))
         kakao_assets = {
             "bg": kakao_bg,
             "c1": kakao_c1,
+            "c2": kakao_c2,
             "t1": kakao_t1,
+            "t2": kakao_t2,
         }
         kakao_assets = {key: value for key, value in kakao_assets.items() if value}
         seo_id = content.get("seoId") or content.get("seo_id") or content.get("seoID")

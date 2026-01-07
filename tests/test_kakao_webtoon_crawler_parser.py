@@ -74,7 +74,9 @@ def test_thumbnail_prefers_background_image():
         {
             "backgroundImage": "https://example.com/bg-no-ext",
             "featuredCharacterImageA": "https://example.com/char.png",
+            "featuredCharacterImageB": "https://example.com/char-b-no-ext",
             "titleImageA": "https://example.com/title.webp",
+            "titleImageB": "https://example.com/title-b-no-ext",
         },
     )
 
@@ -83,7 +85,9 @@ def test_thumbnail_prefers_background_image():
     assert entries[0]["thumbnail_url"] == "https://example.com/bg-no-ext.webp"
     assert entries[0]["assets"]["kakao"]["bg"] == "https://example.com/bg-no-ext.webp"
     assert entries[0]["assets"]["kakao"]["c1"] == "https://example.com/char.png"
+    assert entries[0]["assets"]["kakao"]["c2"] == "https://example.com/char-b-no-ext.webp"
     assert entries[0]["assets"]["kakao"]["t1"] == "https://example.com/title.webp"
+    assert entries[0]["assets"]["kakao"]["t2"] == "https://example.com/title-b-no-ext.webp"
 
 
 def test_thumbnail_fallbacks_when_background_missing():
@@ -109,12 +113,12 @@ def test_normalize_kakao_asset_bg_webp():
     assert crawler._normalize_kakao_asset_url(url) == "https://example.com/bg/asset.webp"
 
 
-def test_normalize_kakao_asset_c1_png():
+def test_normalize_kakao_asset_c1_webp():
     crawler = KakaoWebtoonCrawler()
 
     url = "https://example.com/c1/asset"
 
-    assert crawler._normalize_kakao_asset_url(url) == "https://example.com/c1/asset.png"
+    assert crawler._normalize_kakao_asset_url(url) == "https://example.com/c1/asset.webp"
 
 
 def test_normalize_kakao_asset_t1_webp():
