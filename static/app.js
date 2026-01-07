@@ -3681,12 +3681,23 @@ function createCard(content, tabId, aspectClass) {
   setClasses(affordHint, cx(UI_CLASSES.pillHint, UI_CLASSES.affordHint));
 
   const imgEl = document.createElement('img');
-  imgEl.src = thumb;
+  imgEl.referrerPolicy = 'no-referrer';
+  imgEl.setAttribute('referrerpolicy', 'no-referrer');
+  imgEl.crossOrigin = 'anonymous';
   imgEl.loading = 'lazy';
   imgEl.decoding = 'async';
   imgEl.fetchPriority = 'low';
+  imgEl.src = thumb;
   imgEl.onerror = () => {
     if (imgEl.dataset.fallbackApplied === '1') return;
+    if (DEBUG_RUNTIME) {
+      console.warn('[thumb:error]', {
+        src: imgEl.currentSrc || imgEl.src,
+        content_id: content?.content_id ?? content?.contentId ?? content?.id,
+        source: content?.source,
+        title: content?.title,
+      });
+    }
     imgEl.dataset.fallbackApplied = '1';
     imgEl.src = FALLBACK_THUMB;
   };
