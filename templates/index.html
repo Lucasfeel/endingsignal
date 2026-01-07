@@ -146,23 +146,18 @@
             </div>
             <div class="flex items-center gap-4">
                 <div id="headerSearchWrap" class="relative flex items-center">
-                    <button id="searchButton" data-ui="header-btn" class="h-10 w-10">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <button id="searchButton" data-ui="header-search-icon" aria-label="검색">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <line x1="16.65" y1="16.65" x2="21" y2="21"></line>
+                        </svg>
                     </button>
-                    <input
-                        id="searchInput"
-                        type="text"
-                        data-ui="search-trigger"
-                        class="ml-2 w-[180px]"
-                        placeholder="검색"
-                        readonly
-                    />
                 </div>
-                <button id="profileButton" data-ui="header-btn" aria-haspopup="menu" aria-expanded="false" class="h-[32px] px-3 whitespace-nowrap">
+                <button id="profileButton" data-ui="header-profile-icon" aria-haspopup="menu" aria-expanded="false">
                     <span class="sr-only">프로필</span>
-                    <span id="profileButtonText">Login</span>
+                    <span id="profileButtonText"></span>
                 </button>
-                <div id="profileMenu" data-ui="menu-wrap" class="hidden absolute right-4 top-[48px] z-[130] w-40" role="menu" aria-label="프로필 메뉴">
+                <div id="profileMenu" data-ui="menu-wrap" class="hidden fixed right-4 top-[56px] z-[1000] w-40" role="menu" aria-label="프로필 메뉴">
                     <button id="profileMenuMy" data-ui="menu-item" role="menuitem">내 구독</button>
                     <button id="profileMenuMyPage" data-ui="menu-item" role="menuitem">마이페이지</button>
                     <button id="profileMenuLogout" data-ui="menu-item-danger" role="menuitem">로그아웃</button>
