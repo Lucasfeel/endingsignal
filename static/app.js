@@ -108,7 +108,7 @@ const UI_CLASSES = {
   inputBase:
     'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/18 text-sm text-white focus:outline-none focus:border-white/30',
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border-0 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/7',
   searchTrigger:
     'transition-all duration-200 bg-[#1E1E1E] border border-white/18 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
   inputLabel: 'block text-sm font-medium text-[#D6D6D6]',
@@ -428,6 +428,8 @@ const STATE = {
     user: null,
     isChecking: false,
     uiMode: 'login',
+    avatarImageFailed: false,
+    lastAvatarUrl: null,
   },
 
   // subscriptions
@@ -2838,6 +2840,55 @@ function setupMyPagePasswordChange() {
    Auth modal + profile
    ========================= */
 
+const PROFILE_OUTLINE_ICON = `
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true">
+    <circle cx="12" cy="8" r="4"></circle>
+    <path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path>
+  </svg>
+`;
+
+const AVATAR_BG_COLORS = ['#F4C7C3', '#F9D6A5', '#C7E9F6', '#D6C7F6', '#CFE6D4', '#F6C7DE'];
+
+const getUserDisplayName = (user) => {
+  const name = safeString(user?.name, '');
+  const fullName = safeString(user?.full_name, '');
+  const email = safeString(user?.email, '');
+  const username = safeString(user?.username, '');
+  return name || fullName || email || username || '';
+};
+
+const getUserInitial = (user) => {
+  const displayName = getUserDisplayName(user);
+  const normalized = displayName.trim().normalize('NFKC');
+  const match = normalized.match(/[A-Za-z0-9]/);
+  return match ? match[0].toUpperCase() : '?';
+};
+
+const getAvatarUrl = (user) => {
+  const candidates = [
+    user?.profile_image_url,
+    user?.avatar_url,
+    user?.profileImageUrl,
+    user?.avatarUrl,
+    user?.image_url,
+    user?.imageUrl,
+  ]
+    .map((value) => safeString(value, '').trim())
+    .filter(Boolean);
+  return candidates[0] || '';
+};
+
+const getAvatarBgColor = (user) => {
+  const key = safeString(user?.id, '') || getUserDisplayName(user);
+  if (!key) return AVATAR_BG_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) % 1024;
+  }
+  return AVATAR_BG_COLORS[hash % AVATAR_BG_COLORS.length];
+};
+
 const isProfileMenuOpen = () => UI.profileMenu && !UI.profileMenu.classList.contains('hidden');
 
 function closeProfileMenu() {
@@ -2872,16 +2923,46 @@ function updateProfileButtonState() {
 
   btn.className = UI_CLASSES.headerProfileIcon;
 
-  if (isLoggedIn) {
-    textEl.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
-    btn.setAttribute('title', safeString(user?.email, '프로필'));
-  } else {
-    textEl.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
+  if (!isLoggedIn) {
+    textEl.innerHTML = PROFILE_OUTLINE_ICON;
     btn.setAttribute('title', 'Login');
+    btn.setAttribute('aria-label', 'Login');
     closeProfileMenu();
+    return;
   }
+
+  const displayName = getUserDisplayName(user);
+  const avatarUrl = getAvatarUrl(user);
+  if (STATE.auth.lastAvatarUrl !== avatarUrl) {
+    STATE.auth.lastAvatarUrl = avatarUrl;
+    STATE.auth.avatarImageFailed = false;
+  }
+  const shouldShowImage = Boolean(avatarUrl) && !STATE.auth.avatarImageFailed;
+
+  textEl.innerHTML = '';
+  const avatarWrap = document.createElement('span');
+  avatarWrap.className = 'inline-flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold';
+  avatarWrap.style.background = getAvatarBgColor(user);
+  avatarWrap.style.color = '#111';
+
+  if (shouldShowImage) {
+    const img = document.createElement('img');
+    img.src = avatarUrl;
+    img.alt = displayName ? `${displayName} avatar` : 'User avatar';
+    img.className = 'h-9 w-9 rounded-full object-cover';
+    img.addEventListener('error', () => {
+      if (STATE.auth.avatarImageFailed) return;
+      STATE.auth.avatarImageFailed = true;
+      updateProfileButtonState();
+    });
+    avatarWrap.appendChild(img);
+  } else {
+    avatarWrap.textContent = getUserInitial(user);
+  }
+
+  textEl.appendChild(avatarWrap);
+  btn.setAttribute('title', displayName || '프로필');
+  btn.setAttribute('aria-label', displayName ? `프로필 ${displayName}` : '프로필');
 }
 
 function setupProfileButton() {
