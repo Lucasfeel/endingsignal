@@ -68,8 +68,10 @@ const UI_CLASSES = {
   // Icon buttons
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
   iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
-  headerBtn:
-    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/20 text-xs text-white hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.18)] spring-bounce',
+  headerSearchIcon:
+    'h-10 w-10 flex items-center justify-center rounded-lg bg-[#0b0b0b] text-white hover:bg-white/5 active:bg-white/8 transition-colors',
+  headerProfileIcon:
+    'h-10 w-10 flex items-center justify-center rounded-lg text-white hover:bg-white/5 active:bg-white/8 transition-colors',
 
   // Chips & empty states
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white hover:bg-white/8 active:bg-white/10',
@@ -640,7 +642,8 @@ const DATA_UI_CLASS_MAP = {
   'search-empty-title': UI_CLASSES.emptyTitle,
   'search-empty-msg': UI_CLASSES.emptyMsg,
   'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
-  'header-btn': UI_CLASSES.headerBtn,
+  'header-search-icon': UI_CLASSES.headerSearchIcon,
+  'header-profile-icon': UI_CLASSES.headerProfileIcon,
   'grid-2to3': UI_CLASSES.grid2to3,
   'modal-wrap': UI_CLASSES.modalWrap,
   'modal-card': UI_CLASSES.modalCard,
@@ -2865,17 +2868,15 @@ function updateProfileButtonState() {
   const isAuth = STATE.auth.isAuthenticated;
   const user = STATE.auth.user;
 
-  const baseClasses = cx(UI_CLASSES.headerBtn, 'h-[32px] px-3 whitespace-nowrap');
-  btn.className = cx(baseClasses, isAuth ? 'bg-white/15 border-white/30' : '');
+  btn.className = UI_CLASSES.headerProfileIcon;
 
   if (isAuth && user) {
-    const initial = safeString(user.email || user.id || 'M', 'M')
-      .charAt(0)
-      .toUpperCase();
-    textEl.textContent = initial || 'M';
+    textEl.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
     btn.setAttribute('title', safeString(user.email, '로그아웃'));
   } else {
-    textEl.textContent = 'Login';
+    textEl.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
     btn.setAttribute('title', 'Login');
     closeProfileMenu();
   }
