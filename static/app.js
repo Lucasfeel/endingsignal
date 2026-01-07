@@ -1799,7 +1799,7 @@ function setupScrollEffect() {
    ========================= */
 
 const RECENT_SEARCH_KEY = 'es_recent_searches';
-const MAX_RECENT_SEARCHES = 10;
+const MAX_RECENT_SEARCHES = 8;
 const RECENTLY_OPENED_KEY = 'es_recently_opened';
 const MAX_RECENTLY_OPENED = 12;
 const POPULAR_GRID_LIMIT = 9;
@@ -1943,6 +1943,12 @@ const loadRecentSearches = () => {
   return [];
 };
 
+const normalizeSearchTerm = (term) =>
+  (term || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
 const saveRecentSearches = (list) => {
   try {
     localStorage.setItem(RECENT_SEARCH_KEY, JSON.stringify(list.slice(0, MAX_RECENT_SEARCHES)));
@@ -2071,10 +2077,11 @@ const addRecentSearch = (query) => {
   const q = (query || '').trim();
   if (!q) return;
   const list = loadRecentSearches();
-  const existingIdx = list.findIndex((item) => item.toLowerCase() === q.toLowerCase());
-  if (existingIdx >= 0) list.splice(existingIdx, 1);
-  list.unshift(q);
-  saveRecentSearches(list);
+  const normalized = normalizeSearchTerm(q);
+  const filtered = list.filter((item) => normalizeSearchTerm(item) !== normalized);
+  filtered.unshift(q);
+  const next = filtered.slice(0, MAX_RECENT_SEARCHES);
+  saveRecentSearches(next);
   renderRecentSearches();
 };
 
@@ -2439,8 +2446,8 @@ async function performSearch(q) {
   const query = (q || '').trim();
   const normalizedQuery = normalizeSearchText(query);
   const hasWhitespace = /\s/.test(query);
-  const effectiveType = getSearchType();
-  const source = getSearchSource(effectiveType);
+  const effectiveType = 'all';
+  const source = 'all';
 
   STATE.search.query = query;
   STATE.search.activeIndex = -1;
@@ -2535,7 +2542,7 @@ function openSearchPage({ focus = true } = {}) {
   }
 
   if (STATE.search.query) {
-    if (STATE.search.results.length) renderSearchResults(STATE.search.results, getSearchType());
+    if (STATE.search.results.length) renderSearchResults(STATE.search.results, 'all');
     else performSearch(STATE.search.query);
   } else {
     showSearchIdle();
