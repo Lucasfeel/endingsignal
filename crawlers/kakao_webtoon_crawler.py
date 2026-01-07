@@ -71,6 +71,13 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
     @staticmethod
     def _select_thumbnail_url(content: Dict) -> Optional[str]:
+        def _get_trimmed(value: object) -> Optional[str]:
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if trimmed:
+                    return trimmed
+            return None
+
         priority_keys = (
             "backgroundImage",
             "featuredCharacterImageA",
@@ -80,13 +87,13 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "titleImageB",
         )
         for key in priority_keys:
-            value = content.get(key)
+            value = _get_trimmed(content.get(key))
             if value:
                 return value
 
         anchor_clip = content.get("anchorClip")
         if isinstance(anchor_clip, dict):
-            clip_value = anchor_clip.get("clipFirstFrame")
+            clip_value = _get_trimmed(anchor_clip.get("clipFirstFrame"))
             if clip_value:
                 return clip_value
 
@@ -98,10 +105,32 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "coverImageUrl",
         )
         for key in fallback_keys:
-            value = content.get(key)
+            value = _get_trimmed(content.get(key))
             if value:
                 return value
         return None
+
+    @staticmethod
+    def _normalize_kakao_asset_url(url: Optional[str]) -> Optional[str]:
+        if not isinstance(url, str):
+            return url
+        trimmed = url.strip()
+        if not trimmed:
+            return trimmed
+        lowered = trimmed.lower()
+        if lowered.endswith((".webp", ".png", ".jpg", ".jpeg", ".gif")):
+            return trimmed
+        if "/bg/" in trimmed:
+            return f"{trimmed}.webp"
+        if "/c1/" in trimmed or "/c2/" in trimmed:
+            return f"{trimmed}.png"
+        if "/t1/" in trimmed or "/t2/" in trimmed:
+            return f"{trimmed}.webp"
+        if "/c1a/" in trimmed:
+            return f"{trimmed}.webp"
+        if "/aclip/" in trimmed:
+            return f"{trimmed}.webp"
+        return f"{trimmed}.webp"
 
     def _build_entry(self, content: Dict) -> Optional[Dict]:
         content_id = str(content.get("id") or "").strip()
@@ -112,18 +141,31 @@ class KakaoWebtoonCrawler(ContentCrawler):
             return None
         authors = self._normalize_authors(content.get("authors") or [])
         thumbnail_url = self._select_thumbnail_url(content)
+        thumbnail_url = self._normalize_kakao_asset_url(thumbnail_url) if thumbnail_url else None
+        kakao_bg = self._normalize_kakao_asset_url(content.get("backgroundImage"))
+        kakao_c2 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageB"))
+        kakao_t2 = self._normalize_kakao_asset_url(content.get("titleImageB"))
+        kakao_assets = {
+            "bg": kakao_bg,
+            "c2": kakao_c2,
+            "t2": kakao_t2,
+        }
+        kakao_assets = {key: value for key, value in kakao_assets.items() if value}
         seo_id = content.get("seoId") or content.get("seo_id") or content.get("seoID")
         slug = seo_id or title or content_id
         content_url = (
             f"https://webtoon.kakao.com/content/{urllib.parse.quote(str(slug))}/{content_id}"
         )
-        return {
+        entry = {
             "content_id": content_id,
             "title": title,
             "authors": authors,
             "thumbnail_url": thumbnail_url,
             "content_url": content_url,
         }
+        if kakao_assets:
+            entry["assets"] = {"kakao": kakao_assets}
+        return entry
 
     def _parse_timetable_payload(self, payload: Dict) -> List[Dict]:
         entries: List[Dict] = []
@@ -311,6 +353,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
                     "weekdays": webtoon_data.get("weekdays", []),
                 },
             }
+            kakao_assets = (webtoon_data.get("assets") or {}).get("kakao")
+            if kakao_assets:
+                meta_data["assets"] = {"kakao": kakao_assets}
 
             if content_id in db_existing_ids:
                 record = (
