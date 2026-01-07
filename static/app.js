@@ -68,8 +68,10 @@ const UI_CLASSES = {
   // Icon buttons
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
   iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
-  headerBtn:
-    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/20 text-xs text-white hover:border-white/30 hover:shadow-[0_0_12px_rgba(255,255,255,0.18)] spring-bounce',
+  headerSearchIcon:
+    'h-10 w-10 flex items-center justify-center rounded-lg bg-[#0b0b0b] text-white hover:bg-white/5 active:bg-white/8 transition-colors',
+  headerProfileIcon:
+    'h-10 w-10 flex items-center justify-center rounded-lg text-white hover:bg-white/5 active:bg-white/8 transition-colors',
 
   // Chips & empty states
   chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white hover:bg-white/8 active:bg-white/10',
@@ -106,7 +108,7 @@ const UI_CLASSES = {
   inputBase:
     'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/18 text-sm text-white focus:outline-none focus:border-white/30',
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border-0 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/7',
   searchTrigger:
     'transition-all duration-200 bg-[#1E1E1E] border border-white/18 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
   inputLabel: 'block text-sm font-medium text-[#D6D6D6]',
@@ -426,6 +428,8 @@ const STATE = {
     user: null,
     isChecking: false,
     uiMode: 'login',
+    avatarImageFailed: false,
+    lastAvatarUrl: null,
   },
 
   // subscriptions
@@ -640,7 +644,8 @@ const DATA_UI_CLASS_MAP = {
   'search-empty-title': UI_CLASSES.emptyTitle,
   'search-empty-msg': UI_CLASSES.emptyMsg,
   'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
-  'header-btn': UI_CLASSES.headerBtn,
+  'header-search-icon': UI_CLASSES.headerSearchIcon,
+  'header-profile-icon': UI_CLASSES.headerProfileIcon,
   'grid-2to3': UI_CLASSES.grid2to3,
   'modal-wrap': UI_CLASSES.modalWrap,
   'modal-card': UI_CLASSES.modalCard,
@@ -2835,6 +2840,55 @@ function setupMyPagePasswordChange() {
    Auth modal + profile
    ========================= */
 
+const PROFILE_OUTLINE_ICON = `
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true">
+    <circle cx="12" cy="8" r="4"></circle>
+    <path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path>
+  </svg>
+`;
+
+const AVATAR_BG_COLORS = ['#F4C7C3', '#F9D6A5', '#C7E9F6', '#D6C7F6', '#CFE6D4', '#F6C7DE'];
+
+const getUserDisplayName = (user) => {
+  const name = safeString(user?.name, '');
+  const fullName = safeString(user?.full_name, '');
+  const email = safeString(user?.email, '');
+  const username = safeString(user?.username, '');
+  return name || fullName || email || username || '';
+};
+
+const getUserInitial = (user) => {
+  const displayName = getUserDisplayName(user);
+  const normalized = displayName.trim().normalize('NFKC');
+  const match = normalized.match(/[A-Za-z0-9]/);
+  return match ? match[0].toUpperCase() : '?';
+};
+
+const getAvatarUrl = (user) => {
+  const candidates = [
+    user?.profile_image_url,
+    user?.avatar_url,
+    user?.profileImageUrl,
+    user?.avatarUrl,
+    user?.image_url,
+    user?.imageUrl,
+  ]
+    .map((value) => safeString(value, '').trim())
+    .filter(Boolean);
+  return candidates[0] || '';
+};
+
+const getAvatarBgColor = (user) => {
+  const key = safeString(user?.id, '') || getUserDisplayName(user);
+  if (!key) return AVATAR_BG_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) % 1024;
+  }
+  return AVATAR_BG_COLORS[hash % AVATAR_BG_COLORS.length];
+};
+
 const isProfileMenuOpen = () => UI.profileMenu && !UI.profileMenu.classList.contains('hidden');
 
 function closeProfileMenu() {
@@ -2863,22 +2917,52 @@ function updateProfileButtonState() {
   btn.setAttribute('aria-expanded', isProfileMenuOpen() ? 'true' : 'false');
 
   const isAuth = STATE.auth.isAuthenticated;
+  const hasToken = Boolean(getAccessToken());
+  const isLoggedIn = isAuth || hasToken;
   const user = STATE.auth.user;
 
-  const baseClasses = cx(UI_CLASSES.headerBtn, 'h-[32px] px-3 whitespace-nowrap');
-  btn.className = cx(baseClasses, isAuth ? 'bg-white/15 border-white/30' : '');
+  btn.className = UI_CLASSES.headerProfileIcon;
 
-  if (isAuth && user) {
-    const initial = safeString(user.email || user.id || 'M', 'M')
-      .charAt(0)
-      .toUpperCase();
-    textEl.textContent = initial || 'M';
-    btn.setAttribute('title', safeString(user.email, '로그아웃'));
-  } else {
-    textEl.textContent = 'Login';
+  if (!isLoggedIn) {
+    textEl.innerHTML = PROFILE_OUTLINE_ICON;
     btn.setAttribute('title', 'Login');
+    btn.setAttribute('aria-label', 'Login');
     closeProfileMenu();
+    return;
   }
+
+  const displayName = getUserDisplayName(user);
+  const avatarUrl = getAvatarUrl(user);
+  if (STATE.auth.lastAvatarUrl !== avatarUrl) {
+    STATE.auth.lastAvatarUrl = avatarUrl;
+    STATE.auth.avatarImageFailed = false;
+  }
+  const shouldShowImage = Boolean(avatarUrl) && !STATE.auth.avatarImageFailed;
+
+  textEl.innerHTML = '';
+  const avatarWrap = document.createElement('span');
+  avatarWrap.className = 'inline-flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold';
+  avatarWrap.style.background = getAvatarBgColor(user);
+  avatarWrap.style.color = '#111';
+
+  if (shouldShowImage) {
+    const img = document.createElement('img');
+    img.src = avatarUrl;
+    img.alt = displayName ? `${displayName} avatar` : 'User avatar';
+    img.className = 'h-9 w-9 rounded-full object-cover';
+    img.addEventListener('error', () => {
+      if (STATE.auth.avatarImageFailed) return;
+      STATE.auth.avatarImageFailed = true;
+      updateProfileButtonState();
+    });
+    avatarWrap.appendChild(img);
+  } else {
+    avatarWrap.textContent = getUserInitial(user);
+  }
+
+  textEl.appendChild(avatarWrap);
+  btn.setAttribute('title', displayName || '프로필');
+  btn.setAttribute('aria-label', displayName ? `프로필 ${displayName}` : '프로필');
 }
 
 function setupProfileButton() {
@@ -2886,7 +2970,9 @@ function setupProfileButton() {
   if (!btn) return;
 
   btn.onclick = () => {
-    if (STATE.auth.isAuthenticated) {
+    const isAuth = STATE.auth.isAuthenticated;
+    const hasToken = Boolean(getAccessToken());
+    if (isAuth || hasToken) {
       toggleProfileMenu();
     } else {
       openAuthModal({ reason: 'profile' });
