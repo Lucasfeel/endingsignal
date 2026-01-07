@@ -71,6 +71,13 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
     @staticmethod
     def _select_thumbnail_url(content: Dict) -> Optional[str]:
+        def _get_trimmed(value: object) -> Optional[str]:
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if trimmed:
+                    return trimmed
+            return None
+
         priority_keys = (
             "backgroundImage",
             "featuredCharacterImageA",
@@ -80,13 +87,13 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "titleImageB",
         )
         for key in priority_keys:
-            value = content.get(key)
+            value = _get_trimmed(content.get(key))
             if value:
                 return value
 
         anchor_clip = content.get("anchorClip")
         if isinstance(anchor_clip, dict):
-            clip_value = anchor_clip.get("clipFirstFrame")
+            clip_value = _get_trimmed(anchor_clip.get("clipFirstFrame"))
             if clip_value:
                 return clip_value
 
@@ -98,7 +105,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "coverImageUrl",
         )
         for key in fallback_keys:
-            value = content.get(key)
+            value = _get_trimmed(content.get(key))
             if value:
                 return value
         return None
