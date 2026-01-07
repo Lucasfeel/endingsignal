@@ -3976,7 +3976,14 @@ function createCard(content, tabId, aspectClass) {
     const titleSource = kakaoAssets?.title_b || kakaoAssets?.title_a;
     if (titleSource?.webp || titleSource?.png) {
       const titleWrap = document.createElement('div');
-      setClasses(titleWrap, 'absolute left-0 bottom-10 w-full flex items-center justify-center');
+      setClasses(titleWrap, 'absolute w-full');
+      titleWrap.style.left = '0';
+      titleWrap.style.right = '0';
+      titleWrap.style.bottom = '6px';
+      titleWrap.style.display = 'flex';
+      titleWrap.style.justifyContent = 'center';
+      titleWrap.style.padding = '0 8px';
+      titleWrap.style.boxSizing = 'border-box';
       titleWrap.style.pointerEvents = 'none';
       titleWrap.style.zIndex = '3';
 
