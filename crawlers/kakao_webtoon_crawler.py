@@ -122,6 +122,36 @@ class KakaoWebtoonCrawler(ContentCrawler):
             return trimmed
         return f"{trimmed}.webp"
 
+    @staticmethod
+    def _strip_known_extension(url: Optional[str]) -> Optional[str]:
+        if not isinstance(url, str):
+            return url
+        trimmed = url.strip()
+        if not trimmed:
+            return trimmed
+        lowered = trimmed.lower()
+        for ext in (".webp", ".png", ".jpg", ".jpeg"):
+            if lowered.endswith(ext):
+                return trimmed[: -len(ext)]
+        return trimmed
+
+    @classmethod
+    def _build_asset_variants(
+        cls,
+        raw_url: Optional[str],
+        primary_ext: str,
+        fallback_ext: str,
+    ) -> Optional[Dict[str, str]]:
+        if not isinstance(raw_url, str):
+            return None
+        stripped = cls._strip_known_extension(raw_url)
+        if not stripped:
+            return None
+        return {
+            primary_ext: f"{stripped}.{primary_ext}",
+            fallback_ext: f"{stripped}.{fallback_ext}",
+        }
+
     def _build_entry(self, content: Dict) -> Optional[Dict]:
         content_id = str(content.get("id") or "").strip()
         if not content_id:
@@ -132,20 +162,30 @@ class KakaoWebtoonCrawler(ContentCrawler):
         authors = self._normalize_authors(content.get("authors") or [])
         thumbnail_url = self._select_thumbnail_url(content)
         thumbnail_url = self._normalize_kakao_asset_url(thumbnail_url) if thumbnail_url else None
-        kakao_bg = self._normalize_kakao_asset_url(content.get("backgroundImage"))
-        thumbnail_url = kakao_bg or thumbnail_url
-        kakao_c1 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageA"))
-        kakao_c2 = self._normalize_kakao_asset_url(content.get("featuredCharacterImageB"))
-        kakao_t1 = self._normalize_kakao_asset_url(content.get("titleImageA"))
-        kakao_t2 = self._normalize_kakao_asset_url(content.get("titleImageB"))
+        raw_bg = content.get("backgroundImage")
+        kakao_bg = self._build_asset_variants(raw_bg, "webp", "jpg")
+        thumbnail_url = (kakao_bg or {}).get("webp") or thumbnail_url
         kakao_assets = {
+            "bg_color": (content.get("backgroundColor") or "").strip() or None,
             "bg": kakao_bg,
-            "c1": kakao_c1,
-            "c2": kakao_c2,
-            "t1": kakao_t1,
-            "t2": kakao_t2,
+            "character_a": self._build_asset_variants(
+                content.get("featuredCharacterImageA"),
+                "webp",
+                "png",
+            ),
+            "character_b": self._build_asset_variants(
+                content.get("featuredCharacterImageB"),
+                "webp",
+                "png",
+            ),
+            "title_a": self._build_asset_variants(content.get("titleImageA"), "webp", "png"),
+            "title_b": self._build_asset_variants(content.get("titleImageB"), "webp", "png"),
         }
-        kakao_assets = {key: value for key, value in kakao_assets.items() if value}
+        kakao_assets = {
+            key: value
+            for key, value in kakao_assets.items()
+            if value not in (None, "")
+        }
         seo_id = content.get("seoId") or content.get("seo_id") or content.get("seoID")
         slug = seo_id or title or content_id
         content_url = (
@@ -159,7 +199,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "content_url": content_url,
         }
         if kakao_assets:
-            entry["assets"] = {"kakao": kakao_assets}
+            entry["kakao_assets"] = kakao_assets
         return entry
 
     def _parse_timetable_payload(self, payload: Dict) -> List[Dict]:
@@ -348,9 +388,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
                     "weekdays": webtoon_data.get("weekdays", []),
                 },
             }
-            kakao_assets = (webtoon_data.get("assets") or {}).get("kakao")
+            kakao_assets = webtoon_data.get("kakao_assets")
             if kakao_assets:
-                meta_data["assets"] = {"kakao": kakao_assets}
+                meta_data["common"]["kakao_assets"] = kakao_assets
 
             if content_id in db_existing_ids:
                 record = (
