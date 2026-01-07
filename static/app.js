@@ -2866,14 +2866,16 @@ function updateProfileButtonState() {
   btn.setAttribute('aria-expanded', isProfileMenuOpen() ? 'true' : 'false');
 
   const isAuth = STATE.auth.isAuthenticated;
+  const hasToken = Boolean(getAccessToken());
+  const isLoggedIn = isAuth || hasToken;
   const user = STATE.auth.user;
 
   btn.className = UI_CLASSES.headerProfileIcon;
 
-  if (isAuth && user) {
+  if (isLoggedIn) {
     textEl.innerHTML =
       '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
-    btn.setAttribute('title', safeString(user.email, '로그아웃'));
+    btn.setAttribute('title', safeString(user?.email, '프로필'));
   } else {
     textEl.innerHTML =
       '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
@@ -2887,7 +2889,9 @@ function setupProfileButton() {
   if (!btn) return;
 
   btn.onclick = () => {
-    if (STATE.auth.isAuthenticated) {
+    const isAuth = STATE.auth.isAuthenticated;
+    const hasToken = Boolean(getAccessToken());
+    if (isAuth || hasToken) {
       toggleProfileMenu();
     } else {
       openAuthModal({ reason: 'profile' });
