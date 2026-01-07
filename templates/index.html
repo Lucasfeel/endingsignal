@@ -76,14 +76,16 @@
             background-color: #333; /* Placeholder for logo img */
             display: flex; align-items: center; justify-content: center;
             font-size: 10px; font-weight: bold; color: #fff;
-            border: 1px solid #FFFFFF;
+            border: none !important;
         }
         .l1-logo.active {
-            border: 2px solid #FFFFFF;
             opacity: 1;
-            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+            box-shadow: none;
+            background-color: rgba(255, 255, 255, 0.06);
         }
-        .l1-logo.inactive { opacity: 1; filter: grayscale(100%); }
+        .l1-logo.inactive { opacity: 1; filter: none; }
+        .l1-logo.is-bright { opacity: 1; filter: none; }
+        .l1-logo.is-dim { opacity: 0.28; }
 
         /* L2 Text Tab Styles */
         .l2-tab {
@@ -193,7 +195,7 @@
                 <div id="l1FilterContainer" class="h-[60px] flex items-center px-4 overflow-x-auto hide-scrollbar gap-3 hidden"></div>
 
                 <!-- L2 Filter (Detail Categories) -->
-                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b border-white hidden"></div>
+                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b border-white/10 hidden"></div>
             </div>
 
             <!-- Content Grid -->

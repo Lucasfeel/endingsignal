@@ -3202,10 +3202,13 @@ function renderL1Filters(tabId) {
 
   items.forEach((item) => {
     const el = document.createElement('div');
-    const isActive = STATE.filters?.[tabId]?.source === item.id;
+    const currentSource = STATE.filters?.[tabId]?.source || 'all';
+    const isActive = currentSource === item.id;
+    const isAllSelected = currentSource === 'all';
+    const brightnessClass = isAllSelected || isActive ? 'is-bright' : 'is-dim';
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
-    }`;
+    } ${brightnessClass}`;
     el.textContent = item.label;
 
     el.onclick = () => {
