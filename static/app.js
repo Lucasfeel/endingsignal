@@ -60,26 +60,28 @@ const ICONS = {
 const UI_CLASSES = {
   // Buttons
   btnPrimary:
-    'h-10 px-4 rounded-xl bg-white/15 text-white text-sm font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed',
+    'h-10 px-4 rounded-xl bg-white/16 text-white text-sm font-semibold hover:bg-white/22 active:bg-white/28 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
-    'h-10 px-4 rounded-xl bg-white/8 text-white/90 text-sm hover:bg-white/12 active:bg-white/15 disabled:opacity-50 disabled:cursor-not-allowed',
+    'h-10 px-4 rounded-xl bg-white/10 text-white text-sm hover:bg-white/14 active:bg-white/18 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
   // Icon buttons
   iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
   iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
-  headerBtn:
-    'flex items-center justify-center gap-2 rounded-full bg-[#2d2d2d] border border-white/10 text-xs text-white hover:border-[#4F46E5] hover:shadow-[0_0_12px_rgba(79,70,229,0.4)] spring-bounce',
+  headerSearchIcon:
+    'h-10 w-10 flex items-center justify-center rounded-lg bg-[#0b0b0b] text-white hover:bg-white/5 active:bg-white/8 transition-colors',
+  headerProfileIcon:
+    'h-10 w-10 flex items-center justify-center rounded-lg text-white hover:bg-white/5 active:bg-white/8 transition-colors',
 
   // Chips & empty states
-  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white/80 hover:bg-white/8 active:bg-white/10',
+  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white hover:bg-white/8 active:bg-white/10',
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
-  emptyMsg: 'mt-2 text-sm text-white/70 max-w-md',
+  emptyMsg: 'mt-2 text-sm text-[#D6D6D6] max-w-md',
 
   // Typography helpers
-  sectionTitle: 'text-base font-semibold text-white/90',
-  sectionSubtle: 'text-sm text-white/70',
+  sectionTitle: 'text-base font-semibold text-white',
+  sectionSubtle: 'text-sm text-[#D6D6D6]',
 
   // Card overlays/badges
   starBadge:
@@ -90,7 +92,7 @@ const UI_CLASSES = {
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100',
   affordHint:
     'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
-  pillHint: 'text-[11px] text-white/85 bg-black/40 rounded-full px-2 py-1',
+  pillHint: 'text-[11px] text-white bg-black/40 rounded-full px-2 py-1',
 
   // Cards
   cardRoot:
@@ -99,24 +101,24 @@ const UI_CLASSES = {
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
   cardTextWrap: 'px-0.5',
-  cardTitle: 'font-bold text-[13px] text-[#E5E5E5] leading-[1.4] truncate',
-  cardMeta: 'text-[11px] text-[#A3A3A3] mt-0.5 truncate',
+  cardTitle: 'font-bold text-[13px] text-white leading-[1.4] truncate',
+  cardMeta: 'text-[11px] text-[#A8A8A8] mt-0.5 truncate',
 
   // Inputs
   inputBase:
     'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/10 text-sm text-white focus:outline-none focus:border-[#4F46E5]',
+    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border border-white/18 text-sm text-white focus:outline-none focus:border-white/30',
   searchTrigger:
-    'transition-all duration-200 bg-[#1E1E1E] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]',
-  inputLabel: 'block text-sm font-medium text-gray-300',
+    'transition-all duration-200 bg-[#1E1E1E] border border-white/18 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
+  inputLabel: 'block text-sm font-medium text-[#D6D6D6]',
 
   // Modal
   modalWrap: 'flex items-center justify-center',
   modalCard:
     'relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
   modalTitle: 'text-xl font-bold mb-1 text-white',
-  modalBodyText: 'text-gray-400 text-sm',
+  modalBodyText: 'text-[#A8A8A8] text-sm',
 
   // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
@@ -124,18 +126,18 @@ const UI_CLASSES = {
   // Pages & overlays
   pageOverlayRoot: 'bg-[#121212] text-white',
   pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
-  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/10 p-4 backdrop-blur-sm',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/18 p-4 backdrop-blur-sm',
 
   // Menus
-  menuWrap: 'rounded-xl bg-black/90 border border-white/10 shadow-2xl overflow-hidden py-2',
+  menuWrap: 'rounded-xl bg-black/90 border border-white/18 shadow-2xl overflow-hidden py-2',
   menuItem:
-    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
+    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
   menuItemDanger:
-    'w-full text-left px-4 py-3 text-sm text-red-300 hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]',
+    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
 
   // Pagination controls
   loadMoreBtn:
-    'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-gray-200 font-semibold hover:border-[#4F46E5] transition-colors',
+    'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-[#D6D6D6] font-semibold hover:border-white/30 transition-colors',
 
   // Toasts
   toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
@@ -640,7 +642,8 @@ const DATA_UI_CLASS_MAP = {
   'search-empty-title': UI_CLASSES.emptyTitle,
   'search-empty-msg': UI_CLASSES.emptyMsg,
   'search-empty-button': cx(UI_CLASSES.btnSecondary, 'mt-6'),
-  'header-btn': UI_CLASSES.headerBtn,
+  'header-search-icon': UI_CLASSES.headerSearchIcon,
+  'header-profile-icon': UI_CLASSES.headerProfileIcon,
   'grid-2to3': UI_CLASSES.grid2to3,
   'modal-wrap': UI_CLASSES.modalWrap,
   'modal-card': UI_CLASSES.modalCard,
@@ -1633,9 +1636,9 @@ function syncSubscribeModalUI(content) {
     UI.subscribeStateText.textContent = showLoadingState ? '불러오는 중' : showSubscribedState ? '구독 중' : '';
   }
   if (UI.subscribeStateDot) {
-    UI.subscribeStateDot.classList.remove('bg-purple-400', 'bg-white/50');
-    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-purple-400');
-    else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/50');
+    UI.subscribeStateDot.classList.remove('bg-white', 'bg-white/60');
+    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-white');
+    else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/60');
   }
 
   if (UI.subscribeButton) {
@@ -2863,19 +2866,19 @@ function updateProfileButtonState() {
   btn.setAttribute('aria-expanded', isProfileMenuOpen() ? 'true' : 'false');
 
   const isAuth = STATE.auth.isAuthenticated;
+  const hasToken = Boolean(getAccessToken());
+  const isLoggedIn = isAuth || hasToken;
   const user = STATE.auth.user;
 
-  const baseClasses = cx(UI_CLASSES.headerBtn, 'h-[32px] px-3 whitespace-nowrap');
-  btn.className = cx(baseClasses, isAuth ? 'bg-[#4F46E5]' : '');
+  btn.className = UI_CLASSES.headerProfileIcon;
 
-  if (isAuth && user) {
-    const initial = safeString(user.email || user.id || 'M', 'M')
-      .charAt(0)
-      .toUpperCase();
-    textEl.textContent = initial || 'M';
-    btn.setAttribute('title', safeString(user.email, '로그아웃'));
+  if (isLoggedIn) {
+    textEl.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
+    btn.setAttribute('title', safeString(user?.email, '프로필'));
   } else {
-    textEl.textContent = 'Login';
+    textEl.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path></svg>';
     btn.setAttribute('title', 'Login');
     closeProfileMenu();
   }
@@ -2886,7 +2889,9 @@ function setupProfileButton() {
   if (!btn) return;
 
   btn.onclick = () => {
-    if (STATE.auth.isAuthenticated) {
+    const isAuth = STATE.auth.isAuthenticated;
+    const hasToken = Boolean(getAccessToken());
+    if (isAuth || hasToken) {
       toggleProfileMenu();
     } else {
       openAuthModal({ reason: 'profile' });
@@ -3087,7 +3092,7 @@ function renderBottomNav() {
     const btn = document.createElement('button');
     const isActive = STATE.activeTab === tab.id;
     btn.className = `flex flex-col items-center justify-center w-full spring-bounce ${
-      isActive ? 'text-[#4F46E5]' : 'text-[#525252]'
+      isActive ? 'text-white' : 'text-[#8A8A8A]'
     }`;
 
     const iconClass = isActive ? 'scale-110 neon-drop-shadow' : 'scale-100';
@@ -3173,25 +3178,25 @@ function renderL1Filters(tabId) {
 
   if (tabId === 'webtoon') {
     items = [
-      { id: 'all', label: '전체', color: '#A3A3A3' },
-      { id: 'naver_webtoon', label: 'N', color: '#00D564' },
-      { id: 'kakaowebtoon', label: 'K', color: '#F7E600' },
-      { id: 'lezhin', label: 'L', color: '#E62E2E' },
-      { id: 'laftel', label: 'R', color: '#6C5CE7' },
+      { id: 'all', label: '전체' },
+      { id: 'naver_webtoon', label: 'N' },
+      { id: 'kakaowebtoon', label: 'K' },
+      { id: 'lezhin', label: 'L' },
+      { id: 'laftel', label: 'R' },
     ];
   } else if (tabId === 'novel') {
     items = [
       { id: 'all', label: 'All' },
-      { id: 'naver_series', label: 'N', color: '#00D564' },
-      { id: 'kakao_page', label: 'K', color: '#F7E600' },
-      { id: 'ridi', label: 'R', color: '#0077D9' },
+      { id: 'naver_series', label: 'N' },
+      { id: 'kakao_page', label: 'K' },
+      { id: 'ridi', label: 'R' },
       { id: 'munpia', label: 'M' },
     ];
   } else if (tabId === 'ott') {
     items = [
       { id: 'all', label: 'All' },
-      { id: 'netflix', label: 'N', color: 'red' },
-      { id: 'disney', label: 'D', color: 'blue' },
+      { id: 'netflix', label: 'N' },
+      { id: 'disney', label: 'D' },
       { id: 'tving', label: 'T' },
       { id: 'watcha', label: 'W' },
       { id: 'wavve', label: 'Wa' },
@@ -3202,13 +3207,14 @@ function renderL1Filters(tabId) {
 
   items.forEach((item) => {
     const el = document.createElement('div');
-    const isActive = STATE.filters?.[tabId]?.source === item.id;
+    const currentSource = STATE.filters?.[tabId]?.source || 'all';
+    const isActive = currentSource === item.id;
+    const isAllSelected = currentSource === 'all';
+    const brightnessClass = isAllSelected || isActive ? 'is-bright' : 'is-dim';
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
-    }`;
+    } ${brightnessClass}`;
     el.textContent = item.label;
-
-    if (item.color && isActive) el.style.borderColor = item.color;
 
     el.onclick = () => {
       STATE.filters[tabId].source = item.id;
@@ -3454,7 +3460,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       if (!token) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">로그인하기</button></div>';
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">로그인하기</button></div>';
 
           const loginBtn = document.getElementById('myTabLoginButton');
           if (loginBtn) {
@@ -3471,7 +3477,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       } catch (e) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-[#4f46e5] text-white text-xs font-bold">다시 시도</button></div>';
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">다시 시도</button></div>';
 
           const retryBtn = document.getElementById('mySubRetryButton');
           if (retryBtn) {
@@ -3922,7 +3928,7 @@ function openSubscribeModal(content, opts = {}) {
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.className =
-        'inline-block text-blue-500 underline underline-offset-2 hover:text-blue-300 cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
+        'inline-block text-white underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
       titleEl.textContent = titleText;
