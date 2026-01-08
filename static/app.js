@@ -63,6 +63,8 @@ const UI_CLASSES = {
     'h-10 px-4 rounded-xl bg-white/16 text-white text-sm font-semibold hover:bg-white/22 active:bg-white/28 disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
     'h-10 px-4 rounded-xl bg-white/10 text-white text-sm hover:bg-white/14 active:bg-white/18 disabled:opacity-50 disabled:cursor-not-allowed',
+  btnSolid:
+    'h-10 px-4 rounded-xl bg-[#3F3F46] text-white text-sm font-semibold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
   // Icon buttons
@@ -96,7 +98,7 @@ const UI_CLASSES = {
 
   // Cards
   cardRoot:
-    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5',
+    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:shadow-sm',
   cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
@@ -126,7 +128,7 @@ const UI_CLASSES = {
   // Pages & overlays
   pageOverlayRoot: 'bg-[#121212] text-white',
   pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
-  pageCard: 'rounded-2xl bg-[#1E1E1E] border border-white/18 p-4 backdrop-blur-sm',
+  pageCard: 'rounded-2xl bg-[#1E1E1E] p-4 backdrop-blur-sm shadow-sm shadow-black/40',
 
   // Menus
   menuWrap: 'rounded-xl bg-black/90 border border-white/18 shadow-2xl overflow-hidden py-2',
@@ -541,7 +543,13 @@ const requestCloseOverlay = (overlay) => {
 
 const handleOverlayPopstate = (event) => {
   const st = event.state;
-  if (!st?.overlay) return;
+  if (!st?.overlay) {
+    const top = getOverlayStackTop();
+    if (top?.overlay) {
+      closeOverlayByType(top.overlay, { fromPopstate: true, overlayId: top.id });
+    }
+    return;
+  }
   closeOverlayByType(st.overlay, { fromPopstate: true, overlayId: st.id });
 };
 
@@ -656,6 +664,7 @@ const DATA_UI_CLASS_MAP = {
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
   'btn-primary': UI_CLASSES.btnPrimary,
+  'btn-solid': UI_CLASSES.btnSolid,
   'menu-wrap': UI_CLASSES.menuWrap,
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
@@ -1785,7 +1794,7 @@ function setupScrollEffect() {
    ========================= */
 
 const RECENT_SEARCH_KEY = 'es_recent_searches';
-const MAX_RECENT_SEARCHES = 10;
+const MAX_RECENT_SEARCHES = 8;
 const RECENTLY_OPENED_KEY = 'es_recently_opened';
 const MAX_RECENTLY_OPENED = 12;
 const POPULAR_GRID_LIMIT = 9;
@@ -1859,6 +1868,12 @@ const loadRecentSearches = () => {
   }
   return [];
 };
+
+const normalizeSearchTerm = (term) =>
+  (term || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 
 const saveRecentSearches = (list) => {
   try {
@@ -1988,10 +2003,11 @@ const addRecentSearch = (query) => {
   const q = (query || '').trim();
   if (!q) return;
   const list = loadRecentSearches();
-  const existingIdx = list.findIndex((item) => item.toLowerCase() === q.toLowerCase());
-  if (existingIdx >= 0) list.splice(existingIdx, 1);
-  list.unshift(q);
-  saveRecentSearches(list);
+  const normalized = normalizeSearchTerm(q);
+  const filtered = list.filter((item) => normalizeSearchTerm(item) !== normalized);
+  filtered.unshift(q);
+  const next = filtered.slice(0, MAX_RECENT_SEARCHES);
+  saveRecentSearches(next);
   renderRecentSearches();
 };
 
@@ -2218,7 +2234,7 @@ function buildSearchEmptyActions() {
   return [clearAction, recommendAction];
 }
 
-const SEARCH_ACTIVE_CLASSES = ['ring-2', 'ring-white/50', 'bg-white/5'];
+const SEARCH_ACTIVE_CLASSES = ['shadow-sm'];
 
 const getSearchResultElements = () => {
   if (!UI.searchPageResults) return [];
@@ -2356,8 +2372,8 @@ async function performSearch(q) {
   const query = (q || '').trim();
   const normalizedQuery = normalizeSearchText(query);
   const hasWhitespace = /\s/.test(query);
-  const effectiveType = getSearchType();
-  const source = getSearchSource(effectiveType);
+  const effectiveType = 'all';
+  const source = 'all';
 
   STATE.search.query = query;
   STATE.search.activeIndex = -1;
@@ -2392,11 +2408,6 @@ async function performSearch(q) {
     if (seq !== STATE.search.requestSeq) return;
     const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
     let normalizedItems = items;
-
-    if (normalizedQuery) {
-      const filtered = items.filter((item) => matchesSearchQuery(item, normalizedQuery));
-      if (filtered.length) normalizedItems = filtered;
-    }
 
     if ((!normalizedItems.length && hasWhitespace) || (!items.length && hasWhitespace)) {
       const pool = Array.isArray(STATE.rendering?.list) ? STATE.rendering.list : [];
@@ -2452,7 +2463,7 @@ function openSearchPage({ focus = true } = {}) {
   }
 
   if (STATE.search.query) {
-    if (STATE.search.results.length) renderSearchResults(STATE.search.results, getSearchType());
+    if (STATE.search.results.length) renderSearchResults(STATE.search.results, 'all');
     else performSearch(STATE.search.query);
   } else {
     showSearchIdle();
@@ -3258,12 +3269,14 @@ function renderL1Filters(tabId) {
   let items = [];
 
   if (tabId === 'webtoon') {
+    const currentSource = STATE.filters?.[tabId]?.source;
+    if (currentSource === 'lezhin' || currentSource === 'laftel') {
+      STATE.filters[tabId].source = 'all';
+    }
     items = [
       { id: 'all', label: '전체' },
       { id: 'naver_webtoon', label: 'N' },
       { id: 'kakaowebtoon', label: 'K' },
-      { id: 'lezhin', label: 'L' },
-      { id: 'laftel', label: 'R' },
     ];
   } else if (tabId === 'novel') {
     items = [
@@ -3541,7 +3554,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       if (!token) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">로그인하기</button></div>';
+            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#3F3F46] text-white text-xs font-bold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10">로그인하기</button></div>';
 
           const loginBtn = document.getElementById('myTabLoginButton');
           if (loginBtn) {
