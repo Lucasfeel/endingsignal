@@ -165,7 +165,8 @@ const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
 // (e.g., private mode) does not break the UI.
 const UI_STATE_KEYS = {
   filters: {
-    source: 'endingsignal.filters.source', // localStorage: keep across reloads
+    sources: 'endingsignal.filters.sources', // localStorage: keep across reloads
+    source: 'endingsignal.filters.source', // legacy single-source key
     status: 'endingsignal.filters.status', // localStorage: keep across reloads
     day: 'endingsignal.filters.day', // sessionStorage: reset on new session
   },
@@ -181,10 +182,88 @@ const UI_STATE_KEYS = {
 
 const UI_STATE_DEFAULTS = {
   filters: {
-    source: 'all',
+    sources: [],
     status: 'ongoing',
     day: 'all', // Day defaults to ALL on a fresh visit per product decision
   },
+};
+
+const SOURCE_OPTIONS = {
+  webtoon: [
+    { id: 'naver_webtoon', label: 'N' },
+    { id: 'kakaowebtoon', label: 'K' },
+  ],
+  novel: [
+    { id: 'naver_series', label: 'N' },
+    { id: 'kakao_page', label: 'K' },
+    { id: 'ridi', label: 'R' },
+    { id: 'munpia', label: 'M' },
+  ],
+  ott: [
+    { id: 'netflix', label: 'N' },
+    { id: 'disney', label: 'D' },
+    { id: 'tving', label: 'T' },
+    { id: 'watcha', label: 'W' },
+    { id: 'wavve', label: 'Wa' },
+  ],
+};
+
+const ALL_SOURCE_IDS = Object.values(SOURCE_OPTIONS).flatMap((group) =>
+  group.map((item) => item.id)
+);
+
+const getSourceItemsForTab = (tabId) => SOURCE_OPTIONS[tabId] || [];
+
+const getAllowedSourcesForTab = (tabId) => getSourceItemsForTab(tabId).map((item) => item.id);
+
+const sanitizeSourcesArray = (value, allowed = ALL_SOURCE_IDS) => {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === 'string' && value
+      ? [value]
+      : [];
+  if (!Array.isArray(allowed) || !allowed.length) return [];
+
+  const deduped = [];
+  const seen = new Set();
+  list.forEach((entry) => {
+    const safeEntry = typeof entry === 'string' ? entry : '';
+    if (!safeEntry || !allowed.includes(safeEntry) || seen.has(safeEntry)) return;
+    seen.add(safeEntry);
+    deduped.push(safeEntry);
+  });
+
+  return deduped;
+};
+
+const areSourcesEqual = (left, right) => {
+  const a = Array.isArray(left) ? left : [];
+  const b = Array.isArray(right) ? right : [];
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((item) => set.has(item));
+};
+
+const getSelectedSourcesForTab = (tabId) => {
+  const allowed = getAllowedSourcesForTab(tabId);
+  return sanitizeSourcesArray(STATE.filters?.[tabId]?.sources, allowed);
+};
+
+const getSourceRequestConfig = (tabId) => {
+  const selectedSources = getSelectedSourcesForTab(tabId);
+  if (selectedSources.length === 1) {
+    return { querySource: selectedSources[0], filterSources: [] };
+  }
+  if (selectedSources.length > 1) {
+    return { querySource: 'all', filterSources: selectedSources };
+  }
+  return { querySource: 'all', filterSources: [] };
+};
+
+const filterItemsBySources = (items, sources) => {
+  if (!Array.isArray(items) || !Array.isArray(sources) || sources.length === 0) return items;
+  const sourceSet = new Set(sources);
+  return items.filter((item) => sourceSet.has(String(item?.source || '').trim()));
 };
 
 const safeLoadStorage = (storageObj, key) => {
@@ -231,17 +310,16 @@ const getCurrentScrollViewKey = () => {
 
 const UIState = {
   load() {
+    const savedSources = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.sources);
     const savedSource = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.source);
     const savedStatus = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.status);
     const savedDay = safeLoadStorage(sessionStorage, UI_STATE_KEYS.filters.day);
+    const migratedSources =
+      savedSources !== null && savedSources !== undefined ? savedSources : savedSource;
 
     return {
       filters: {
-        source: sanitizeFilterValue(
-          savedSource,
-          ['all', 'naver_webtoon', 'kakaowebtoon', 'lezhin', 'laftel'],
-          UI_STATE_DEFAULTS.filters.source,
-        ),
+        sources: sanitizeSourcesArray(migratedSources, ALL_SOURCE_IDS),
         status: sanitizeFilterValue(
           savedStatus,
           ['ongoing', 'completed'],
@@ -260,13 +338,10 @@ const UIState = {
     const tabId = getFilterTargetTab();
     const fallbackFilters = UI_STATE_DEFAULTS.filters;
     const tabFilters = STATE.filters?.[tabId] || {};
+    const allowedSources = getAllowedSourcesForTab(tabId);
     return {
       filters: {
-        source: sanitizeFilterValue(
-          tabFilters.source,
-          ['all', 'naver_webtoon', 'kakaowebtoon', 'lezhin', 'laftel'],
-          fallbackFilters.source,
-        ),
+        sources: sanitizeSourcesArray(tabFilters.sources, allowedSources),
         status: sanitizeFilterValue(tabFilters.status, ['ongoing', 'completed'], fallbackFilters.status),
         day: sanitizeFilterValue(
           tabFilters.day,
@@ -282,11 +357,8 @@ const UIState = {
     if (!STATE.filters?.[tabId]) return;
 
     const incoming = nextState?.filters || UI_STATE_DEFAULTS.filters;
-    const nextSource = sanitizeFilterValue(
-      incoming.source,
-      ['all', 'naver_webtoon', 'kakaowebtoon', 'lezhin', 'laftel'],
-      UI_STATE_DEFAULTS.filters.source,
-    );
+    const allowedSources = getAllowedSourcesForTab(tabId);
+    const nextSources = sanitizeSourcesArray(incoming.sources ?? incoming.source, allowedSources);
     const nextStatus = sanitizeFilterValue(
       incoming.status,
       ['ongoing', 'completed'],
@@ -300,17 +372,18 @@ const UIState = {
 
     const current = STATE.filters[tabId];
     const changed =
-      current.source !== nextSource || current.status !== nextStatus || current.day !== nextDay;
+      !areSourcesEqual(current.sources, nextSources) ||
+      current.status !== nextStatus ||
+      current.day !== nextDay;
 
-    STATE.filters[tabId].source = nextSource;
+    STATE.filters[tabId].sources = nextSources;
     STATE.filters[tabId].status = nextStatus;
     STATE.filters[tabId].day = nextDay;
 
-    // Keep day/source in sync for novel, which shares the same filter surface.
+    // Keep day in sync for novel, which shares the same filter surface.
     ['webtoon', 'novel'].forEach((type) => {
       if (!STATE.filters[type]) return;
       STATE.filters[type].day = nextDay;
-      if (type === 'webtoon') STATE.filters[type].source = nextSource;
     });
 
     if (rerender) {
@@ -327,7 +400,12 @@ const UIState = {
     const snapshot = this.get();
     // Persist long-lived filters in localStorage; day lives in sessionStorage so it resets on
     // a fresh session per product requirement.
-    safeSaveStorage(localStorage, UI_STATE_KEYS.filters.source, snapshot.filters.source);
+    safeSaveStorage(localStorage, UI_STATE_KEYS.filters.sources, snapshot.filters.sources);
+    try {
+      localStorage?.removeItem?.(UI_STATE_KEYS.filters.source);
+    } catch (e) {
+      console.warn('Failed to remove legacy source filter key', e);
+    }
     safeSaveStorage(localStorage, UI_STATE_KEYS.filters.status, snapshot.filters.status);
     safeSaveStorage(sessionStorage, UI_STATE_KEYS.filters.day, snapshot.filters.day);
   },
@@ -402,9 +480,9 @@ const STATE = {
   lastBrowseTab: 'webtoon',
   renderToken: 0,
   filters: {
-    webtoon: { source: 'all', day: 'all' },
-    novel: { source: 'all', day: 'all' },
-    ott: { source: 'all', genre: 'drama' },
+    webtoon: { sources: [], day: 'all' },
+    novel: { sources: [], day: 'all' },
+    ott: { sources: [], genre: 'drama' },
     series: { sort: 'latest' },
     my: { viewMode: 'subscribing' },
   },
@@ -456,6 +534,7 @@ const STATE = {
       requestSeq: 0,
       tabId: null,
       source: 'all',
+      filterSources: [],
       aspectClass: 'aspect-[3/4]',
     },
     hiatus: {
@@ -468,6 +547,7 @@ const STATE = {
       requestSeq: 0,
       tabId: null,
       source: 'all',
+      filterSources: [],
       aspectClass: 'aspect-[3/4]',
     },
   },
@@ -1052,7 +1132,7 @@ const contentKey = (c) => {
   return `${src}:${cid}`;
 };
 
-const resetPaginationState = (category, { tabId, source, aspectClass, requestSeq }) => {
+const resetPaginationState = (category, { tabId, source, filterSources, aspectClass, requestSeq }) => {
   const target = STATE.pagination?.[category];
   if (!target) return;
 
@@ -1064,6 +1144,7 @@ const resetPaginationState = (category, { tabId, source, aspectClass, requestSeq
   target.totalLoaded = 0;
   target.tabId = tabId;
   target.source = source;
+  target.filterSources = Array.isArray(filterSources) ? filterSources : [];
   target.aspectClass = aspectClass;
   target.requestSeq = requestSeq;
 };
@@ -1880,8 +1961,8 @@ const getSearchType = () =>
 
 const getSearchSource = (type) => {
   if (['webtoon', 'novel', 'ott'].includes(type)) {
-    const src = STATE.filters?.[type]?.source;
-    return src || 'all';
+    const sources = getSelectedSourcesForTab(type);
+    return sources.length === 1 ? sources[0] : 'all';
   }
   return 'all';
 };
@@ -3340,52 +3421,27 @@ function renderL1Filters(tabId) {
   if (!UI.l1Filter) return;
 
   UI.l1Filter.innerHTML = '';
-  let items = [];
+  const items = getSourceItemsForTab(tabId);
+  if (!items.length) return;
 
-  if (tabId === 'webtoon') {
-    const currentSource = STATE.filters?.[tabId]?.source;
-    if (currentSource === 'lezhin' || currentSource === 'laftel') {
-      STATE.filters[tabId].source = 'all';
-    }
-    items = [
-      { id: 'all', label: '전체' },
-      { id: 'naver_webtoon', label: 'N' },
-      { id: 'kakaowebtoon', label: 'K' },
-    ];
-  } else if (tabId === 'novel') {
-    items = [
-      { id: 'all', label: 'All' },
-      { id: 'naver_series', label: 'N' },
-      { id: 'kakao_page', label: 'K' },
-      { id: 'ridi', label: 'R' },
-      { id: 'munpia', label: 'M' },
-    ];
-  } else if (tabId === 'ott') {
-    items = [
-      { id: 'all', label: 'All' },
-      { id: 'netflix', label: 'N' },
-      { id: 'disney', label: 'D' },
-      { id: 'tving', label: 'T' },
-      { id: 'watcha', label: 'W' },
-      { id: 'wavve', label: 'Wa' },
-    ];
-  } else {
-    return;
-  }
+  const selectedSources = getSelectedSourcesForTab(tabId);
+  const selectedSet = new Set(selectedSources);
 
   items.forEach((item) => {
     const el = document.createElement('div');
-    const currentSource = STATE.filters?.[tabId]?.source || 'all';
-    const isActive = currentSource === item.id;
-    const isAllSelected = currentSource === 'all';
-    const brightnessClass = isAllSelected || isActive ? 'is-bright' : 'is-dim';
+    const isActive = selectedSet.has(item.id);
+    const brightnessClass =
+      selectedSet.size === 0 ? 'is-bright' : isActive ? 'is-bright' : 'is-dim';
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
     } ${brightnessClass}`;
     el.textContent = item.label;
 
     el.onclick = () => {
-      STATE.filters[tabId].source = item.id;
+      const nextSelected = new Set(getSelectedSourcesForTab(tabId));
+      if (nextSelected.has(item.id)) nextSelected.delete(item.id);
+      else nextSelected.add(item.id);
+      STATE.filters[tabId].sources = Array.from(nextSelected);
       renderL1Filters(tabId);
       fetchAndRenderContent(tabId);
       UIState.save();
@@ -3515,6 +3571,7 @@ async function loadNextPage(category, { signal } = {}) {
     const incoming = Array.isArray(json?.contents)
       ? json.contents.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
       : [];
+    const filteredIncoming = filterItemsBySources(incoming, pg.filterSources);
 
     const next = json?.next_cursor ?? null;
     const legacyNext = !next ? json?.last_title ?? null : null;
@@ -3524,7 +3581,7 @@ async function loadNextPage(category, { signal } = {}) {
     const existingKeys = new Set(pg.items.map(contentKey));
     const toAppend = [];
 
-    for (const c of incoming) {
+    for (const c of filteredIncoming) {
       const key = contentKey(c);
       if (!key || existingKeys.has(key)) continue;
       existingKeys.add(key);
@@ -3549,11 +3606,13 @@ async function loadNextPage(category, { signal } = {}) {
     const missingCursor = !hasPaginationToken;
     const reachedEndByCount = returnedCount < responsePageSize;
 
-    if (noNewItems) {
+    const allowEmptyPageStop = !pg.filterSources?.length;
+    if (noNewItems && allowEmptyPageStop) {
       console.warn('No new items returned; marking pagination as done to avoid stalls');
     }
-
-    pg.done = noNewItems || (missingCursor && (reachedEndByCount || pg.items.length > 0));
+    pg.done =
+      (allowEmptyPageStop && noNewItems) ||
+      (missingCursor && (reachedEndByCount || pg.items.length > 0));
     pg.totalLoaded = pg.items.length;
 
     appendCardsToGrid(toAppend, {
@@ -3715,14 +3774,22 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       }
     } else {
       let url = '';
+      let sourceFilter = [];
 
       if (tabId === 'webtoon' || tabId === 'novel') {
         const day = STATE.filters[tabId].day;
-        const source = STATE.filters[tabId].source;
-        const query = { type: tabId, source };
+        const { querySource, filterSources } = getSourceRequestConfig(tabId);
+        sourceFilter = filterSources;
+        const query = { type: tabId, source: querySource };
 
         if (day === 'completed' || day === 'hiatus') {
-          resetPaginationState(day, { tabId, source, aspectClass, requestSeq });
+          resetPaginationState(day, {
+            tabId,
+            source: querySource,
+            filterSources,
+            aspectClass,
+            requestSeq,
+          });
           setActivePaginationCategory(day);
           updateLoadMoreUI(day);
           updateCountIndicator(day);
@@ -3760,6 +3827,10 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           { title: 'Mock Item 2', meta: { common: { thumbnail_url: null, authors: [] } } },
           { title: 'Mock Item 3', meta: { common: { thumbnail_url: null, authors: [] } } },
         ];
+      }
+
+      if (sourceFilter.length) {
+        data = filterItemsBySources(data, sourceFilter);
       }
     }
 
