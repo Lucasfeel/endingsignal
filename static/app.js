@@ -3652,6 +3652,7 @@ async function loadNextPage(category, { signal } = {}) {
     showToast(e?.message || '콘텐츠를 불러오지 못했습니다.', { type: 'error' });
   } finally {
     pg.loading = false;
+    updateCountIndicator(category);
     updateLoadMoreUI(category);
   }
 }
@@ -3815,6 +3816,19 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           updateCountIndicator(day);
           setupInfiniteObserver(day);
           await loadNextPage(day, { signal });
+          if (isStale()) return { stale: true };
+          const pg = STATE.pagination?.[day];
+          if (pg && pg.items.length === 0 && pg.done) {
+            UI.contentGrid.innerHTML = '';
+            renderEmptyState(UI.contentGrid, {
+              title: '콘텐츠가 없습니다.',
+              message: '조건에 맞는 콘텐츠가 없습니다.',
+            });
+            setCountIndicatorText('');
+            hideLoadMoreUI();
+            disconnectInfiniteObserver();
+            return { itemCount: 0, aspectClass };
+          }
           return { itemCount: STATE.pagination?.[day]?.items?.length || 0, aspectClass };
         }
 
