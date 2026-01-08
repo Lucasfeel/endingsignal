@@ -1379,6 +1379,44 @@ function logout({ silent = false } = {}) {
   fetchAndRenderContent(STATE.activeTab);
 }
 
+let authRevalidateTimer = null;
+const scheduleAuthRevalidate = () => {
+  const token = getAccessToken();
+  if (!token || STATE.auth.isChecking) return;
+  if (authRevalidateTimer) clearTimeout(authRevalidateTimer);
+  authRevalidateTimer = setTimeout(async () => {
+    authRevalidateTimer = null;
+    if (!getAccessToken()) return;
+    await fetchMe();
+    preloadSubscriptionsOnce({ force: true }).catch((e) => {
+      console.warn('Failed to refresh subscriptions after revalidate', e);
+    });
+  }, 200);
+};
+
+function setupAuthReturnListeners() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      scheduleAuthRevalidate();
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    scheduleAuthRevalidate();
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== 'es_access_token') return;
+    if (!event.newValue) {
+      STATE.auth.isAuthenticated = false;
+      STATE.auth.user = null;
+      updateProfileButtonState();
+      return;
+    }
+    scheduleAuthRevalidate();
+  });
+}
+
 /* =========================
    CP2: API Contract Baseline + CP2.1 hardening
    ========================= */
@@ -1812,6 +1850,7 @@ async function initApp() {
   setupAuthModalListeners();
   setupProfileButton();
   updateProfileButtonState();
+  setupAuthReturnListeners();
   setupSearchHandlers();
   setupMyPageHandlers();
   setupMyPagePasswordChange();
