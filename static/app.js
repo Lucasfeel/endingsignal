@@ -4336,6 +4336,21 @@ function openSubscribeModal(content, opts = {}) {
 
   const titleText = String(content?.title || '').trim();
   const url = getContentUrl(content);
+  const meta = normalizeMeta(content?.meta);
+  const rawAuthors = meta?.common?.authors;
+  const authorText = (() => {
+    if (Array.isArray(rawAuthors)) {
+      return rawAuthors
+        .map((author) => String(author || '').trim())
+        .filter(Boolean)
+        .join(', ');
+    }
+    if (typeof rawAuthors === 'string') {
+      return rawAuthors.trim();
+    }
+    return '';
+  })();
+  const displayText = authorText ? `${titleText}(${authorText})` : titleText;
 
   if (!titleEl && window.ES_DEBUG) {
     console.error('[subscribeModal] title element missing');
@@ -4350,19 +4365,19 @@ function openSubscribeModal(content, opts = {}) {
 
     if (url && titleText) {
       const anchor = document.createElement('a');
-      anchor.textContent = titleText;
+      anchor.textContent = displayText;
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.className =
-        'inline-block text-white underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
+        'inline-block text-blue-400 underline underline-offset-2 hover:text-blue-300 visited:text-blue-400 focus-visible:underline focus-visible:outline-none cursor-pointer pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
-      titleEl.textContent = titleText;
+      titleEl.textContent = displayText;
     }
   } else if (modalEl) {
     const fallbackEl = modalEl.querySelector('p');
-    if (fallbackEl) fallbackEl.textContent = titleText;
+    if (fallbackEl) fallbackEl.textContent = displayText;
   }
 
   if (linkContainer) {
