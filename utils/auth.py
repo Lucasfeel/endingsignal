@@ -25,9 +25,12 @@ def get_jwt_secret():
     if env_secret:
         return env_secret
 
-    allow_insecure_dev = os.getenv('FLASK_ENV') != 'production' or os.getenv(
-        'ALLOW_INSECURE_JWT_DEV'
-    )
+    flask_env = os.getenv('FLASK_ENV')
+    allow_insecure_dev = flask_env in {'development', 'test'}
+    if os.getenv('ALLOW_INSECURE_JWT_DEV') == '1':
+        allow_insecure_dev = True
+    if os.getenv('PYTEST_CURRENT_TEST'):
+        allow_insecure_dev = True
     if allow_insecure_dev:
         if _DEV_FALLBACK_SECRET is None:
             _DEV_FALLBACK_SECRET = os.urandom(24).hex()

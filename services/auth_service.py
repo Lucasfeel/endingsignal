@@ -9,7 +9,7 @@ import psycopg2
 from database import get_db, get_cursor
 from utils.auth import JWT_ISSUER, get_jwt_secret
 
-ACCESS_TOKEN_EXP_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_EXP_MINUTES', '20'))
+ACCESS_TOKEN_EXP_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_EXP_MINUTES', '10080'))
 
 
 def is_valid_email(email: str) -> bool:
