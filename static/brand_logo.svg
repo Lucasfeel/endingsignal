@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMid meet">
+  <g fill="none" stroke="none">
+    <text x="40" y="200" font-family="'Arial Black', Arial, sans-serif" font-size="180" fill="#FFFFFF" letter-spacing="-4">connoti</text>
+    <g transform="translate(980,40)">
+      <path d="M60 20c-30 0-54 24-54 54v42c0 18 14 32 32 32h44c18 0 32-14 32-32V74c0-30-24-54-54-54z" fill="#FFC92A"/>
+      <path d="M34 148a26 26 0 0 0 52 0" fill="#FFC92A"/>
+      <circle cx="60" cy="164" r="10" fill="#FFC92A"/>
+    </g>
+    <path d="M120 60c80-40 200-40 280 0" stroke="#BFBFBF" stroke-width="12" stroke-linecap="round" opacity="0.4"/>
+    <path d="M760 60c80-40 200-40 280 0" stroke="#BFBFBF" stroke-width="12" stroke-linecap="round" opacity="0.4"/>
+    <path d="M1080 240l10 20 22 2-16 14 4 22-20-10-20 10 4-22-16-14 22-2z" fill="#D9D9D9"/>
+  </g>
+</svg>
