@@ -1861,18 +1861,38 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function setupScrollEffect() {
-  window.addEventListener('scroll', () => {
+  if (!UI.filtersWrapper) return;
+
+  const resolveBaseBackground = () => {
+    const rootEl =
+      document.getElementById('app') ||
+      document.getElementById('root') ||
+      document.querySelector('main') ||
+      document.body;
+    const candidates = [rootEl, document.body, document.documentElement];
+    for (const el of candidates) {
+      if (!el) continue;
+      const color = getComputedStyle(el).backgroundColor;
+      if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') {
+        return color;
+      }
+    }
+    return '#000';
+  };
+
+  const baseBgColor = resolveBaseBackground();
+  UI.filtersWrapper.style.backgroundColor = baseBgColor;
+  UI.filtersWrapper.style.backdropFilter = 'none';
+  UI.filtersWrapper.style.webkitBackdropFilter = 'none';
+
+  const handleScroll = () => {
     const scrolled = window.scrollY > 10;
-    if (!UI.filtersWrapper) return;
-
-    UI.filtersWrapper.style.backgroundColor = scrolled
-      ? 'rgba(18, 18, 18, 0.85)'
-      : '#121212';
-    UI.filtersWrapper.style.backdropFilter = scrolled ? 'blur(12px)' : 'none';
-
     if (scrolled) UI.filtersWrapper.classList.add('border-b', 'border-white/5');
     else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
-  });
+  };
+
+  handleScroll();
+  window.addEventListener('scroll', handleScroll);
 }
 
 /* =========================
@@ -3632,6 +3652,7 @@ async function loadNextPage(category, { signal } = {}) {
     showToast(e?.message || '콘텐츠를 불러오지 못했습니다.', { type: 'error' });
   } finally {
     pg.loading = false;
+    updateCountIndicator(category);
     updateLoadMoreUI(category);
   }
 }
@@ -3795,6 +3816,19 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           updateCountIndicator(day);
           setupInfiniteObserver(day);
           await loadNextPage(day, { signal });
+          if (isStale()) return { stale: true };
+          const pg = STATE.pagination?.[day];
+          if (pg && pg.items.length === 0 && pg.done) {
+            UI.contentGrid.innerHTML = '';
+            renderEmptyState(UI.contentGrid, {
+              title: '콘텐츠가 없습니다.',
+              message: '조건에 맞는 콘텐츠가 없습니다.',
+            });
+            setCountIndicatorText('');
+            hideLoadMoreUI();
+            disconnectInfiniteObserver();
+            return { itemCount: 0, aspectClass };
+          }
           return { itemCount: STATE.pagination?.[day]?.items?.length || 0, aspectClass };
         }
 
@@ -4336,6 +4370,21 @@ function openSubscribeModal(content, opts = {}) {
 
   const titleText = String(content?.title || '').trim();
   const url = getContentUrl(content);
+  const meta = normalizeMeta(content?.meta);
+  const rawAuthors = meta?.common?.authors;
+  const authorText = (() => {
+    if (Array.isArray(rawAuthors)) {
+      return rawAuthors
+        .map((author) => String(author || '').trim())
+        .filter(Boolean)
+        .join(', ');
+    }
+    if (typeof rawAuthors === 'string') {
+      return rawAuthors.trim();
+    }
+    return '';
+  })();
+  const displayText = authorText ? `${titleText}(${authorText})` : titleText;
 
   if (!titleEl && window.ES_DEBUG) {
     console.error('[subscribeModal] title element missing');
@@ -4350,19 +4399,19 @@ function openSubscribeModal(content, opts = {}) {
 
     if (url && titleText) {
       const anchor = document.createElement('a');
-      anchor.textContent = titleText;
+      anchor.textContent = displayText;
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.className =
-        'inline-block text-white underline underline-offset-2 hover:text-white cursor-pointer focus-visible:underline focus-visible:outline-none pointer-events-auto';
+        'inline-block text-blue-400 underline underline-offset-2 hover:text-blue-300 visited:text-blue-400 focus-visible:underline focus-visible:outline-none cursor-pointer pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
-      titleEl.textContent = titleText;
+      titleEl.textContent = displayText;
     }
   } else if (modalEl) {
     const fallbackEl = modalEl.querySelector('p');
-    if (fallbackEl) fallbackEl.textContent = titleText;
+    if (fallbackEl) fallbackEl.textContent = displayText;
   }
 
   if (linkContainer) {
