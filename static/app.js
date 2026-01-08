@@ -1732,8 +1732,8 @@ function syncSubscribeModalUI(content) {
     UI.subscribeStateText.textContent = showLoadingState ? '불러오는 중' : showSubscribedState ? '구독 중' : '';
   }
   if (UI.subscribeStateDot) {
-    UI.subscribeStateDot.classList.remove('bg-white', 'bg-white/60');
-    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-white');
+    UI.subscribeStateDot.classList.remove('bg-white', 'bg-white/50', 'bg-white/60', 'bg-[#02E70F]');
+    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-[#02E70F]');
     else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/60');
   }
 
