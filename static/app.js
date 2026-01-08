@@ -1861,18 +1861,38 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function setupScrollEffect() {
-  window.addEventListener('scroll', () => {
+  if (!UI.filtersWrapper) return;
+
+  const resolveBaseBackground = () => {
+    const rootEl =
+      document.getElementById('app') ||
+      document.getElementById('root') ||
+      document.querySelector('main') ||
+      document.body;
+    const candidates = [rootEl, document.body, document.documentElement];
+    for (const el of candidates) {
+      if (!el) continue;
+      const color = getComputedStyle(el).backgroundColor;
+      if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') {
+        return color;
+      }
+    }
+    return '#000';
+  };
+
+  const baseBgColor = resolveBaseBackground();
+  UI.filtersWrapper.style.backgroundColor = baseBgColor;
+  UI.filtersWrapper.style.backdropFilter = 'none';
+  UI.filtersWrapper.style.webkitBackdropFilter = 'none';
+
+  const handleScroll = () => {
     const scrolled = window.scrollY > 10;
-    if (!UI.filtersWrapper) return;
-
-    UI.filtersWrapper.style.backgroundColor = scrolled
-      ? 'rgba(18, 18, 18, 0.85)'
-      : '#121212';
-    UI.filtersWrapper.style.backdropFilter = scrolled ? 'blur(12px)' : 'none';
-
     if (scrolled) UI.filtersWrapper.classList.add('border-b', 'border-white/5');
     else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
-  });
+  };
+
+  handleScroll();
+  window.addEventListener('scroll', handleScroll);
 }
 
 /* =========================
