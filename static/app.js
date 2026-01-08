@@ -3343,12 +3343,14 @@ function renderL1Filters(tabId) {
   let items = [];
 
   if (tabId === 'webtoon') {
+    const currentSource = STATE.filters?.[tabId]?.source;
+    if (currentSource === 'lezhin' || currentSource === 'laftel') {
+      STATE.filters[tabId].source = 'all';
+    }
     items = [
       { id: 'all', label: '전체' },
       { id: 'naver_webtoon', label: 'N' },
       { id: 'kakaowebtoon', label: 'K' },
-      { id: 'lezhin', label: 'L' },
-      { id: 'laftel', label: 'R' },
     ];
   } else if (tabId === 'novel') {
     items = [
