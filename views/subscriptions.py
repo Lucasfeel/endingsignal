@@ -13,7 +13,11 @@ subscriptions_bp = Blueprint('subscriptions', __name__)
 
 def _content_exists(cursor, content_id: str, source: str) -> bool:
     cursor.execute(
-        "SELECT 1 FROM contents WHERE content_id = %s AND source = %s",
+        """
+        SELECT 1
+        FROM contents
+        WHERE content_id = %s AND source = %s AND COALESCE(is_deleted, FALSE) = FALSE
+        """,
         (str(content_id), source),
     )
     return cursor.fetchone() is not None
@@ -37,7 +41,7 @@ def list_subscriptions():
                 ON s.content_id = c.content_id AND s.source = c.source
             LEFT JOIN admin_content_overrides o
                 ON o.content_id = c.content_id AND o.source = c.source
-            WHERE s.user_id = %s
+            WHERE s.user_id = %s AND COALESCE(c.is_deleted, FALSE) = FALSE
             ORDER BY c.title
             """,
             (user_id,),
