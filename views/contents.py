@@ -131,7 +131,10 @@ def search_contents():
 
         thresholds = compute_thresholds(q_len)
 
-        where_clauses = [f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))"]
+        where_clauses = [
+            "COALESCE(is_deleted, FALSE) = FALSE",
+            f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))",
+        ]
         params = [like_param, like_param]
 
         if content_type:
@@ -205,7 +208,8 @@ def get_ongoing_contents():
         base_query = (
             "SELECT content_id, title, status, meta, source "
             "FROM contents "
-            "WHERE content_type = %s AND (status = '연재중' OR status = '휴재')"
+            "WHERE content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE "
+            "AND (status = '연재중' OR status = '휴재')"
         )
         params = [content_type]
 
@@ -287,7 +291,7 @@ def get_hiatus_contents():
         cursor = get_cursor(conn)
 
         query_params = [content_type]
-        where_clause = "WHERE status = '휴재' AND content_type = %s"
+        where_clause = "WHERE status = '휴재' AND content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE"
 
         if source != 'all':
             where_clause += " AND source = %s"
@@ -383,7 +387,7 @@ def get_completed_contents():
         cursor = get_cursor(conn)
 
         query_params = [content_type]
-        where_clause = "WHERE status = '완결' AND content_type = %s"
+        where_clause = "WHERE status = '완결' AND content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE"
 
         if source != 'all':
             where_clause += " AND source = %s"

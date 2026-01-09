@@ -85,6 +85,33 @@ def setup_database_standalone():
             "ALTER TABLE contents ADD COLUMN IF NOT EXISTS normalized_authors TEXT"
         )
 
+        print("LOG: [DB Setup] Ensuring soft-delete columns exist...")
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ALTER COLUMN is_deleted SET DEFAULT FALSE"
+        )
+        cursor.execute(
+            """
+            UPDATE contents
+            SET is_deleted = FALSE
+            WHERE is_deleted IS NULL;
+            """
+        )
+        cursor.execute(
+            "ALTER TABLE contents ALTER COLUMN is_deleted SET NOT NULL"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_reason TEXT"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_by INTEGER"
+        )
+
         print("LOG: [DB Setup] Creating 'users' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -144,6 +171,21 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'admin_content_metadata' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admin_content_metadata (
+            id SERIAL PRIMARY KEY,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            public_at TIMESTAMP NULL,
+            reason TEXT NULL,
+            admin_id INTEGER NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(content_id, source)
+        )""")
+        print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
 
         print("LOG: [DB Setup] Creating 'cdc_events' table...")
         cursor.execute("""

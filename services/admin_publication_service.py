@@ -1,0 +1,91 @@
+from database import get_cursor
+
+
+_DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
+
+
+def _serialize_publication_row(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "content_id": row["content_id"],
+        "source": row["source"],
+        "public_at": row["public_at"],
+        "reason": row["reason"],
+        "admin_id": row["admin_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def upsert_publication(
+    conn,
+    *,
+    admin_id,
+    content_id,
+    source,
+    public_at,
+    reason,
+):
+    cursor = get_cursor(conn)
+
+    cursor.execute(
+        "SELECT 1 FROM contents WHERE content_id = %s AND source = %s",
+        (content_id, source),
+    )
+    if cursor.fetchone() is None:
+        cursor.close()
+        return _DEF_NOT_FOUND
+
+    cursor.execute(
+        """
+        INSERT INTO admin_content_metadata (
+            content_id,
+            source,
+            public_at,
+            reason,
+            admin_id,
+            updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (content_id, source) DO UPDATE SET
+            public_at = EXCLUDED.public_at,
+            reason = EXCLUDED.reason,
+            admin_id = EXCLUDED.admin_id,
+            updated_at = NOW()
+        RETURNING id, content_id, source, public_at, reason, admin_id, created_at, updated_at
+        """,
+        (content_id, source, public_at, reason, admin_id),
+    )
+    publication_row = cursor.fetchone()
+    conn.commit()
+    cursor.close()
+
+    return {"publication": _serialize_publication_row(publication_row)}
+
+
+def delete_publication(conn, *, content_id, source):
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "DELETE FROM admin_content_metadata WHERE content_id = %s AND source = %s",
+        (content_id, source),
+    )
+    conn.commit()
+    cursor.close()
+
+
+def list_publications(conn, *, limit, offset):
+    cursor = get_cursor(conn)
+    cursor.execute(
+        """
+        SELECT id, content_id, source, public_at, reason, admin_id, created_at, updated_at
+        FROM admin_content_metadata
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC
+        LIMIT %s OFFSET %s
+        """,
+        (limit, offset),
+    )
+    rows = cursor.fetchall()
+    cursor.close()
+    return [_serialize_publication_row(row) for row in rows]
