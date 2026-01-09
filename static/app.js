@@ -682,6 +682,7 @@ const UI = {
   profileButtonText: document.getElementById('profileButtonText'),
   profileMenu: document.getElementById('profileMenu'),
   profileMenuMy: document.getElementById('profileMenuMy'),
+  profileMenuAdmin: document.getElementById('profileMenuAdmin'),
   profileMenuLogout: document.getElementById('profileMenuLogout'),
   headerSearchWrap: document.getElementById('headerSearchWrap'),
   searchButton: document.getElementById('searchButton'),
@@ -3134,6 +3135,18 @@ function toggleProfileMenu() {
   else openProfileMenu();
 }
 
+function updateAdminEntryVisibility() {
+  const adminEntry = UI.profileMenuAdmin;
+  if (!adminEntry) return;
+
+  const isAdmin = STATE.auth.user?.role === 'admin';
+  if (isAdmin) {
+    adminEntry.classList.remove('hidden');
+  } else {
+    adminEntry.classList.add('hidden');
+  }
+}
+
 function updateProfileButtonState() {
   const btn = UI.profileButton;
   const textEl = UI.profileButtonText;
@@ -3153,6 +3166,7 @@ function updateProfileButtonState() {
     btn.setAttribute('title', 'Login');
     btn.setAttribute('aria-label', 'Login');
     closeProfileMenu();
+    updateAdminEntryVisibility();
     return;
   }
 
@@ -3188,6 +3202,7 @@ function updateProfileButtonState() {
   textEl.appendChild(avatarWrap);
   btn.setAttribute('title', displayName || '프로필');
   btn.setAttribute('aria-label', displayName ? `프로필 ${displayName}` : '프로필');
+  updateAdminEntryVisibility();
 }
 
 function setupProfileButton() {
@@ -3220,6 +3235,13 @@ function setupProfileButton() {
     UI.profileMenuMy.onclick = () => {
       closeProfileMenu();
       updateTab('my');
+    };
+  }
+
+  if (UI.profileMenuAdmin) {
+    UI.profileMenuAdmin.onclick = () => {
+      closeProfileMenu();
+      window.location.href = '/admin';
     };
   }
 
