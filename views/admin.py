@@ -4,6 +4,11 @@ from flask import Blueprint, jsonify, request, g
 
 from database import get_db, get_cursor
 from services.admin_override_service import upsert_override_and_record_event
+from services.admin_publication_service import (
+    delete_publication,
+    list_publications,
+    upsert_publication,
+)
 from utils.auth import admin_required, login_required
 from utils.time import parse_iso_naive_kst
 
@@ -22,6 +27,19 @@ def _serialize_override(row):
         'source': row['source'],
         'override_status': row['override_status'],
         'override_completed_at': row['override_completed_at'].isoformat() if row['override_completed_at'] else None,
+        'reason': row['reason'],
+        'admin_id': row['admin_id'],
+        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+    }
+
+
+def _serialize_publication(row):
+    return {
+        'id': row['id'],
+        'content_id': row['content_id'],
+        'source': row['source'],
+        'public_at': row['public_at'].isoformat() if row['public_at'] else None,
         'reason': row['reason'],
         'admin_id': row['admin_id'],
         'created_at': row['created_at'].isoformat() if row['created_at'] else None,
@@ -145,3 +163,81 @@ def delete_content_override():
     cursor.close()
 
     return jsonify({'success': True})
+
+
+@admin_bp.route('/api/admin/contents/publication', methods=['POST'])
+@login_required
+@admin_required
+def upsert_content_publication():
+    data = request.get_json() or {}
+    content_id = data.get('content_id')
+    source = data.get('source')
+    public_at_raw = data.get('public_at')
+    reason = data.get('reason')
+
+    if not content_id or not source:
+        return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+
+    public_at = None
+    if public_at_raw not in (None, ''):
+        public_at = parse_iso_naive_kst(public_at_raw)
+        if public_at is None:
+            return _error_response(400, 'INVALID_REQUEST', 'public_at must be a valid ISO 8601 datetime string')
+
+    conn = get_db()
+    result = upsert_publication(
+        conn,
+        admin_id=g.current_user['id'],
+        content_id=content_id,
+        source=source,
+        public_at=public_at,
+        reason=reason,
+    )
+
+    if result.get('error') == 'CONTENT_NOT_FOUND':
+        return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+
+    return jsonify({'success': True, 'publication': _serialize_publication(result['publication'])})
+
+
+@admin_bp.route('/api/admin/contents/publication', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_content_publication():
+    data = request.get_json() or {}
+    content_id = data.get('content_id')
+    source = data.get('source')
+
+    if not content_id or not source:
+        return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+
+    conn = get_db()
+    delete_publication(conn, content_id=content_id, source=source)
+
+    return jsonify({'success': True})
+
+
+@admin_bp.route('/api/admin/contents/publications', methods=['GET'])
+@login_required
+@admin_required
+def list_content_publications():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    conn = get_db()
+    publications = list_publications(conn, limit=limit, offset=offset)
+
+    return jsonify(
+        {
+            'success': True,
+            'publications': [_serialize_publication(row) for row in publications],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
