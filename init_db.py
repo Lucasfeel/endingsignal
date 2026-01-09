@@ -7,6 +7,7 @@ import psycopg2
 
 from database import create_standalone_connection, setup_database_standalone
 from dotenv import load_dotenv
+from services.auth_service import bootstrap_admin_from_env
 
 
 def connect_with_retries(max_attempts: int = 10):
@@ -61,6 +62,18 @@ def main():
         else:
             print("[INFO] Database not initialized. Running setup...")
         setup_database_standalone()
+        try:
+            ran, admin_id = bootstrap_admin_from_env()
+            if ran:
+                print(f"[INFO] Admin bootstrap applied for ADMIN_ID={admin_id}")
+            else:
+                print("[INFO] ADMIN_ID/ADMIN_PASSWORD not set. Skipping admin bootstrap.")
+        except ValueError as exc:
+            print(
+                f"[FATAL] Admin bootstrap misconfigured: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print("\n[SUCCESS] Database initialization complete.")
         print("==========================================")
         print("  DATABASE INITIALIZATION SCRIPT FINISHED")

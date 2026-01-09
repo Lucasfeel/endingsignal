@@ -6,7 +6,7 @@ import bcrypt
 import jwt
 import psycopg2
 
-from database import get_db, get_cursor
+from database import create_standalone_connection, get_db, get_cursor
 from utils.auth import JWT_ISSUER, get_jwt_secret
 
 ACCESS_TOKEN_EXP_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_EXP_MINUTES', '10080'))
@@ -124,3 +124,45 @@ def change_password(user_id: int, current_password: str, new_password: str):
         raise
     finally:
         cursor.close()
+
+
+def bootstrap_admin_from_env():
+    admin_id = os.getenv("ADMIN_ID") or os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+
+    if not admin_id or not admin_password:
+        return False, None
+
+    if not is_valid_password(admin_password):
+        raise ValueError("ADMIN_PASSWORD must be at least 8 characters.")
+
+    conn = None
+    cursor = None
+    try:
+        conn = create_standalone_connection()
+        cursor = get_cursor(conn)
+        password_hash = hash_password(admin_password)
+        cursor.execute(
+            """
+            INSERT INTO users (email, password_hash, role, is_active, created_at, updated_at)
+            VALUES (%s, %s, 'admin', TRUE, NOW(), NOW())
+            ON CONFLICT (email)
+            DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                role = 'admin',
+                is_active = TRUE,
+                updated_at = NOW();
+            """,
+            (admin_id, password_hash),
+        )
+        conn.commit()
+        return True, admin_id
+    except psycopg2.Error:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
