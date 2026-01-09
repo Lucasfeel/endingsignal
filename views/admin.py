@@ -1,6 +1,6 @@
 # views/admin.py
 
-from flask import Blueprint, jsonify, request, g
+from flask import Blueprint, jsonify, request, g, render_template
 
 from database import get_db, get_cursor
 from services.admin_override_service import upsert_override_and_record_event
@@ -75,6 +75,11 @@ def _serialize_final_state(state):
     if hasattr(final_completed_at, 'isoformat'):
         serialized['final_completed_at'] = final_completed_at.isoformat()
     return serialized
+
+
+@admin_bp.route('/admin', methods=['GET'])
+def admin_page():
+    return render_template('admin.html')
 
 
 @admin_bp.route('/api/admin/contents/override', methods=['POST'])
