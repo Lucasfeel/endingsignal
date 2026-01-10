@@ -73,6 +73,20 @@
               최근 공개일 변경
             </button>
             <button
+              id="tabMissingCompletion"
+              class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
+              type="button"
+            >
+              완결일 미설정
+            </button>
+            <button
+              id="tabMissingPublication"
+              class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
+              type="button"
+            >
+              공개일 미설정
+            </button>
+            <button
               id="tabAudit"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
@@ -293,6 +307,96 @@
             <div class="mt-4 flex items-center justify-between text-xs text-white/60">
               <button id="publicationsPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
               <button id="publicationsNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelMissingCompletion" class="hidden grid gap-6 lg:grid-cols-[1fr]">
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h2 class="text-lg font-semibold">완결일 미설정 콘텐츠</h2>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <select
+                id="missingCompletionSourceSelect"
+                class="min-w-[140px] rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="all">전체 소스</option>
+                <option value="naver_webtoon">네이버 웹툰</option>
+                <option value="kakao_webtoon">카카오 웹툰</option>
+                <option value="kakaopage_webtoon">카카오페이지 웹툰</option>
+              </select>
+              <select
+                id="missingCompletionTypeSelect"
+                class="min-w-[120px] rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="all">전체 타입</option>
+                <option value="webtoon">웹툰</option>
+                <option value="novel">웹소설</option>
+                <option value="ott">OTT</option>
+                <option value="series">시리즈</option>
+              </select>
+              <input
+                id="missingCompletionSearchInput"
+                type="text"
+                placeholder="제목 필터 (선택)"
+                class="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <button
+                id="missingCompletionRefreshBtn"
+                type="button"
+                class="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm text-white transition hover:border-white/40"
+              >
+                새로고침
+              </button>
+            </div>
+            <div id="missingCompletionList" class="mt-4 space-y-2 text-sm text-white/80"></div>
+            <div class="mt-4 flex items-center justify-between text-xs text-white/60">
+              <button id="missingCompletionPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
+              <button id="missingCompletionNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelMissingPublication" class="hidden grid gap-6 lg:grid-cols-[1fr]">
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h2 class="text-lg font-semibold">공개일 미설정 콘텐츠</h2>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <select
+                id="missingPublicationSourceSelect"
+                class="min-w-[140px] rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="all">전체 소스</option>
+                <option value="naver_webtoon">네이버 웹툰</option>
+                <option value="kakao_webtoon">카카오 웹툰</option>
+                <option value="kakaopage_webtoon">카카오페이지 웹툰</option>
+              </select>
+              <select
+                id="missingPublicationTypeSelect"
+                class="min-w-[120px] rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="all">전체 타입</option>
+                <option value="webtoon">웹툰</option>
+                <option value="novel">웹소설</option>
+                <option value="ott">OTT</option>
+                <option value="series">시리즈</option>
+              </select>
+              <input
+                id="missingPublicationSearchInput"
+                type="text"
+                placeholder="제목 필터 (선택)"
+                class="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <button
+                id="missingPublicationRefreshBtn"
+                type="button"
+                class="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm text-white transition hover:border-white/40"
+              >
+                새로고침
+              </button>
+            </div>
+            <div id="missingPublicationList" class="mt-4 space-y-2 text-sm text-white/80"></div>
+            <div class="mt-4 flex items-center justify-between text-xs text-white/60">
+              <button id="missingPublicationPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
+              <button id="missingPublicationNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
             </div>
           </div>
         </section>

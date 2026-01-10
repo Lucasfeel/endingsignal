@@ -94,6 +94,23 @@ def _serialize_audit_log(row):
     }
 
 
+def _serialize_missing_content(row):
+    return {
+        'content_id': row['content_id'],
+        'source': row['source'],
+        'title': row['title'],
+        'content_type': row['content_type'],
+        'status': row['status'],
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
+        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+        'override_status': _get_row_value(row, 'override_status'),
+        'override_completed_at': row['override_completed_at'].isoformat()
+        if _get_row_value(row, 'override_completed_at')
+        else None,
+    }
+
+
 def _serialize_final_state(state):
     if not state:
         return state
@@ -391,6 +408,155 @@ def list_content_publications():
         {
             'success': True,
             'publications': [_serialize_publication(row) for row in publications],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/contents/missing-completion', methods=['GET'])
+@login_required
+@admin_required
+def list_missing_completion_contents():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    source = request.args.get('source')
+    if not source or source == 'all':
+        source = None
+    content_type = request.args.get('content_type')
+    if not content_type or content_type == 'all':
+        content_type = None
+    query = request.args.get('q')
+    query = query.strip() if isinstance(query, str) and query.strip() else None
+
+    params = []
+    sql = """
+        SELECT
+            c.content_id,
+            c.source,
+            c.title,
+            c.content_type,
+            c.status,
+            c.meta,
+            c.created_at,
+            c.updated_at,
+            o.override_status,
+            o.override_completed_at
+        FROM contents c
+        LEFT JOIN admin_content_overrides o
+          ON o.content_id = c.content_id AND o.source = c.source
+        WHERE COALESCE(c.is_deleted, FALSE) = FALSE
+          AND (
+            (o.id IS NULL AND c.status = '완결')
+            OR (o.override_status = '완결' AND o.override_completed_at IS NULL)
+          )
+    """
+
+    if source:
+        sql += " AND c.source = %s"
+        params.append(source)
+    if content_type:
+        sql += " AND c.content_type = %s"
+        params.append(content_type)
+    if query:
+        sql += " AND c.title ILIKE %s"
+        params.append(f"%{query}%")
+
+    sql += """
+        ORDER BY c.updated_at DESC
+        LIMIT %s OFFSET %s
+    """
+    params.extend([limit, offset])
+
+    conn = get_db()
+    cursor = get_cursor(conn)
+    cursor.execute(sql, tuple(params))
+    rows = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(
+        {
+            'success': True,
+            'items': [_serialize_missing_content(row) for row in rows],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/contents/missing-publication', methods=['GET'])
+@login_required
+@admin_required
+def list_missing_publication_contents():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    source = request.args.get('source')
+    if not source or source == 'all':
+        source = None
+    content_type = request.args.get('content_type')
+    if not content_type or content_type == 'all':
+        content_type = None
+    query = request.args.get('q')
+    query = query.strip() if isinstance(query, str) and query.strip() else None
+
+    params = []
+    sql = """
+        SELECT
+            c.content_id,
+            c.source,
+            c.title,
+            c.content_type,
+            c.status,
+            c.meta,
+            c.created_at,
+            c.updated_at
+        FROM contents c
+        LEFT JOIN admin_content_metadata m
+          ON m.content_id = c.content_id AND m.source = c.source
+        WHERE COALESCE(c.is_deleted, FALSE) = FALSE
+          AND m.public_at IS NULL
+    """
+
+    if source:
+        sql += " AND c.source = %s"
+        params.append(source)
+    if content_type:
+        sql += " AND c.content_type = %s"
+        params.append(content_type)
+    if query:
+        sql += " AND c.title ILIKE %s"
+        params.append(f"%{query}%")
+
+    sql += """
+        ORDER BY c.updated_at DESC
+        LIMIT %s OFFSET %s
+    """
+    params.extend([limit, offset])
+
+    conn = get_db()
+    cursor = get_cursor(conn)
+    cursor.execute(sql, tuple(params))
+    rows = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(
+        {
+            'success': True,
+            'items': [_serialize_missing_content(row) for row in rows],
             'limit': limit,
             'offset': offset,
         }
