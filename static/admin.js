@@ -169,6 +169,24 @@
       offset: 0,
       lastCount: 0,
     },
+    missingCompletion: {
+      items: [],
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+      source: 'all',
+      contentType: 'all',
+      q: '',
+    },
+    missingPublication: {
+      items: [],
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+      source: 'all',
+      contentType: 'all',
+      q: '',
+    },
     audit: {
       items: [],
       q: '',
@@ -365,12 +383,16 @@
       manage: document.getElementById('panelManage'),
       deleted: document.getElementById('panelDeleted'),
       publications: document.getElementById('panelPublications'),
+      missingCompletion: document.getElementById('panelMissingCompletion'),
+      missingPublication: document.getElementById('panelMissingPublication'),
       audit: document.getElementById('panelAudit'),
     };
     const tabs = {
       manage: document.getElementById('tabManage'),
       deleted: document.getElementById('tabDeleted'),
       publications: document.getElementById('tabPublications'),
+      missingCompletion: document.getElementById('tabMissingCompletion'),
+      missingPublication: document.getElementById('tabMissingPublication'),
       audit: document.getElementById('tabAudit'),
     };
 
@@ -1145,6 +1167,102 @@
     });
   };
 
+  const renderMissingList = ({ items, containerId, emptyText, detailBuilder }) => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = emptyText;
+      container.appendChild(empty);
+      return;
+    }
+
+    items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const row = document.createElement('div');
+      row.className = 'flex items-start gap-3';
+
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className =
+        'flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-black/40';
+      const thumbImg = document.createElement('img');
+      const thumbUrl = getThumbnailUrl(item);
+      thumbImg.className = 'h-full w-full object-cover';
+      if (thumbUrl) {
+        thumbImg.src = thumbUrl;
+      } else {
+        thumbImg.classList.add('hidden');
+        const fallback = document.createElement('span');
+        fallback.className = 'text-[10px] text-white/40';
+        fallback.textContent = 'No Image';
+        thumbWrap.appendChild(fallback);
+      }
+      thumbWrap.appendChild(thumbImg);
+
+      const contentBox = document.createElement('div');
+      contentBox.className = 'flex-1';
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      title.textContent = item.title || item.normalized_title || item.content_id;
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      meta.textContent = `${item.source || '-'} · ${item.content_type || '-'} · ${item.status || '-'}`;
+      const detail = document.createElement('div');
+      detail.className = 'mt-1 text-[11px] text-white/50';
+      detail.textContent = detailBuilder(item);
+
+      contentBox.appendChild(title);
+      contentBox.appendChild(meta);
+      contentBox.appendChild(detail);
+
+      const actions = document.createElement('div');
+      actions.className = 'flex flex-col gap-2';
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () => openLookupInManage(item));
+      actions.appendChild(openBtn);
+
+      row.appendChild(thumbWrap);
+      row.appendChild(contentBox);
+      row.appendChild(actions);
+
+      card.appendChild(row);
+      container.appendChild(card);
+    });
+  };
+
+  const renderMissingCompletionList = () => {
+    renderMissingList({
+      items: STATE.missingCompletion.items,
+      containerId: 'missingCompletionList',
+      emptyText: '완결일 미설정 콘텐츠가 없습니다.',
+      detailBuilder: (item) => {
+        const overrideStatus = item.override_status || '-';
+        const overrideCompletedAt = item.override_completed_at
+          ? formatTimestamp(item.override_completed_at)
+          : '미설정';
+        return `override: ${overrideStatus} · 완결일: ${overrideCompletedAt}`;
+      },
+    });
+  };
+
+  const renderMissingPublicationList = () => {
+    renderMissingList({
+      items: STATE.missingPublication.items,
+      containerId: 'missingPublicationList',
+      emptyText: '공개일 미설정 콘텐츠가 없습니다.',
+      detailBuilder: () => '공개일: 미설정',
+    });
+  };
+
   const renderAuditList = () => {
     const container = document.getElementById('auditList');
     if (!container) return;
@@ -1197,6 +1315,20 @@
     });
   };
 
+  const updateMissingCompletionPagination = () => {
+    const prevBtn = document.getElementById('missingCompletionPrevBtn');
+    const nextBtn = document.getElementById('missingCompletionNextBtn');
+    setButtonDisabled(prevBtn, STATE.missingCompletion.offset === 0);
+    setButtonDisabled(nextBtn, STATE.missingCompletion.lastCount < STATE.missingCompletion.limit);
+  };
+
+  const updateMissingPublicationPagination = () => {
+    const prevBtn = document.getElementById('missingPublicationPrevBtn');
+    const nextBtn = document.getElementById('missingPublicationNextBtn');
+    setButtonDisabled(prevBtn, STATE.missingPublication.offset === 0);
+    setButtonDisabled(nextBtn, STATE.missingPublication.lastCount < STATE.missingPublication.limit);
+  };
+
   const loadPublications = async () => {
     const params = new URLSearchParams();
     params.set('limit', STATE.publications.limit);
@@ -1215,6 +1347,78 @@
     } catch (err) {
       showToast(err.message || '공개일 목록을 불러오지 못했습니다.', { type: 'error' });
     }
+  };
+
+  const loadMissingCompletion = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.missingCompletion.limit);
+    params.set('offset', STATE.missingCompletion.offset);
+    if (STATE.missingCompletion.source !== 'all') params.set('source', STATE.missingCompletion.source);
+    if (STATE.missingCompletion.contentType !== 'all') {
+      params.set('content_type', STATE.missingCompletion.contentType);
+    }
+    if (STATE.missingCompletion.q) params.set('q', STATE.missingCompletion.q);
+
+    try {
+      const payload = await apiRequest(
+        'GET',
+        `/api/admin/contents/missing-completion?${params.toString()}`,
+        { token: STATE.token },
+      );
+      STATE.missingCompletion.items = payload?.items || [];
+      STATE.missingCompletion.lastCount = STATE.missingCompletion.items.length;
+      renderMissingCompletionList();
+      updateMissingCompletionPagination();
+    } catch (err) {
+      showToast(err.message || '완결일 미설정 목록을 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const refreshMissingCompletion = async () => {
+    const source = document.getElementById('missingCompletionSourceSelect')?.value || 'all';
+    const contentType = document.getElementById('missingCompletionTypeSelect')?.value || 'all';
+    const q = document.getElementById('missingCompletionSearchInput')?.value?.trim() || '';
+    STATE.missingCompletion.source = source;
+    STATE.missingCompletion.contentType = contentType;
+    STATE.missingCompletion.q = q;
+    STATE.missingCompletion.offset = 0;
+    await loadMissingCompletion();
+  };
+
+  const loadMissingPublication = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.missingPublication.limit);
+    params.set('offset', STATE.missingPublication.offset);
+    if (STATE.missingPublication.source !== 'all') params.set('source', STATE.missingPublication.source);
+    if (STATE.missingPublication.contentType !== 'all') {
+      params.set('content_type', STATE.missingPublication.contentType);
+    }
+    if (STATE.missingPublication.q) params.set('q', STATE.missingPublication.q);
+
+    try {
+      const payload = await apiRequest(
+        'GET',
+        `/api/admin/contents/missing-publication?${params.toString()}`,
+        { token: STATE.token },
+      );
+      STATE.missingPublication.items = payload?.items || [];
+      STATE.missingPublication.lastCount = STATE.missingPublication.items.length;
+      renderMissingPublicationList();
+      updateMissingPublicationPagination();
+    } catch (err) {
+      showToast(err.message || '공개일 미설정 목록을 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const refreshMissingPublication = async () => {
+    const source = document.getElementById('missingPublicationSourceSelect')?.value || 'all';
+    const contentType = document.getElementById('missingPublicationTypeSelect')?.value || 'all';
+    const q = document.getElementById('missingPublicationSearchInput')?.value?.trim() || '';
+    STATE.missingPublication.source = source;
+    STATE.missingPublication.contentType = contentType;
+    STATE.missingPublication.q = q;
+    STATE.missingPublication.offset = 0;
+    await loadMissingPublication();
   };
 
   const loadAudit = async () => {
@@ -1278,12 +1482,20 @@
     const tabManage = document.getElementById('tabManage');
     const tabDeleted = document.getElementById('tabDeleted');
     const tabPublications = document.getElementById('tabPublications');
+    const tabMissingCompletion = document.getElementById('tabMissingCompletion');
+    const tabMissingPublication = document.getElementById('tabMissingPublication');
     const tabAudit = document.getElementById('tabAudit');
     const deletedSearchBtn = document.getElementById('deletedSearchBtn');
     const deletedPrevBtn = document.getElementById('deletedPrevBtn');
     const deletedNextBtn = document.getElementById('deletedNextBtn');
     const publicationsPrevBtn = document.getElementById('publicationsPrevBtn');
     const publicationsNextBtn = document.getElementById('publicationsNextBtn');
+    const missingCompletionRefreshBtn = document.getElementById('missingCompletionRefreshBtn');
+    const missingCompletionPrevBtn = document.getElementById('missingCompletionPrevBtn');
+    const missingCompletionNextBtn = document.getElementById('missingCompletionNextBtn');
+    const missingPublicationRefreshBtn = document.getElementById('missingPublicationRefreshBtn');
+    const missingPublicationPrevBtn = document.getElementById('missingPublicationPrevBtn');
+    const missingPublicationNextBtn = document.getElementById('missingPublicationNextBtn');
     const auditSearchBtn = document.getElementById('auditSearchBtn');
     const auditPrevBtn = document.getElementById('auditPrevBtn');
     const auditNextBtn = document.getElementById('auditNextBtn');
@@ -1305,6 +1517,14 @@
     tabPublications?.addEventListener('click', () => {
       setTab('publications');
       loadPublications();
+    });
+    tabMissingCompletion?.addEventListener('click', () => {
+      setTab('missingCompletion');
+      withLoading(missingCompletionRefreshBtn, '불러오는 중...', refreshMissingCompletion);
+    });
+    tabMissingPublication?.addEventListener('click', () => {
+      setTab('missingPublication');
+      withLoading(missingPublicationRefreshBtn, '불러오는 중...', refreshMissingPublication);
     });
     tabAudit?.addEventListener('click', () => {
       setTab('audit');
@@ -1357,6 +1577,70 @@
         if (STATE.publications.lastCount < STATE.publications.limit) return;
         STATE.publications.offset += STATE.publications.limit;
         await loadPublications();
+      }),
+    );
+
+    missingCompletionRefreshBtn?.addEventListener('click', () =>
+      withLoading(missingCompletionRefreshBtn, '불러오는 중...', refreshMissingCompletion),
+    );
+    document.getElementById('missingCompletionSearchInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        withLoading(missingCompletionRefreshBtn, '불러오는 중...', refreshMissingCompletion);
+      }
+    });
+    document.getElementById('missingCompletionSourceSelect')?.addEventListener('change', () => {
+      withLoading(missingCompletionRefreshBtn, '불러오는 중...', refreshMissingCompletion);
+    });
+    document.getElementById('missingCompletionTypeSelect')?.addEventListener('change', () => {
+      withLoading(missingCompletionRefreshBtn, '불러오는 중...', refreshMissingCompletion);
+    });
+    missingCompletionPrevBtn?.addEventListener('click', () =>
+      withLoading(missingCompletionPrevBtn, '불러오는 중...', async () => {
+        if (STATE.missingCompletion.offset === 0) return;
+        STATE.missingCompletion.offset = Math.max(
+          0,
+          STATE.missingCompletion.offset - STATE.missingCompletion.limit,
+        );
+        await loadMissingCompletion();
+      }),
+    );
+    missingCompletionNextBtn?.addEventListener('click', () =>
+      withLoading(missingCompletionNextBtn, '불러오는 중...', async () => {
+        if (STATE.missingCompletion.lastCount < STATE.missingCompletion.limit) return;
+        STATE.missingCompletion.offset += STATE.missingCompletion.limit;
+        await loadMissingCompletion();
+      }),
+    );
+
+    missingPublicationRefreshBtn?.addEventListener('click', () =>
+      withLoading(missingPublicationRefreshBtn, '불러오는 중...', refreshMissingPublication),
+    );
+    document.getElementById('missingPublicationSearchInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        withLoading(missingPublicationRefreshBtn, '불러오는 중...', refreshMissingPublication);
+      }
+    });
+    document.getElementById('missingPublicationSourceSelect')?.addEventListener('change', () => {
+      withLoading(missingPublicationRefreshBtn, '불러오는 중...', refreshMissingPublication);
+    });
+    document.getElementById('missingPublicationTypeSelect')?.addEventListener('change', () => {
+      withLoading(missingPublicationRefreshBtn, '불러오는 중...', refreshMissingPublication);
+    });
+    missingPublicationPrevBtn?.addEventListener('click', () =>
+      withLoading(missingPublicationPrevBtn, '불러오는 중...', async () => {
+        if (STATE.missingPublication.offset === 0) return;
+        STATE.missingPublication.offset = Math.max(
+          0,
+          STATE.missingPublication.offset - STATE.missingPublication.limit,
+        );
+        await loadMissingPublication();
+      }),
+    );
+    missingPublicationNextBtn?.addEventListener('click', () =>
+      withLoading(missingPublicationNextBtn, '불러오는 중...', async () => {
+        if (STATE.missingPublication.lastCount < STATE.missingPublication.limit) return;
+        STATE.missingPublication.offset += STATE.missingPublication.limit;
+        await loadMissingPublication();
       }),
     );
 

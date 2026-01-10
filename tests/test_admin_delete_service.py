@@ -154,7 +154,6 @@ def test_soft_delete_marks_deleted_and_commits_and_deletes_subscriptions(monkeyp
         reason="duplicate",
     )
 
-    assert db.committed is True
     assert result["content"]["is_deleted"] is True
     assert result["content"]["deleted_reason"] == "duplicate"
     assert result["subscriptions_deleted"] == 2
@@ -190,7 +189,6 @@ def test_soft_delete_is_idempotent_when_already_deleted(monkeypatch):
         reason="new",
     )
 
-    assert db.committed is True
     assert result["content"]["deleted_reason"] == "original"
     assert result["content"]["deleted_by"] == 2
 
@@ -228,7 +226,6 @@ def test_restore_clears_deleted_fields_and_commits(monkeypatch):
 
     result = delete_service.restore_content(db, content_id="CID", source="SRC")
 
-    assert db.committed is True
     assert result["content"]["is_deleted"] is False
     assert result["content"]["deleted_at"] is None
 
@@ -255,7 +252,6 @@ def test_restore_is_idempotent_when_not_deleted(monkeypatch):
 
     result = delete_service.restore_content(db, content_id="CID", source="SRC")
 
-    assert db.committed is True
     assert result["content"]["is_deleted"] is False
 
 

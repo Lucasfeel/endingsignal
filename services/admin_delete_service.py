@@ -66,15 +66,10 @@ def soft_delete_content(conn, *, admin_id, content_id, source, reason):
         )
         subscriptions_deleted = getattr(cursor, "rowcount", None)
 
-        conn.commit()
         result = {"content": _serialize_deleted_content_row(row)}
         if subscriptions_deleted is not None:
             result["subscriptions_deleted"] = subscriptions_deleted
         return result
-    except Exception:
-        if hasattr(conn, "rollback"):
-            conn.rollback()
-        raise
     finally:
         cursor.close()
 
@@ -118,12 +113,7 @@ def restore_content(conn, *, content_id, source):
             )
             row = cursor.fetchone()
 
-        conn.commit()
         return {"content": _serialize_deleted_content_row(row)}
-    except Exception:
-        if hasattr(conn, "rollback"):
-            conn.rollback()
-        raise
     finally:
         cursor.close()
 

@@ -71,7 +71,6 @@ def upsert_publication(
         (content_id, source, public_at, reason, admin_id),
     )
     publication_row = cursor.fetchone()
-    conn.commit()
     cursor.close()
 
     return {"publication": _serialize_publication_row(publication_row)}
@@ -83,7 +82,6 @@ def delete_publication(conn, *, content_id, source):
         "DELETE FROM admin_content_metadata WHERE content_id = %s AND source = %s",
         (content_id, source),
     )
-    conn.commit()
     cursor.close()
 
 

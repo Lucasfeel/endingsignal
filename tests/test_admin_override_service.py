@@ -84,7 +84,6 @@ def test_scheduled_override_does_not_record_event(monkeypatch):
         now=now,
     )
 
-    assert db.committed is True
     assert result['event_recorded'] is False
     assert recorded_events == []
     assert result['new_final_state']['final_status'] == '연재중'
