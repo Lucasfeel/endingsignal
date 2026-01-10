@@ -243,6 +243,29 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
 
+        print("LOG: [DB Setup] Creating 'admin_action_logs' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admin_action_logs (
+            id SERIAL PRIMARY KEY,
+            admin_id INTEGER NOT NULL REFERENCES users(id),
+            action_type TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            reason TEXT NULL,
+            payload JSONB NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )""")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created_at ON admin_action_logs (created_at DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_content ON admin_action_logs (content_id, source)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_admin ON admin_action_logs (admin_id, created_at DESC)"
+        )
+        print("LOG: [DB Setup] 'admin_action_logs' table created or already exists.")
+
         print("LOG: [DB Setup] Creating 'cdc_events' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS cdc_events (

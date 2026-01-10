@@ -169,6 +169,14 @@
       offset: 0,
       lastCount: 0,
     },
+    audit: {
+      items: [],
+      q: '',
+      actionType: '',
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+    },
   };
 
   const parseKstNaiveIsoToEpoch = (value) => {
@@ -281,46 +289,16 @@
     return '';
   };
 
-  const parseMeta = (meta) => {
-    if (!meta) return {};
-    if (typeof meta === 'object') return meta;
-    if (typeof meta === 'string') {
-      try {
-        const parsed = JSON.parse(meta);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-      } catch (err) {
-        return {};
-      }
-    }
-    return {};
-  };
-
-  const getThumbnailUrl = (item) => {
-    const meta = parseMeta(item?.meta);
-    return (
-      meta?.common?.thumbnail_url ||
-      meta?.thumbnail_url ||
-      meta?.common?.thumbnail ||
-      item?.thumbnail_url ||
-      item?.thumbnail ||
-      item?.thumbnail_path ||
-      ''
-    );
-  };
-
-  const getAuthorsText = (item) => {
-    const meta = parseMeta(item?.meta);
-    const authors = meta?.common?.authors;
-    if (Array.isArray(authors)) {
-      return authors.filter(Boolean).join(', ');
-    }
-    if (typeof meta?.common?.author === 'string') {
-      return meta.common.author;
-    }
-    return '';
-  };
-
   const getKey = (item) => `${item.content_id}::${item.source}`;
+
+  const AUDIT_ACTION_LABELS = {
+    OVERRIDE_UPSERT: '완결 처리 저장',
+    OVERRIDE_DELETE: '완결 처리 삭제',
+    PUBLICATION_UPSERT: '공개일 저장',
+    PUBLICATION_DELETE: '공개일 삭제',
+    CONTENT_DELETE: '콘텐츠 삭제',
+    CONTENT_RESTORE: '콘텐츠 복구',
+  };
 
   const computeFinalState = (rawStatus, override) => {
     if (!override) {
@@ -387,11 +365,13 @@
       manage: document.getElementById('panelManage'),
       deleted: document.getElementById('panelDeleted'),
       publications: document.getElementById('panelPublications'),
+      audit: document.getElementById('panelAudit'),
     };
     const tabs = {
       manage: document.getElementById('tabManage'),
       deleted: document.getElementById('tabDeleted'),
       publications: document.getElementById('tabPublications'),
+      audit: document.getElementById('tabAudit'),
     };
 
     Object.entries(panels).forEach(([key, panel]) => {
@@ -1165,6 +1145,58 @@
     });
   };
 
+  const renderAuditList = () => {
+    const container = document.getElementById('auditList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!STATE.audit.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '운영 로그가 없습니다.';
+      container.appendChild(empty);
+      return;
+    }
+
+    STATE.audit.items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const header = document.createElement('div');
+      header.className = 'flex items-start justify-between gap-2';
+
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      const titleText = item.title || `${item.content_id || '-'}::${item.source || '-'}`;
+      title.textContent = titleText;
+
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () => openLookupInManage(item));
+
+      header.appendChild(title);
+      header.appendChild(openBtn);
+
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      const label = AUDIT_ACTION_LABELS[item.action_type] || item.action_type || '-';
+      const adminLabel = item.admin_email || `ID ${item.admin_id || '-'}`;
+      meta.textContent = `${label} · ${adminLabel} · ${formatTimestamp(item.created_at)}`;
+
+      const reason = document.createElement('div');
+      reason.className = 'mt-1 text-[11px] text-white/50';
+      reason.textContent = `사유: ${item.reason || '-'}`;
+
+      card.appendChild(header);
+      card.appendChild(meta);
+      card.appendChild(reason);
+      container.appendChild(card);
+    });
+  };
+
   const loadPublications = async () => {
     const params = new URLSearchParams();
     params.set('limit', STATE.publications.limit);
@@ -1183,6 +1215,33 @@
     } catch (err) {
       showToast(err.message || '공개일 목록을 불러오지 못했습니다.', { type: 'error' });
     }
+  };
+
+  const loadAudit = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.audit.limit);
+    params.set('offset', STATE.audit.offset);
+    if (STATE.audit.q) params.set('q', STATE.audit.q);
+    if (STATE.audit.actionType) params.set('action_type', STATE.audit.actionType);
+
+    try {
+      const payload = await apiRequest('GET', `/api/admin/audit/logs?${params.toString()}`, {
+        token: STATE.token,
+      });
+      STATE.audit.items = payload?.logs || [];
+      STATE.audit.lastCount = STATE.audit.items.length;
+      renderAuditList();
+      updateAuditPagination();
+    } catch (err) {
+      showToast(err.message || '운영 로그를 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const updateAuditPagination = () => {
+    const prevBtn = document.getElementById('auditPrevBtn');
+    const nextBtn = document.getElementById('auditNextBtn');
+    setButtonDisabled(prevBtn, STATE.audit.offset === 0);
+    setButtonDisabled(nextBtn, STATE.audit.lastCount < STATE.audit.limit);
   };
 
   const updatePublicationsPagination = () => {
@@ -1219,11 +1278,15 @@
     const tabManage = document.getElementById('tabManage');
     const tabDeleted = document.getElementById('tabDeleted');
     const tabPublications = document.getElementById('tabPublications');
+    const tabAudit = document.getElementById('tabAudit');
     const deletedSearchBtn = document.getElementById('deletedSearchBtn');
     const deletedPrevBtn = document.getElementById('deletedPrevBtn');
     const deletedNextBtn = document.getElementById('deletedNextBtn');
     const publicationsPrevBtn = document.getElementById('publicationsPrevBtn');
     const publicationsNextBtn = document.getElementById('publicationsNextBtn');
+    const auditSearchBtn = document.getElementById('auditSearchBtn');
+    const auditPrevBtn = document.getElementById('auditPrevBtn');
+    const auditNextBtn = document.getElementById('auditNextBtn');
 
     manageSearchBtn?.addEventListener('click', () =>
       withLoading(manageSearchBtn, '검색 중...', performSearch),
@@ -1242,6 +1305,10 @@
     tabPublications?.addEventListener('click', () => {
       setTab('publications');
       loadPublications();
+    });
+    tabAudit?.addEventListener('click', () => {
+      setTab('audit');
+      loadAudit();
     });
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
@@ -1290,6 +1357,31 @@
         if (STATE.publications.lastCount < STATE.publications.limit) return;
         STATE.publications.offset += STATE.publications.limit;
         await loadPublications();
+      }),
+    );
+
+    auditSearchBtn?.addEventListener('click', () =>
+      withLoading(auditSearchBtn, '불러오는 중...', async () => {
+        const q = document.getElementById('auditSearchInput')?.value?.trim() || '';
+        const actionType = document.getElementById('auditActionSelect')?.value || '';
+        STATE.audit.q = q;
+        STATE.audit.actionType = actionType;
+        STATE.audit.offset = 0;
+        await loadAudit();
+      }),
+    );
+    auditPrevBtn?.addEventListener('click', () =>
+      withLoading(auditPrevBtn, '불러오는 중...', async () => {
+        if (STATE.audit.offset === 0) return;
+        STATE.audit.offset = Math.max(0, STATE.audit.offset - STATE.audit.limit);
+        await loadAudit();
+      }),
+    );
+    auditNextBtn?.addEventListener('click', () =>
+      withLoading(auditNextBtn, '불러오는 중...', async () => {
+        if (STATE.audit.lastCount < STATE.audit.limit) return;
+        STATE.audit.offset += STATE.audit.limit;
+        await loadAudit();
       }),
     );
   };

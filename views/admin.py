@@ -11,6 +11,7 @@ from services.admin_publication_service import (
     list_publications,
     upsert_publication,
 )
+from services.admin_audit_service import insert_admin_action_log
 from services.admin_delete_service import (
     list_deleted_contents,
     restore_content,
@@ -71,6 +72,25 @@ def _serialize_deleted_content(row):
         'deleted_at': row['deleted_at'].isoformat() if row['deleted_at'] else None,
         'deleted_reason': row['deleted_reason'],
         'deleted_by': row['deleted_by'],
+    }
+
+
+def _serialize_audit_log(row):
+    return {
+        'id': row['id'],
+        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+        'action_type': row['action_type'],
+        'reason': row['reason'],
+        'admin_id': row['admin_id'],
+        'admin_email': _get_row_value(row, 'admin_email'),
+        'content_id': row['content_id'],
+        'source': row['source'],
+        'title': _get_row_value(row, 'title'),
+        'content_type': _get_row_value(row, 'content_type'),
+        'status': _get_row_value(row, 'status'),
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
+        'is_deleted': _get_row_value(row, 'is_deleted'),
+        'payload': _get_row_value(row, 'payload'),
     }
 
 
@@ -151,6 +171,20 @@ def upsert_content_override():
     if result.get('error') == 'CONTENT_NOT_FOUND':
         return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
+    insert_admin_action_log(
+        conn,
+        admin_id=g.current_user['id'],
+        action_type='OVERRIDE_UPSERT',
+        content_id=content_id,
+        source=source,
+        reason=reason,
+        payload={
+            'override': _serialize_override(result['override']),
+            'event_recorded': result.get('event_recorded', False),
+        },
+    )
+    conn.commit()
+
     return jsonify(
         {
             'success': True,
@@ -218,6 +252,15 @@ def delete_content_override():
         "DELETE FROM admin_content_overrides WHERE content_id = %s AND source = %s",
         (content_id, source),
     )
+    insert_admin_action_log(
+        conn,
+        admin_id=g.current_user['id'],
+        action_type='OVERRIDE_DELETE',
+        content_id=content_id,
+        source=source,
+        reason=reason,
+        payload={'deleted': True},
+    )
     conn.commit()
     cursor.close()
 
@@ -256,6 +299,21 @@ def upsert_content_publication():
     if result.get('error') == 'CONTENT_NOT_FOUND':
         return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
+    insert_admin_action_log(
+        conn,
+        admin_id=g.current_user['id'],
+        action_type='PUBLICATION_UPSERT',
+        content_id=content_id,
+        source=source,
+        reason=reason,
+        payload={
+            'public_at': result['publication']['public_at'].isoformat()
+            if result.get('publication', {}).get('public_at')
+            else None,
+        },
+    )
+    conn.commit()
+
     return jsonify({'success': True, 'publication': _serialize_publication(result['publication'])})
 
 
@@ -275,6 +333,16 @@ def delete_content_publication():
 
     conn = get_db()
     delete_publication(conn, content_id=content_id, source=source)
+    insert_admin_action_log(
+        conn,
+        admin_id=g.current_user['id'],
+        action_type='PUBLICATION_DELETE',
+        content_id=content_id,
+        source=source,
+        reason=reason,
+        payload={'deleted': True},
+    )
+    conn.commit()
 
     return jsonify({'success': True})
 
@@ -329,6 +397,17 @@ def soft_delete_content_endpoint():
     if result.get('error') == 'CONTENT_NOT_FOUND':
         return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
+    insert_admin_action_log(
+        conn,
+        admin_id=g.current_user['id'],
+        action_type='CONTENT_DELETE',
+        content_id=content_id,
+        source=source,
+        reason=reason,
+        payload={'subscriptions_deleted': result.get('subscriptions_deleted')},
+    )
+    conn.commit()
+
     response = {
         'success': True,
         'content': _serialize_deleted_content(result['content']),
@@ -345,6 +424,7 @@ def restore_content_endpoint():
     data = request.get_json() or {}
     content_id = data.get('content_id')
     source = data.get('source')
+    reason = data.get('reason')
 
     if not content_id or not source:
         return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
@@ -358,6 +438,17 @@ def restore_content_endpoint():
 
     if result.get('error') == 'CONTENT_NOT_FOUND':
         return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+
+    insert_admin_action_log(
+        conn,
+        admin_id=g.current_user['id'],
+        action_type='CONTENT_RESTORE',
+        content_id=content_id,
+        source=source,
+        reason=reason if isinstance(reason, str) and reason.strip() else None,
+        payload={'restored': True},
+    )
+    conn.commit()
 
     return jsonify({'success': True, 'content': _serialize_deleted_content(result['content'])})
 
@@ -383,6 +474,93 @@ def list_deleted_contents_endpoint():
         {
             'success': True,
             'deleted_contents': [_serialize_deleted_content(row) for row in deleted_contents],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/audit/logs', methods=['GET'])
+@login_required
+@admin_required
+def list_admin_audit_logs():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    query = request.args.get('q')
+    action_type = request.args.get('action_type')
+    admin_id = request.args.get('admin_id')
+    content_id = request.args.get('content_id')
+    source = request.args.get('source')
+
+    admin_id_value = None
+    if admin_id:
+        try:
+            admin_id_value = int(admin_id)
+        except ValueError:
+            return _error_response(400, 'INVALID_REQUEST', 'admin_id must be an integer')
+
+    params = []
+    sql = """
+        SELECT
+            l.id,
+            l.created_at,
+            l.action_type,
+            l.reason,
+            l.admin_id,
+            u.email AS admin_email,
+            l.content_id,
+            l.source,
+            l.payload,
+            c.title,
+            c.content_type,
+            c.status,
+            c.meta,
+            COALESCE(c.is_deleted, FALSE) AS is_deleted
+        FROM admin_action_logs l
+        LEFT JOIN users u ON u.id = l.admin_id
+        LEFT JOIN contents c ON c.content_id = l.content_id AND c.source = l.source
+        WHERE 1=1
+    """
+
+    if action_type:
+        sql += " AND l.action_type = %s"
+        params.append(action_type)
+    if admin_id_value is not None:
+        sql += " AND l.admin_id = %s"
+        params.append(admin_id_value)
+    if content_id:
+        sql += " AND l.content_id = %s"
+        params.append(content_id)
+    if source:
+        sql += " AND l.source = %s"
+        params.append(source)
+    if query:
+        like_value = f"%{query}%"
+        sql += " AND (c.title ILIKE %s OR l.content_id ILIKE %s)"
+        params.extend([like_value, like_value])
+
+    sql += """
+        ORDER BY l.created_at DESC, l.id DESC
+        LIMIT %s OFFSET %s
+    """
+    params.extend([limit, offset])
+
+    conn = get_db()
+    cursor = get_cursor(conn)
+    cursor.execute(sql, tuple(params))
+    logs = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(
+        {
+            'success': True,
+            'logs': [_serialize_audit_log(row) for row in logs],
             'limit': limit,
             'offset': offset,
         }
