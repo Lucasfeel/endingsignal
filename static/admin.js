@@ -171,21 +171,114 @@
     },
   };
 
-  const formatDateTimeLocal = (value) => {
+  const parseKstNaiveIsoToEpoch = (value) => {
+    if (!value) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return null;
+    if (/[zZ]|[+-]\d{2}:\d{2}$/.test(value)) {
+      const epoch = Date.parse(value);
+      return Number.isNaN(epoch) ? null : epoch;
+    }
+    const match = value.match(
+      /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/,
+    );
+    if (!match) return null;
+    const [, year, month, day, hour, minute, second] = match;
+    const utcEpoch = Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour) - 9,
+      Number(minute),
+      Number(second || 0),
+    );
+    return Number.isNaN(utcEpoch) ? null : utcEpoch;
+  };
+
+  const formatEpochAsKst = (epoch) => {
+    if (epoch === null || epoch === undefined) return '-';
+    const date = new Date(epoch);
+    if (Number.isNaN(date.getTime())) return '-';
+    const formatter = new Intl.DateTimeFormat('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
+  };
+
+  const toDatetimeLocalValueKst = (value) => {
     if (!value) return '';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '';
-    const pad = (num) => String(num).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-      date.getHours(),
-    )}:${pad(date.getMinutes())}`;
+    if (typeof value === 'string' && !(/[zZ]|[+-]\d{2}:\d{2}$/.test(value))) {
+      return value.length >= 16 ? value.slice(0, 16) : value;
+    }
+    const epoch = parseKstNaiveIsoToEpoch(value);
+    if (epoch === null) return '';
+    const date = new Date(epoch);
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
   };
 
   const formatTimestamp = (value) => {
     if (!value) return '-';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('ko-KR');
+    const epoch = parseKstNaiveIsoToEpoch(value);
+    if (epoch === null) return value;
+    return formatEpochAsKst(epoch);
+  };
+
+  const parseMeta = (meta) => {
+    if (!meta) return {};
+    if (typeof meta === 'object') return meta;
+    if (typeof meta === 'string') {
+      try {
+        const parsed = JSON.parse(meta);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (err) {
+        return {};
+      }
+    }
+    return {};
+  };
+
+  const getThumbnailUrl = (item) => {
+    const meta = parseMeta(item?.meta);
+    return (
+      meta?.common?.thumbnail_url ||
+      meta?.thumbnail_url ||
+      meta?.common?.thumbnail ||
+      item?.thumbnail_url ||
+      item?.thumbnail ||
+      item?.thumbnail_path ||
+      ''
+    );
+  };
+
+  const getAuthorsText = (item) => {
+    const meta = parseMeta(item?.meta);
+    const authors = meta?.common?.authors;
+    if (Array.isArray(authors)) {
+      return authors.filter(Boolean).join(', ');
+    }
+    if (typeof meta?.common?.author === 'string') {
+      return meta.common.author;
+    }
+    return '';
   };
 
   const parseMeta = (meta) => {
@@ -260,9 +353,9 @@
       };
     }
 
-    const scheduledAt = new Date(overrideCompletedAt);
-    const now = new Date();
-    if (Number.isNaN(scheduledAt.getTime())) {
+    const scheduledEpoch = parseKstNaiveIsoToEpoch(overrideCompletedAt);
+    const nowEpoch = Date.now();
+    if (scheduledEpoch === null) {
       return {
         final_status: rawStatus,
         final_completed_at: null,
@@ -271,7 +364,7 @@
       };
     }
 
-    if (now < scheduledAt) {
+    if (nowEpoch < scheduledEpoch) {
       return {
         final_status: rawStatus,
         final_completed_at: null,
@@ -519,13 +612,13 @@
     const publication = STATE.manage.publicationsMap.get(key);
 
     if (overrideInput) {
-      overrideInput.value = override ? formatDateTimeLocal(override.override_completed_at) : '';
+      overrideInput.value = override ? toDatetimeLocalValueKst(override.override_completed_at) : '';
     }
     if (overrideReason) {
       overrideReason.value = override?.reason || '';
     }
     if (publicationInput) {
-      publicationInput.value = publication ? formatDateTimeLocal(publication.public_at) : '';
+      publicationInput.value = publication ? toDatetimeLocalValueKst(publication.public_at) : '';
     }
     if (publicationReason) {
       publicationReason.value = publication?.reason || '';

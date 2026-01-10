@@ -201,12 +201,15 @@ def list_content_overrides():
 @login_required
 @admin_required
 def delete_content_override():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     content_id = data.get('content_id')
     source = data.get('source')
+    reason = data.get('reason') or request.args.get('reason')
 
     if not content_id or not source:
         return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+    if not isinstance(reason, str) or not reason.strip():
+        return _error_response(400, 'INVALID_REQUEST', 'reason is required')
 
     conn = get_db()
     cursor = get_cursor(conn)
@@ -260,12 +263,15 @@ def upsert_content_publication():
 @login_required
 @admin_required
 def delete_content_publication():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     content_id = data.get('content_id')
     source = data.get('source')
+    reason = data.get('reason') or request.args.get('reason')
 
     if not content_id or not source:
         return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+    if not isinstance(reason, str) or not reason.strip():
+        return _error_response(400, 'INVALID_REQUEST', 'reason is required')
 
     conn = get_db()
     delete_publication(conn, content_id=content_id, source=source)
