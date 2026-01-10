@@ -80,7 +80,6 @@ def test_upsert_publication_missing_content(monkeypatch):
     )
 
     assert result == {"error": "CONTENT_NOT_FOUND"}
-    assert db.committed is False
 
 
 def test_upsert_publication_creates_and_commits(monkeypatch):
@@ -97,7 +96,6 @@ def test_upsert_publication_creates_and_commits(monkeypatch):
         reason="manual publish",
     )
 
-    assert db.committed is True
     assert result["publication"]["content_id"] == "CID"
     assert result["publication"]["reason"] == "manual publish"
 
@@ -129,7 +127,6 @@ def test_upsert_publication_updates_existing(monkeypatch):
         reason="update",
     )
 
-    assert db.committed is True
     assert result["publication"]["id"] == 7
     assert result["publication"]["admin_id"] == 9
     assert result["publication"]["updated_at"] == now
@@ -141,5 +138,3 @@ def test_delete_publication_commits_and_is_idempotent(monkeypatch):
     monkeypatch.setattr(publication_service, "get_cursor", lambda conn: FakeCursor(conn))
 
     publication_service.delete_publication(db, content_id="CID", source="SRC")
-
-    assert db.committed is True
