@@ -4,6 +4,13 @@ from database import get_cursor
 _DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
 
 
+def _get_row_value(row, key):
+    try:
+        return row[key]
+    except Exception:
+        return None
+
+
 def _serialize_publication_row(row):
     if not row:
         return None
@@ -16,6 +23,11 @@ def _serialize_publication_row(row):
         "admin_id": row["admin_id"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "title": _get_row_value(row, "title"),
+        "content_type": _get_row_value(row, "content_type"),
+        "status": _get_row_value(row, "status"),
+        "meta": _get_row_value(row, "meta"),
+        "is_deleted": _get_row_value(row, "is_deleted"),
     }
 
 
@@ -79,9 +91,24 @@ def list_publications(conn, *, limit, offset):
     cursor = get_cursor(conn)
     cursor.execute(
         """
-        SELECT id, content_id, source, public_at, reason, admin_id, created_at, updated_at
-        FROM admin_content_metadata
-        ORDER BY updated_at DESC NULLS LAST, created_at DESC
+        SELECT
+            m.id,
+            m.content_id,
+            m.source,
+            m.public_at,
+            m.reason,
+            m.admin_id,
+            m.created_at,
+            m.updated_at,
+            c.title,
+            c.content_type,
+            c.status,
+            c.meta,
+            COALESCE(c.is_deleted, FALSE) AS is_deleted
+        FROM admin_content_metadata m
+        JOIN contents c
+          ON c.content_id = m.content_id AND c.source = m.source
+        ORDER BY m.updated_at DESC NULLS LAST, m.created_at DESC
         LIMIT %s OFFSET %s
         """,
         (limit, offset),

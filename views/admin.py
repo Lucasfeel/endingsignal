@@ -1,5 +1,7 @@
 # views/admin.py
 
+import json
+
 from flask import Blueprint, jsonify, request, g, render_template
 
 from database import get_db, get_cursor
@@ -49,6 +51,11 @@ def _serialize_publication(row):
         'admin_id': row['admin_id'],
         'created_at': row['created_at'].isoformat() if row['created_at'] else None,
         'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+        'title': _get_row_value(row, 'title'),
+        'content_type': _get_row_value(row, 'content_type'),
+        'status': _get_row_value(row, 'status'),
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
+        'is_deleted': _get_row_value(row, 'is_deleted'),
     }
 
 
@@ -60,6 +67,7 @@ def _serialize_deleted_content(row):
         'title': row['title'],
         'status': row['status'],
         'is_deleted': row['is_deleted'],
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
         'deleted_at': row['deleted_at'].isoformat() if row['deleted_at'] else None,
         'deleted_reason': row['deleted_reason'],
         'deleted_by': row['deleted_by'],
@@ -75,6 +83,30 @@ def _serialize_final_state(state):
     if hasattr(final_completed_at, 'isoformat'):
         serialized['final_completed_at'] = final_completed_at.isoformat()
     return serialized
+
+
+def _get_row_value(row, key):
+    try:
+        return row[key]
+    except Exception:
+        return None
+
+
+def _normalize_meta(value):
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    try:
+        return dict(value)
+    except Exception:
+        return {}
 
 
 @admin_bp.route('/admin', methods=['GET'])
@@ -169,12 +201,15 @@ def list_content_overrides():
 @login_required
 @admin_required
 def delete_content_override():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     content_id = data.get('content_id')
     source = data.get('source')
+    reason = data.get('reason') or request.args.get('reason')
 
     if not content_id or not source:
         return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+    if not isinstance(reason, str) or not reason.strip():
+        return _error_response(400, 'INVALID_REQUEST', 'reason is required')
 
     conn = get_db()
     cursor = get_cursor(conn)
@@ -228,12 +263,15 @@ def upsert_content_publication():
 @login_required
 @admin_required
 def delete_content_publication():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     content_id = data.get('content_id')
     source = data.get('source')
+    reason = data.get('reason') or request.args.get('reason')
 
     if not content_id or not source:
         return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+    if not isinstance(reason, str) or not reason.strip():
+        return _error_response(400, 'INVALID_REQUEST', 'reason is required')
 
     conn = get_db()
     delete_publication(conn, content_id=content_id, source=source)
@@ -349,3 +387,71 @@ def list_deleted_contents_endpoint():
             'offset': offset,
         }
     )
+
+
+@admin_bp.route('/api/admin/contents/lookup', methods=['GET'])
+@login_required
+@admin_required
+def lookup_admin_content():
+    content_id = request.args.get('content_id')
+    source = request.args.get('source')
+
+    if not content_id or not source:
+        return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
+
+    conn = get_db()
+    cursor = get_cursor(conn)
+
+    try:
+        cursor.execute(
+            """
+            SELECT content_id, source, title, content_type, status, meta,
+                   COALESCE(is_deleted, FALSE) AS is_deleted, created_at, updated_at
+            FROM contents
+            WHERE content_id = %s AND source = %s
+            """,
+            (content_id, source),
+        )
+        content_row = cursor.fetchone()
+        if content_row is None:
+            return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+
+        cursor.execute(
+            """
+            SELECT id, content_id, source, override_status, override_completed_at, reason,
+                   admin_id, created_at, updated_at
+            FROM admin_content_overrides
+            WHERE content_id = %s AND source = %s
+            """,
+            (content_id, source),
+        )
+        override_row = cursor.fetchone()
+
+        cursor.execute(
+            """
+            SELECT id, content_id, source, public_at, reason, admin_id, created_at, updated_at
+            FROM admin_content_metadata
+            WHERE content_id = %s AND source = %s
+            """,
+            (content_id, source),
+        )
+        publication_row = cursor.fetchone()
+    finally:
+        cursor.close()
+
+    content = {
+        'content_id': content_row['content_id'],
+        'source': content_row['source'],
+        'title': content_row['title'],
+        'content_type': content_row['content_type'],
+        'status': content_row['status'],
+        'meta': _normalize_meta(_get_row_value(content_row, 'meta')),
+        'is_deleted': content_row['is_deleted'],
+        'created_at': content_row['created_at'].isoformat() if content_row['created_at'] else None,
+        'updated_at': content_row['updated_at'].isoformat() if content_row['updated_at'] else None,
+    }
+
+    override = _serialize_override(override_row) if override_row else None
+    publication = _serialize_publication(publication_row) if publication_row else None
+
+    return jsonify({'success': True, 'content': content, 'override': override, 'publication': publication})
