@@ -112,6 +112,62 @@ def setup_database_standalone():
             "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_by INTEGER"
         )
 
+        print("LOG: [DB Setup] Ensuring contents timestamps exist...")
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS created_at TIMESTAMP"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ALTER COLUMN created_at SET DEFAULT NOW()"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ALTER COLUMN updated_at SET DEFAULT NOW()"
+        )
+        cursor.execute(
+            """
+            UPDATE contents
+            SET created_at = NOW()
+            WHERE created_at IS NULL;
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE contents
+            SET updated_at = NOW()
+            WHERE updated_at IS NULL;
+            """
+        )
+        cursor.execute(
+            "ALTER TABLE contents ALTER COLUMN created_at SET NOT NULL"
+        )
+        cursor.execute(
+            "ALTER TABLE contents ALTER COLUMN updated_at SET NOT NULL"
+        )
+        cursor.execute(
+            """
+            CREATE OR REPLACE FUNCTION set_updated_at()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.updated_at = NOW();
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_contents_updated_at ON contents;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_contents_updated_at
+            BEFORE UPDATE ON contents
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
+
         print("LOG: [DB Setup] Creating 'users' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -186,6 +242,29 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'admin_action_logs' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admin_action_logs (
+            id SERIAL PRIMARY KEY,
+            admin_id INTEGER NOT NULL REFERENCES users(id),
+            action_type TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            reason TEXT NULL,
+            payload JSONB NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )""")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created_at ON admin_action_logs (created_at DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_content ON admin_action_logs (content_id, source)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_admin ON admin_action_logs (admin_id, created_at DESC)"
+        )
+        print("LOG: [DB Setup] 'admin_action_logs' table created or already exists.")
 
         print("LOG: [DB Setup] Creating 'cdc_events' table...")
         cursor.execute("""
