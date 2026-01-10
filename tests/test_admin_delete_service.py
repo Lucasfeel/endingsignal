@@ -48,7 +48,7 @@ class FakeCursor:
             }
             self.rowcount = before - len(self.db.subscriptions)
             self.last_result = []
-        elif "WHERE is_deleted = TRUE" in query:
+        elif "COALESCE(is_deleted, FALSE) = TRUE" in query:
             if len(params) == 4:
                 like_title, like_normalized, limit, offset = params
                 needle = like_title.strip("%").lower()
@@ -131,6 +131,7 @@ def test_soft_delete_marks_deleted_and_commits_and_deletes_subscriptions(monkeyp
             "normalized_title": "title",
             "status": "active",
             "is_deleted": False,
+            "meta": {},
             "deleted_at": None,
             "deleted_reason": None,
             "deleted_by": None,
@@ -171,6 +172,7 @@ def test_soft_delete_is_idempotent_when_already_deleted(monkeypatch):
             "normalized_title": "title",
             "status": "active",
             "is_deleted": True,
+            "meta": {},
             "deleted_at": existing,
             "deleted_reason": "original",
             "deleted_by": 2,
@@ -214,6 +216,7 @@ def test_restore_clears_deleted_fields_and_commits(monkeypatch):
             "normalized_title": "title",
             "status": "active",
             "is_deleted": True,
+            "meta": {},
             "deleted_at": datetime(2024, 4, 1, 0, 0, 0),
             "deleted_reason": "spam",
             "deleted_by": 4,
@@ -240,6 +243,7 @@ def test_restore_is_idempotent_when_not_deleted(monkeypatch):
             "normalized_title": "title",
             "status": "active",
             "is_deleted": False,
+            "meta": {},
             "deleted_at": None,
             "deleted_reason": None,
             "deleted_by": None,
@@ -265,6 +269,7 @@ def test_list_deleted_contents_filters_by_q(monkeypatch):
             "normalized_title": "alphatitle",
             "status": "active",
             "is_deleted": True,
+            "meta": {},
             "deleted_at": datetime(2024, 5, 1, 0, 0, 0),
             "deleted_reason": "spam",
             "deleted_by": 1,
@@ -277,6 +282,7 @@ def test_list_deleted_contents_filters_by_q(monkeypatch):
             "normalized_title": "beta",
             "status": "active",
             "is_deleted": True,
+            "meta": {},
             "deleted_at": datetime(2024, 5, 2, 0, 0, 0),
             "deleted_reason": "spam",
             "deleted_by": 1,

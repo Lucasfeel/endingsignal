@@ -14,6 +14,7 @@ def _serialize_deleted_content_row(row):
         "title": row["title"],
         "status": row["status"],
         "is_deleted": row["is_deleted"],
+        "meta": row["meta"],
         "deleted_at": row["deleted_at"],
         "deleted_reason": row["deleted_reason"],
         "deleted_by": row["deleted_by"],
@@ -26,7 +27,7 @@ def soft_delete_content(conn, *, admin_id, content_id, source, reason):
         cursor.execute(
             """
             SELECT content_id, source, content_type, title, status,
-                   is_deleted, deleted_at, deleted_reason, deleted_by
+                   is_deleted, meta, deleted_at, deleted_reason, deleted_by
             FROM contents
             WHERE content_id = %s AND source = %s
             """,
@@ -51,7 +52,7 @@ def soft_delete_content(conn, *, admin_id, content_id, source, reason):
             cursor.execute(
                 """
                 SELECT content_id, source, content_type, title, status,
-                       is_deleted, deleted_at, deleted_reason, deleted_by
+                       is_deleted, meta, deleted_at, deleted_reason, deleted_by
                 FROM contents
                 WHERE content_id = %s AND source = %s
                 """,
@@ -84,7 +85,7 @@ def restore_content(conn, *, content_id, source):
         cursor.execute(
             """
             SELECT content_id, source, content_type, title, status,
-                   is_deleted, deleted_at, deleted_reason, deleted_by
+                   is_deleted, meta, deleted_at, deleted_reason, deleted_by
             FROM contents
             WHERE content_id = %s AND source = %s
             """,
@@ -109,7 +110,7 @@ def restore_content(conn, *, content_id, source):
             cursor.execute(
                 """
                 SELECT content_id, source, content_type, title, status,
-                       is_deleted, deleted_at, deleted_reason, deleted_by
+                       is_deleted, meta, deleted_at, deleted_reason, deleted_by
                 FROM contents
                 WHERE content_id = %s AND source = %s
                 """,
@@ -132,9 +133,9 @@ def list_deleted_contents(conn, *, limit, offset, q=None):
     params = []
     query = """
         SELECT content_id, source, content_type, title, status,
-               is_deleted, deleted_at, deleted_reason, deleted_by
+               is_deleted, meta, deleted_at, deleted_reason, deleted_by
         FROM contents
-        WHERE is_deleted = TRUE
+        WHERE COALESCE(is_deleted, FALSE) = TRUE
     """
     if q:
         query += " AND (title ILIKE %s OR normalized_title ILIKE %s)"
