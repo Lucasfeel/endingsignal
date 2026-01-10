@@ -120,7 +120,6 @@ def upsert_override_and_record_event(
             resolved_by="override",
         )
 
-    conn.commit()
     cursor.close()
 
     result = {

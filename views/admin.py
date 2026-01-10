@@ -158,45 +158,52 @@ def upsert_content_override():
             return _error_response(400, 'INVALID_REQUEST', 'override_completed_at must be a valid ISO 8601 datetime string')
 
     conn = get_db()
-    result = upsert_override_and_record_event(
-        conn,
-        admin_id=g.current_user['id'],
-        content_id=content_id,
-        source=source,
-        override_status=override_status,
-        override_completed_at=override_completed_at,
-        reason=reason,
-    )
+    try:
+        result = upsert_override_and_record_event(
+            conn,
+            admin_id=g.current_user['id'],
+            content_id=content_id,
+            source=source,
+            override_status=override_status,
+            override_completed_at=override_completed_at,
+            reason=reason,
+        )
 
-    if result.get('error') == 'CONTENT_NOT_FOUND':
-        return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+        if result.get('error') == 'CONTENT_NOT_FOUND':
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
+            return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
-    insert_admin_action_log(
-        conn,
-        admin_id=g.current_user['id'],
-        action_type='OVERRIDE_UPSERT',
-        content_id=content_id,
-        source=source,
-        reason=reason,
-        payload={
-            'override': _serialize_override(result['override']),
-            'event_recorded': result.get('event_recorded', False),
-        },
-    )
-    conn.commit()
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='OVERRIDE_UPSERT',
+            content_id=content_id,
+            source=source,
+            reason=reason,
+            payload={
+                'override': _serialize_override(result['override']),
+                'event_recorded': result.get('event_recorded', False),
+            },
+        )
+        conn.commit()
 
-    return jsonify(
-        {
-            'success': True,
-            'override': _serialize_override(result['override']),
-            'previous_final_state': _serialize_final_state(result.get('previous_final_state')),
-            'new_final_state': _serialize_final_state(result.get('new_final_state')),
-            'event_recorded': result.get('event_recorded', False),
-            'is_scheduled_completion': result.get('final_state', {}).get('is_scheduled_completion'),
-            'scheduled_completed_at': result.get('final_state', {}).get('scheduled_completed_at'),
-            'final_state': result.get('final_state'),
-        }
-    )
+        return jsonify(
+            {
+                'success': True,
+                'override': _serialize_override(result['override']),
+                'previous_final_state': _serialize_final_state(result.get('previous_final_state')),
+                'new_final_state': _serialize_final_state(result.get('new_final_state')),
+                'event_recorded': result.get('event_recorded', False),
+                'is_scheduled_completion': result.get('final_state', {}).get('is_scheduled_completion'),
+                'scheduled_completed_at': result.get('final_state', {}).get('scheduled_completed_at'),
+                'final_state': result.get('final_state'),
+            }
+        )
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
 
 
 @admin_bp.route('/api/admin/contents/overrides', methods=['GET'])
@@ -247,24 +254,29 @@ def delete_content_override():
 
     conn = get_db()
     cursor = get_cursor(conn)
+    try:
+        cursor.execute(
+            "DELETE FROM admin_content_overrides WHERE content_id = %s AND source = %s",
+            (content_id, source),
+        )
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='OVERRIDE_DELETE',
+            content_id=content_id,
+            source=source,
+            reason=reason,
+            payload={'deleted': True},
+        )
+        conn.commit()
 
-    cursor.execute(
-        "DELETE FROM admin_content_overrides WHERE content_id = %s AND source = %s",
-        (content_id, source),
-    )
-    insert_admin_action_log(
-        conn,
-        admin_id=g.current_user['id'],
-        action_type='OVERRIDE_DELETE',
-        content_id=content_id,
-        source=source,
-        reason=reason,
-        payload={'deleted': True},
-    )
-    conn.commit()
-    cursor.close()
-
-    return jsonify({'success': True})
+        return jsonify({'success': True})
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
+    finally:
+        cursor.close()
 
 
 @admin_bp.route('/api/admin/contents/publication', methods=['POST'])
@@ -287,34 +299,41 @@ def upsert_content_publication():
             return _error_response(400, 'INVALID_REQUEST', 'public_at must be a valid ISO 8601 datetime string')
 
     conn = get_db()
-    result = upsert_publication(
-        conn,
-        admin_id=g.current_user['id'],
-        content_id=content_id,
-        source=source,
-        public_at=public_at,
-        reason=reason,
-    )
+    try:
+        result = upsert_publication(
+            conn,
+            admin_id=g.current_user['id'],
+            content_id=content_id,
+            source=source,
+            public_at=public_at,
+            reason=reason,
+        )
 
-    if result.get('error') == 'CONTENT_NOT_FOUND':
-        return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+        if result.get('error') == 'CONTENT_NOT_FOUND':
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
+            return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
-    insert_admin_action_log(
-        conn,
-        admin_id=g.current_user['id'],
-        action_type='PUBLICATION_UPSERT',
-        content_id=content_id,
-        source=source,
-        reason=reason,
-        payload={
-            'public_at': result['publication']['public_at'].isoformat()
-            if result.get('publication', {}).get('public_at')
-            else None,
-        },
-    )
-    conn.commit()
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='PUBLICATION_UPSERT',
+            content_id=content_id,
+            source=source,
+            reason=reason,
+            payload={
+                'public_at': result['publication']['public_at'].isoformat()
+                if result.get('publication', {}).get('public_at')
+                else None,
+            },
+        )
+        conn.commit()
 
-    return jsonify({'success': True, 'publication': _serialize_publication(result['publication'])})
+        return jsonify({'success': True, 'publication': _serialize_publication(result['publication'])})
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
 
 
 @admin_bp.route('/api/admin/contents/publication', methods=['DELETE'])
@@ -332,19 +351,24 @@ def delete_content_publication():
         return _error_response(400, 'INVALID_REQUEST', 'reason is required')
 
     conn = get_db()
-    delete_publication(conn, content_id=content_id, source=source)
-    insert_admin_action_log(
-        conn,
-        admin_id=g.current_user['id'],
-        action_type='PUBLICATION_DELETE',
-        content_id=content_id,
-        source=source,
-        reason=reason,
-        payload={'deleted': True},
-    )
-    conn.commit()
+    try:
+        delete_publication(conn, content_id=content_id, source=source)
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='PUBLICATION_DELETE',
+            content_id=content_id,
+            source=source,
+            reason=reason,
+            payload={'deleted': True},
+        )
+        conn.commit()
 
-    return jsonify({'success': True})
+        return jsonify({'success': True})
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
 
 
 @admin_bp.route('/api/admin/contents/publications', methods=['GET'])
@@ -386,35 +410,42 @@ def soft_delete_content_endpoint():
         return _error_response(400, 'INVALID_REQUEST', 'content_id, source, and reason are required')
 
     conn = get_db()
-    result = soft_delete_content(
-        conn,
-        admin_id=g.current_user['id'],
-        content_id=content_id,
-        source=source,
-        reason=reason,
-    )
+    try:
+        result = soft_delete_content(
+            conn,
+            admin_id=g.current_user['id'],
+            content_id=content_id,
+            source=source,
+            reason=reason,
+        )
 
-    if result.get('error') == 'CONTENT_NOT_FOUND':
-        return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+        if result.get('error') == 'CONTENT_NOT_FOUND':
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
+            return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
-    insert_admin_action_log(
-        conn,
-        admin_id=g.current_user['id'],
-        action_type='CONTENT_DELETE',
-        content_id=content_id,
-        source=source,
-        reason=reason,
-        payload={'subscriptions_deleted': result.get('subscriptions_deleted')},
-    )
-    conn.commit()
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='CONTENT_DELETE',
+            content_id=content_id,
+            source=source,
+            reason=reason,
+            payload={'subscriptions_deleted': result.get('subscriptions_deleted')},
+        )
+        conn.commit()
 
-    response = {
-        'success': True,
-        'content': _serialize_deleted_content(result['content']),
-    }
-    if 'subscriptions_deleted' in result:
-        response['subscriptions_deleted'] = result['subscriptions_deleted']
-    return jsonify(response)
+        response = {
+            'success': True,
+            'content': _serialize_deleted_content(result['content']),
+        }
+        if 'subscriptions_deleted' in result:
+            response['subscriptions_deleted'] = result['subscriptions_deleted']
+        return jsonify(response)
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
 
 
 @admin_bp.route('/api/admin/contents/restore', methods=['POST'])
@@ -430,27 +461,34 @@ def restore_content_endpoint():
         return _error_response(400, 'INVALID_REQUEST', 'content_id and source are required')
 
     conn = get_db()
-    result = restore_content(
-        conn,
-        content_id=content_id,
-        source=source,
-    )
+    try:
+        result = restore_content(
+            conn,
+            content_id=content_id,
+            source=source,
+        )
 
-    if result.get('error') == 'CONTENT_NOT_FOUND':
-        return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+        if result.get('error') == 'CONTENT_NOT_FOUND':
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
+            return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
-    insert_admin_action_log(
-        conn,
-        admin_id=g.current_user['id'],
-        action_type='CONTENT_RESTORE',
-        content_id=content_id,
-        source=source,
-        reason=reason if isinstance(reason, str) and reason.strip() else None,
-        payload={'restored': True},
-    )
-    conn.commit()
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='CONTENT_RESTORE',
+            content_id=content_id,
+            source=source,
+            reason=reason if isinstance(reason, str) and reason.strip() else None,
+            payload={'restored': True},
+        )
+        conn.commit()
 
-    return jsonify({'success': True, 'content': _serialize_deleted_content(result['content'])})
+        return jsonify({'success': True, 'content': _serialize_deleted_content(result['content'])})
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
 
 
 @admin_bp.route('/api/admin/contents/deleted', methods=['GET'])
