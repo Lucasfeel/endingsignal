@@ -2004,6 +2004,7 @@ function ensureKakaoThumbStyles() {
   max-width: 167px;
   height: auto;
   display: block;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.85));
 }
 @media (min-width: 1024px) {
   .kakaoTitleImg {
@@ -4003,6 +4004,21 @@ const hexToRgb = (hex) => {
   };
 };
 
+const pickKakaoTitleSource = (kakaoAssets) => {
+  if (!kakaoAssets) return null;
+  const titleA = kakaoAssets?.title_a || null;
+  const titleB = kakaoAssets?.title_b || null;
+  if (titleA && !titleB) return titleA;
+  if (titleB && !titleA) return titleB;
+  if (!titleA && !titleB) return null;
+
+  const bgRgb = hexToRgb(kakaoAssets?.bg_color || '');
+  if (!bgRgb) return titleB || titleA;
+  const luminance = (0.2126 * bgRgb.r + 0.7152 * bgRgb.g + 0.0722 * bgRgb.b) / 255;
+  const bgIsDark = luminance < 0.55;
+  return bgIsDark ? titleA || titleB : titleB || titleA;
+};
+
 const buildPicture = ({
   webp,
   fallbackUrl,
@@ -4170,7 +4186,7 @@ function createCard(content, tabId, aspectClass) {
       stack.appendChild(gradientEl);
     }
 
-    const titleSource = kakaoAssets?.title_b || kakaoAssets?.title_a;
+    const titleSource = pickKakaoTitleSource(kakaoAssets);
     if (titleSource?.webp || titleSource?.png) {
       const titleWrap = document.createElement('div');
       setClasses(titleWrap, 'absolute w-full');
