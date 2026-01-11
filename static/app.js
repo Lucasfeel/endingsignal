@@ -484,7 +484,7 @@ const STATE = {
     novel: { sources: [], day: 'all' },
     ott: { sources: [], genre: 'drama' },
     series: { sort: 'latest' },
-    my: { viewMode: 'completion' },
+    my: { viewMode: 'subscribing' },
   },
   search: {
     pageOpen: false,
@@ -3595,7 +3595,6 @@ function updateFilterVisibility(tabId) {
     UI.seriesFooter.classList.remove('hidden');
   } else if (tabId === 'my') {
     UI.mySubToggle.classList.remove('hidden');
-    syncMySubToggleUI();
   }
 }
 
@@ -3691,26 +3690,14 @@ function renderL2Filters(tabId) {
   });
 }
 
-function syncMySubToggleUI() {
-  const mode = STATE.filters?.my?.viewMode || 'completion';
-
-  if (UI.toggleIndicator) {
-    const x =
-      mode === 'publication' ? 'translateX(0%)' : mode === 'completion' ? 'translateX(100%)' : 'translateX(200%)';
-    UI.toggleIndicator.style.transform = x;
-  }
-
-  const btns = document.querySelectorAll('#mySubToggleContainer button[data-mode]');
-  btns.forEach((btn) => {
-    const active = btn.dataset.mode === mode;
-    btn.classList.toggle('text-white', active);
-    btn.classList.toggle('text-gray-400', !active);
-  });
-}
-
 function updateMySubTab(mode) {
   STATE.filters.my.viewMode = mode;
-  syncMySubToggleUI();
+
+  if (UI.toggleIndicator) {
+    UI.toggleIndicator.style.transform =
+      mode === 'subscribing' ? 'translateX(0)' : 'translateX(100%)';
+  }
+
   fetchAndRenderContent('my');
 }
 
@@ -3916,21 +3903,14 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         return { stale: true };
       }
 
-      const mode = STATE.filters?.my?.viewMode || 'completion';
+      const mode = STATE.filters?.my?.viewMode || 'subscribing';
 
       data = (subs || []).filter((item) => {
-        const sub = item?.subscription || {};
+        if (!item?.subscription?.wants_completion) return false;
         const fs = item?.final_state || {};
         const isScheduled = fs?.is_scheduled_completion === true;
         const isCompleted = fs?.final_status === '완결' && !isScheduled;
 
-        if (mode === 'publication') {
-          if (sub.wants_publication !== true) return false;
-          if (!supportsPublicationUI(item)) return false;
-          return true;
-        }
-
-        if (sub.wants_completion !== true) return false;
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
@@ -3942,10 +3922,10 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
             message: '구독 중인 작품이 완결되면 여기에 표시됩니다.',
             actions: [
               {
-                label: '완결구독 보기',
+                label: '구독 목록 보기',
                 variant: 'primary',
                 onClick: () => {
-                  STATE.filters.my.viewMode = 'completion';
+                  STATE.filters.my.viewMode = 'subscribing';
                   updateTab('my');
                 },
               },
@@ -3956,26 +3936,9 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
               },
             ],
           };
-        } else if (mode === 'publication') {
-          emptyStateConfig = {
-            title: '공개 알림을 구독한 작품이 없습니다',
-            message: 'OTT/Series 작품에서 공개 알림을 설정해보세요.',
-            actions: [
-              {
-                label: '검색하기',
-                variant: 'primary',
-                onClick: () => openSearchAndFocus(),
-              },
-              {
-                label: 'OTT 보기',
-                variant: 'secondary',
-                onClick: () => updateTab('ott'),
-              },
-            ],
-          };
         } else {
           emptyStateConfig = {
-            title: '완결 알림을 구독한 작품이 없습니다',
+            title: '구독한 작품이 없습니다',
             message: '작품을 검색한 뒤, 작품 화면에서 알림을 설정해보세요.',
             actions: [
               {
