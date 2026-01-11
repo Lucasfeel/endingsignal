@@ -523,6 +523,8 @@ const STATE = {
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
   subscriptionsLoadPromise: null,
+  subscriptionsRequestSeq: 0,
+  subscriptionsAbortController: null,
 
   pagination: {
     completed: {
@@ -1557,6 +1559,7 @@ const safeString = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
 const safeBool = (v, fallback = false) =>
   typeof v === 'boolean' ? v : fallback;
 const safeObj = (v) => (v && typeof v === 'object' ? v : {});
+const isAbortError = (err) => err && (err.name === 'AbortError' || err.code === 20);
 
 function normalizeSearchText(s) {
   return (s || '')
@@ -1664,6 +1667,10 @@ const isAnySubscribedForCard = (content) => {
 async function loadSubscriptions({ force = false } = {}) {
   const token = getAccessToken();
   if (!token) {
+    if (STATE.subscriptionsAbortController) {
+      STATE.subscriptionsAbortController.abort();
+      STATE.subscriptionsAbortController = null;
+    }
     STATE.subscriptionsSet = new Set();
     STATE.publicationSubscriptionsSet = new Set();
     STATE.mySubscriptions = [];
@@ -1683,34 +1690,55 @@ async function loadSubscriptions({ force = false } = {}) {
     return STATE.mySubscriptions;
   }
 
+  const seq = (STATE.subscriptionsRequestSeq || 0) + 1;
+  STATE.subscriptionsRequestSeq = seq;
+  const tokenSnapshot = token;
+
+  if (STATE.subscriptionsAbortController) {
+    STATE.subscriptionsAbortController.abort();
+  }
+  const ac = new AbortController();
+  STATE.subscriptionsAbortController = ac;
+
   const loadPromise = (async () => {
-    const res = await apiRequest('GET', '/api/me/subscriptions', { token });
-    if (!res || res.success !== true || !Array.isArray(res.data)) {
-      throw new Error('구독 정보를 불러오지 못했습니다.');
+    try {
+      const res = await apiRequest('GET', '/api/me/subscriptions', {
+        token,
+        signal: ac.signal,
+      });
+      if (!res || res.success !== true || !Array.isArray(res.data)) {
+        throw new Error('구독 정보를 불러오지 못했습니다.');
+      }
+
+      const normalized = res.data
+        .map((x) => normalizeSubscriptionItem(x))
+        .filter(Boolean);
+
+      if (seq !== STATE.subscriptionsRequestSeq) return normalized;
+      if (getAccessToken() !== tokenSnapshot) return normalized;
+
+      const completionSet = new Set();
+      const publicationSet = new Set();
+      normalized.forEach((item) => {
+        const key = buildSubscriptionKey(item);
+        if (!key) return;
+        if (item.subscription?.wants_completion) completionSet.add(key);
+        if (item.subscription?.wants_publication) publicationSet.add(key);
+      });
+
+      STATE.subscriptionsSet = completionSet;
+      STATE.publicationSubscriptionsSet = publicationSet;
+      STATE.mySubscriptions = normalized;
+      STATE.subscriptionsLoadedAt = Date.now();
+      syncAllRenderedStarBadges();
+      syncMySubListInPlace();
+      if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+
+      return normalized;
+    } catch (err) {
+      if (isAbortError(err)) return STATE.mySubscriptions || [];
+      throw err;
     }
-
-    const normalized = res.data
-      .map((x) => normalizeSubscriptionItem(x))
-      .filter(Boolean);
-
-    const completionSet = new Set();
-    const publicationSet = new Set();
-    normalized.forEach((item) => {
-      const key = buildSubscriptionKey(item);
-      if (!key) return;
-      if (item.subscription?.wants_completion) completionSet.add(key);
-      if (item.subscription?.wants_publication) publicationSet.add(key);
-    });
-
-    STATE.subscriptionsSet = completionSet;
-    STATE.publicationSubscriptionsSet = publicationSet;
-    STATE.mySubscriptions = normalized;
-    STATE.subscriptionsLoadedAt = Date.now();
-    syncAllRenderedStarBadges();
-    syncMySubListInPlace();
-    if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
-
-    return normalized;
   })();
 
   STATE.subscriptionsLoadPromise = loadPromise;
@@ -1720,6 +1748,9 @@ async function loadSubscriptions({ force = false } = {}) {
   } finally {
     if (STATE.subscriptionsLoadPromise === loadPromise) {
       STATE.subscriptionsLoadPromise = null;
+    }
+    if (STATE.subscriptionsAbortController === ac) {
+      STATE.subscriptionsAbortController = null;
     }
   }
 }
@@ -1743,6 +1774,12 @@ async function retryModalSubscriptionLoad(content) {
     STATE.subscribeModalState.loadFailed = false;
     syncSubscribeModalUI(content);
   } catch (e) {
+    if (isAbortError(e)) {
+      STATE.subscribeModalState.isLoading = false;
+      STATE.subscribeModalState.loadFailed = false;
+      syncSubscribeModalUI(content);
+      return;
+    }
     STATE.subscribeModalState.isLoading = false;
     STATE.subscribeModalState.loadFailed = true;
     showToast('구독 상태를 불러오지 못했습니다. 다시 시도해 주세요.', { type: 'error' });
@@ -4851,9 +4888,10 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
       nextState ? `${label}을 구독했습니다.` : `${label}을 해제했습니다.`,
       { type: 'success' }
     );
-    loadSubscriptions({ force: true }).catch((err) =>
-      console.warn('Failed to refresh subscriptions after toggle', err)
-    );
+    loadSubscriptions({ force: true }).catch((err) => {
+      if (isAbortError(err)) return;
+      console.warn('Failed to refresh subscriptions after toggle', err);
+    });
   } catch (e) {
     if (e?.httpStatus === 401) {
       showToast('로그인이 필요합니다.', { type: 'error' });
