@@ -17,8 +17,9 @@ from services.admin_delete_service import (
     restore_content,
     soft_delete_content,
 )
+from services.cdc_event_service import record_content_published_event
 from utils.auth import admin_required, login_required
-from utils.time import parse_iso_naive_kst
+from utils.time import now_kst_naive, parse_iso_naive_kst
 
 
 admin_bp = Blueprint('admin', __name__)
@@ -331,6 +332,43 @@ def upsert_content_publication():
                 conn.rollback()
             return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
+        publication = result.get('publication') or {}
+        public_at = publication.get('public_at')
+        event_due_now = public_at is not None and public_at <= now_kst_naive()
+        event_recorded = False
+        event_inserted = False
+        event_skipped_reason = None
+
+        if event_due_now:
+            cursor = None
+            try:
+                cursor = get_cursor(conn)
+                cursor.execute(
+                    """
+                    SELECT 1 FROM contents
+                    WHERE content_id = %s
+                      AND source = %s
+                      AND COALESCE(is_deleted, FALSE) = FALSE
+                    """,
+                    (content_id, source),
+                )
+                content_active = cursor.fetchone() is not None
+            finally:
+                if cursor:
+                    cursor.close()
+
+            if content_active:
+                event_inserted = record_content_published_event(
+                    conn,
+                    content_id=content_id,
+                    source=source,
+                    public_published_at=public_at,
+                    resolved_by="publication",
+                )
+                event_recorded = True
+            else:
+                event_skipped_reason = "CONTENT_DELETED"
+
         insert_admin_action_log(
             conn,
             admin_id=g.current_user['id'],
@@ -339,14 +377,25 @@ def upsert_content_publication():
             source=source,
             reason=reason,
             payload={
-                'public_at': result['publication']['public_at'].isoformat()
-                if result.get('publication', {}).get('public_at')
-                else None,
+                'public_at': public_at.isoformat() if public_at else None,
+                'event_due_now': event_due_now,
+                'event_recorded': event_recorded,
+                'event_inserted': event_inserted,
+                'event_skipped_reason': event_skipped_reason,
             },
         )
         conn.commit()
 
-        return jsonify({'success': True, 'publication': _serialize_publication(result['publication'])})
+        return jsonify(
+            {
+                'success': True,
+                'publication': _serialize_publication(result['publication']),
+                'event_due_now': event_due_now,
+                'event_recorded': event_recorded,
+                'event_inserted': event_inserted,
+                'event_skipped_reason': event_skipped_reason,
+            }
+        )
     except Exception:
         if hasattr(conn, 'rollback'):
             conn.rollback()
