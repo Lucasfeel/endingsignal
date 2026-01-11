@@ -484,7 +484,7 @@ const STATE = {
     novel: { sources: [], day: 'all' },
     ott: { sources: [], genre: 'drama' },
     series: { sort: 'latest' },
-    my: { viewMode: 'subscribing' },
+    my: { viewMode: 'completion' },
   },
   search: {
     pageOpen: false,
@@ -518,6 +518,7 @@ const STATE = {
 
   // subscriptions
   subscriptionsSet: new Set(),
+  publicationSubscriptionsSet: new Set(),
   pendingSubOps: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
@@ -668,7 +669,8 @@ const UI = {
   l2Filter: document.getElementById('l2FilterContainer'),
   filtersWrapper: document.getElementById('filtersWrapper'),
   subscribeModal: document.getElementById('subscribeModal'),
-  subscribeButton: document.getElementById('subscribeButton'),
+  subscribePublicationButton: document.getElementById('subscribePublicationButton'),
+  subscribeCompletionButton: document.getElementById('subscribeCompletionButton'),
   subscribeStateLine: document.getElementById('subscribeStateLine'),
   subscribeStateDot: document.getElementById('subscribeStateDot'),
   subscribeStateText: document.getElementById('subscribeStateText'),
@@ -1061,7 +1063,7 @@ function createStarBadgeEl() {
   return badgeEl;
 }
 
-function syncStarBadgeForCard(cardEl, subscribed) {
+function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
   if (!cardEl) return;
 
   const thumb = cardEl.querySelector('[data-card-thumb="true"]');
@@ -1069,8 +1071,14 @@ function syncStarBadgeForCard(cardEl, subscribed) {
 
   const contentId = cardEl.getAttribute('data-content-id');
   const source = cardEl.getAttribute('data-source');
-  const key = source && contentId ? `${source}:${contentId}` : null;
-  const shouldShow = typeof subscribed === 'boolean' ? subscribed : key ? STATE.subscriptionsSet.has(key) : false;
+  const contentType = cardEl.getAttribute('data-content-type');
+  const content = {
+    content_id: contentId,
+    source,
+    content_type: contentType,
+  };
+  const shouldShow =
+    typeof subscribedOverride === 'boolean' ? subscribedOverride : isAnySubscribedForCard(content);
   const existing = thumb.querySelector('[data-star-badge="true"]');
 
   if (shouldShow && !existing) {
@@ -1084,9 +1092,9 @@ function syncAllRenderedStarBadges() {
   document.querySelectorAll('[data-content-id][data-source]').forEach((cardEl) => {
     const contentId = cardEl.getAttribute('data-content-id');
     const source = cardEl.getAttribute('data-source');
-    const key = source && contentId ? `${source}:${contentId}` : null;
-    const subscribed = key ? STATE.subscriptionsSet.has(key) : false;
-    syncStarBadgeForCard(cardEl, subscribed);
+    const contentType = cardEl.getAttribute('data-content-type');
+    const content = { content_id: contentId, source, content_type: contentType };
+    syncStarBadgeForCard(cardEl, isAnySubscribedForCard(content));
   });
 }
 
@@ -1372,6 +1380,7 @@ function logout({ silent = false } = {}) {
   STATE.auth.user = null;
 
   STATE.subscriptionsSet = new Set();
+  STATE.publicationSubscriptionsSet = new Set();
   STATE.mySubscriptions = [];
   STATE.subscriptionsLoadedAt = null;
 
@@ -1565,6 +1574,16 @@ const normalizeSubscriptionItem = (item) => {
   const source = safeString(item.source, '');
   if (!contentId || !source) return null;
 
+  const subscriptionRaw = safeObj(item.subscription);
+  const wantsCompletion =
+    'wants_completion' in subscriptionRaw
+      ? safeBool(subscriptionRaw.wants_completion, false)
+      : true;
+  const wantsPublication =
+    'wants_publication' in subscriptionRaw
+      ? safeBool(subscriptionRaw.wants_publication, false)
+      : false;
+
   const fsRaw = safeObj(item.final_state);
   const finalStatus = safeString(
     fsRaw.final_status,
@@ -1587,6 +1606,10 @@ const normalizeSubscriptionItem = (item) => {
     title: safeString(item.title, 'Untitled'),
     status: safeString(item.status, ''),
     meta: normalizeMeta(item.meta),
+    subscription: {
+      wants_completion: wantsCompletion,
+      wants_publication: wantsPublication,
+    },
     final_state: finalState,
   };
 };
@@ -1606,15 +1629,43 @@ const subKey = (content) => {
 
 const buildSubscriptionKey = (content) => subKey(content);
 
-const isSubscribed = (content) => {
+const getContentType = (content) => {
+  const rawType = content?.content_type || content?.contentType || content?.type;
+  if (rawType) return String(rawType).toLowerCase();
+  if (['webtoon', 'novel', 'ott', 'series'].includes(STATE.activeTab)) return STATE.activeTab;
+  if (['webtoon', 'novel', 'ott', 'series'].includes(STATE.lastBrowseTab))
+    return STATE.lastBrowseTab;
+  return '';
+};
+
+const supportsPublicationUI = (content) => {
+  const ct = getContentType(content);
+  return ct === 'ott' || ct === 'series';
+};
+
+const isCompletionSubscribed = (content) => {
   const key = subKey(content);
   return key ? STATE.subscriptionsSet.has(key) : false;
+};
+
+const isPublicationSubscribed = (content) => {
+  const key = subKey(content);
+  return key ? STATE.publicationSubscriptionsSet.has(key) : false;
+};
+
+const isAnySubscribedForCard = (content) => {
+  const ct = getContentType(content);
+  if (ct === 'ott' || ct === 'series') {
+    return isCompletionSubscribed(content) || isPublicationSubscribed(content);
+  }
+  return isCompletionSubscribed(content);
 };
 
 async function loadSubscriptions({ force = false } = {}) {
   const token = getAccessToken();
   if (!token) {
     STATE.subscriptionsSet = new Set();
+    STATE.publicationSubscriptionsSet = new Set();
     STATE.mySubscriptions = [];
     STATE.subscriptionsLoadedAt = null;
     STATE.subscriptionsLoadPromise = null;
@@ -1642,13 +1693,17 @@ async function loadSubscriptions({ force = false } = {}) {
       .map((x) => normalizeSubscriptionItem(x))
       .filter(Boolean);
 
-    const nextSet = new Set();
+    const completionSet = new Set();
+    const publicationSet = new Set();
     normalized.forEach((item) => {
       const key = buildSubscriptionKey(item);
-      if (key) nextSet.add(key);
+      if (!key) return;
+      if (item.subscription?.wants_completion) completionSet.add(key);
+      if (item.subscription?.wants_publication) publicationSet.add(key);
     });
 
-    STATE.subscriptionsSet = nextSet;
+    STATE.subscriptionsSet = completionSet;
+    STATE.publicationSubscriptionsSet = publicationSet;
     STATE.mySubscriptions = normalized;
     STATE.subscriptionsLoadedAt = Date.now();
     syncAllRenderedStarBadges();
@@ -1695,7 +1750,7 @@ async function retryModalSubscriptionLoad(content) {
   }
 }
 
-async function subscribeContent(content) {
+async function subscribeContent(content, alertType = 'completion') {
   const token = getAccessToken();
   if (!token) throw { httpStatus: 401, message: '로그인이 필요합니다.' };
 
@@ -1706,7 +1761,7 @@ async function subscribeContent(content) {
 
   try {
     await apiRequest('POST', '/api/me/subscriptions', {
-      body: { content_id: contentId, contentId, source },
+      body: { content_id: contentId, contentId, source, alert_type: alertType },
       token,
     });
 
@@ -1717,7 +1772,7 @@ async function subscribeContent(content) {
   }
 }
 
-async function unsubscribeContent(content) {
+async function unsubscribeContent(content, alertType = 'completion') {
   const token = getAccessToken();
   if (!token) throw { httpStatus: 401, message: '로그인이 필요합니다.' };
 
@@ -1728,7 +1783,7 @@ async function unsubscribeContent(content) {
 
   try {
     await apiRequest('DELETE', '/api/me/subscriptions', {
-      body: { content_id: contentId, contentId, source },
+      body: { content_id: contentId, contentId, source, alert_type: alertType },
       token,
     });
 
@@ -1738,12 +1793,17 @@ async function unsubscribeContent(content) {
   }
 }
 
-function applySubscriptionChange({ content, subscribed }) {
+function applySubscriptionChange({ content, alertType, subscribed }) {
   const key = subKey(content);
   if (!key) return;
 
-  if (subscribed) STATE.subscriptionsSet.add(key);
-  else STATE.subscriptionsSet.delete(key);
+  if (alertType === 'publication') {
+    if (subscribed) STATE.publicationSubscriptionsSet.add(key);
+    else STATE.publicationSubscriptionsSet.delete(key);
+  } else {
+    if (subscribed) STATE.subscriptionsSet.add(key);
+    else STATE.subscriptionsSet.delete(key);
+  }
 
   syncSubscribeModalUI(content);
   syncAllRenderedStarBadges();
@@ -1758,9 +1818,15 @@ function syncSubscribeModalUI(content) {
   if (!modalKey || !incomingKey || modalKey !== incomingKey) return;
 
   const modalState = STATE.subscribeModalState || { isLoading: false, loadFailed: false };
-  const subscribed = !modalState.isLoading && !modalState.loadFailed ? isSubscribed(content) : null;
+  const publicationSupported = supportsPublicationUI(content);
+  const completionSubscribed =
+    !modalState.isLoading && !modalState.loadFailed ? isCompletionSubscribed(content) : null;
+  const publicationSubscribed =
+    publicationSupported && !modalState.isLoading && !modalState.loadFailed
+      ? isPublicationSubscribed(content)
+      : null;
   const showLoadingState = modalState.isLoading;
-  const showSubscribedState = subscribed === true;
+  const showSubscribedState = completionSubscribed === true || publicationSubscribed === true;
   const shouldShowStateLine = showLoadingState || showSubscribedState;
 
   if (UI.subscribeStateLine) {
@@ -1768,7 +1834,17 @@ function syncSubscribeModalUI(content) {
   }
 
   if (UI.subscribeStateText) {
-    UI.subscribeStateText.textContent = showLoadingState ? '불러오는 중' : showSubscribedState ? '구독 중' : '';
+    if (showLoadingState) {
+      UI.subscribeStateText.textContent = '불러오는 중';
+    } else if (completionSubscribed && publicationSubscribed) {
+      UI.subscribeStateText.textContent = '공개/완결 구독 중';
+    } else if (publicationSubscribed) {
+      UI.subscribeStateText.textContent = '공개 알림 구독 중';
+    } else if (completionSubscribed) {
+      UI.subscribeStateText.textContent = '완결 알림 구독 중';
+    } else {
+      UI.subscribeStateText.textContent = '';
+    }
   }
   if (UI.subscribeStateDot) {
     UI.subscribeStateDot.classList.remove('bg-white', 'bg-white/50', 'bg-white/60', 'bg-[#02E70F]');
@@ -1776,28 +1852,51 @@ function syncSubscribeModalUI(content) {
     else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/60');
   }
 
-  if (UI.subscribeButton) {
-    const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
-    const shouldDisable = modalState.isLoading || STATE.subscribeToggleInFlight;
-    if (shouldDisable) UI.subscribeButton.classList.add(...disabledClasses);
-    else UI.subscribeButton.classList.remove(...disabledClasses);
-    UI.subscribeButton.disabled = shouldDisable;
+  const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
+  const shouldDisable = modalState.isLoading || STATE.subscribeToggleInFlight;
+  const setButtonState = (btn, { label, isSubscribed }) => {
+    if (!btn) return;
+    if (shouldDisable) btn.classList.add(...disabledClasses);
+    else btn.classList.remove(...disabledClasses);
+    btn.disabled = shouldDisable;
+    if (modalState.isLoading) {
+      btn.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span><span>${label}</span>`;
+    } else {
+      btn.textContent = label;
+    }
+    btn.dataset.subscribed = isSubscribed === null ? '' : isSubscribed ? '1' : '0';
+    btn.classList.toggle('neon-glow', isSubscribed === true);
+    btn.classList.toggle('bg-white/16', isSubscribed === true);
+  };
 
-    const label = modalState.isLoading
+  if (UI.subscribePublicationButton) {
+    UI.subscribePublicationButton.classList.toggle('hidden', !publicationSupported);
+    const publicationLabel = modalState.isLoading
       ? '불러오는 중'
       : modalState.loadFailed
         ? '다시 시도'
-        : subscribed
-          ? '구독 해제'
-          : '구독하기';
+        : publicationSubscribed
+          ? '공개 해제'
+          : '공개 구독';
+    setButtonState(UI.subscribePublicationButton, {
+      label: publicationLabel,
+      isSubscribed: publicationSubscribed,
+    });
+  }
 
-    if (modalState.isLoading) {
-      UI.subscribeButton.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span><span>${label}</span>`;
-    } else {
-      UI.subscribeButton.textContent = label;
-    }
-
-    UI.subscribeButton.dataset.subscribed = subscribed === null ? '' : subscribed ? '1' : '0';
+  if (UI.subscribeCompletionButton) {
+    UI.subscribeCompletionButton.classList.toggle('w-full', !publicationSupported);
+    const completionLabel = modalState.isLoading
+      ? '불러오는 중'
+      : modalState.loadFailed
+        ? '다시 시도'
+        : completionSubscribed
+          ? '완결 해제'
+          : '완결 구독';
+    setButtonState(UI.subscribeCompletionButton, {
+      label: completionLabel,
+      isSubscribed: completionSubscribed,
+    });
   }
 }
 
@@ -3496,6 +3595,7 @@ function updateFilterVisibility(tabId) {
     UI.seriesFooter.classList.remove('hidden');
   } else if (tabId === 'my') {
     UI.mySubToggle.classList.remove('hidden');
+    syncMySubToggleUI();
   }
 }
 
@@ -3591,14 +3691,26 @@ function renderL2Filters(tabId) {
   });
 }
 
-function updateMySubTab(mode) {
-  STATE.filters.my.viewMode = mode;
+function syncMySubToggleUI() {
+  const mode = STATE.filters?.my?.viewMode || 'completion';
 
   if (UI.toggleIndicator) {
-    UI.toggleIndicator.style.transform =
-      mode === 'subscribing' ? 'translateX(0)' : 'translateX(100%)';
+    const x =
+      mode === 'publication' ? 'translateX(0%)' : mode === 'completion' ? 'translateX(100%)' : 'translateX(200%)';
+    UI.toggleIndicator.style.transform = x;
   }
 
+  const btns = document.querySelectorAll('#mySubToggleContainer button[data-mode]');
+  btns.forEach((btn) => {
+    const active = btn.dataset.mode === mode;
+    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('text-gray-400', !active);
+  });
+}
+
+function updateMySubTab(mode) {
+  STATE.filters.my.viewMode = mode;
+  syncMySubToggleUI();
   fetchAndRenderContent('my');
 }
 
@@ -3804,13 +3916,21 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         return { stale: true };
       }
 
-      const mode = STATE.filters?.my?.viewMode || 'subscribing';
+      const mode = STATE.filters?.my?.viewMode || 'completion';
 
       data = (subs || []).filter((item) => {
+        const sub = item?.subscription || {};
         const fs = item?.final_state || {};
         const isScheduled = fs?.is_scheduled_completion === true;
         const isCompleted = fs?.final_status === '완결' && !isScheduled;
 
+        if (mode === 'publication') {
+          if (sub.wants_publication !== true) return false;
+          if (!supportsPublicationUI(item)) return false;
+          return true;
+        }
+
+        if (sub.wants_completion !== true) return false;
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
@@ -3822,10 +3942,10 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
             message: '구독 중인 작품이 완결되면 여기에 표시됩니다.',
             actions: [
               {
-                label: '구독 목록 보기',
+                label: '완결구독 보기',
                 variant: 'primary',
                 onClick: () => {
-                  STATE.filters.my.viewMode = 'subscribing';
+                  STATE.filters.my.viewMode = 'completion';
                   updateTab('my');
                 },
               },
@@ -3836,9 +3956,26 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
               },
             ],
           };
+        } else if (mode === 'publication') {
+          emptyStateConfig = {
+            title: '공개 알림을 구독한 작품이 없습니다',
+            message: 'OTT/Series 작품에서 공개 알림을 설정해보세요.',
+            actions: [
+              {
+                label: '검색하기',
+                variant: 'primary',
+                onClick: () => openSearchAndFocus(),
+              },
+              {
+                label: 'OTT 보기',
+                variant: 'secondary',
+                onClick: () => updateTab('ott'),
+              },
+            ],
+          };
         } else {
           emptyStateConfig = {
-            title: '구독한 작품이 없습니다',
+            title: '완결 알림을 구독한 작품이 없습니다',
             message: '작품을 검색한 뒤, 작품 화면에서 알림을 설정해보세요.',
             actions: [
               {
@@ -4087,6 +4224,10 @@ function createCard(content, tabId, aspectClass) {
   }
   if (source) {
     el.setAttribute('data-source', String(source));
+  }
+  const contentType = getContentType({ ...content, type: tabId });
+  if (contentType) {
+    el.setAttribute('data-content-type', contentType);
   }
 
   el.setAttribute('role', 'button');
@@ -4342,7 +4483,7 @@ function createCard(content, tabId, aspectClass) {
 
   el.onclick = () => openSubscribeModal(content, { returnFocusEl: el });
 
-  syncStarBadgeForCard(el, isSubscribed(content));
+  syncStarBadgeForCard(el, isAnySubscribedForCard(content));
   return el;
 }
 
@@ -4496,8 +4637,11 @@ function openSubscribeModal(content, opts = {}) {
     linkContainer.classList.add('hidden');
   }
   if (modalEl) {
+    const initialFocusEl = supportsPublicationUI(content)
+      ? UI.subscribePublicationButton || UI.subscribeCompletionButton
+      : UI.subscribeCompletionButton;
     openModal(modalEl, {
-      initialFocusEl: document.getElementById('subscribeButton') || modalEl,
+      initialFocusEl: initialFocusEl || modalEl,
       returnFocusEl,
     });
   }
@@ -4544,7 +4688,7 @@ function closeSubscribeModal({ fromPopstate = false, overlayId = null, skipHisto
   popOverlayState('modal', overlayId);
 }
 
-window.toggleSubscriptionFromModal = async function () {
+window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
   const content = STATE.currentModalContent;
   if (!content) return;
   const modalState = STATE.subscribeModalState || {};
@@ -4557,24 +4701,44 @@ window.toggleSubscriptionFromModal = async function () {
   }
 
   if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
-  const btn = UI.subscribeButton;
+  const normalizedType =
+    String(alertType || '').toLowerCase() === 'publication' ? 'publication' : 'completion';
+  if (normalizedType === 'publication' && !supportsPublicationUI(content)) return;
+
+  const btn =
+    normalizedType === 'publication'
+      ? UI.subscribePublicationButton
+      : UI.subscribeCompletionButton;
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
-  const currently = isSubscribed(content);
+  const currently =
+    normalizedType === 'publication'
+      ? isPublicationSubscribed(content)
+      : isCompletionSubscribed(content);
   const nextState = !currently;
   if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
 
   STATE.subscribeToggleInFlight = true;
-  if (btn) {
-    btn.disabled = true;
-    btn.classList.add(...disabledClasses);
-    btn.textContent = currently ? '해제하는 중…' : '구독하는 중…';
+  const activeLabel = currently ? '해제하는 중…' : '구독하는 중…';
+  if (UI.subscribePublicationButton) {
+    UI.subscribePublicationButton.disabled = true;
+    UI.subscribePublicationButton.classList.add(...disabledClasses);
+    if (btn === UI.subscribePublicationButton) {
+      UI.subscribePublicationButton.textContent = activeLabel;
+    }
+  }
+  if (UI.subscribeCompletionButton) {
+    UI.subscribeCompletionButton.disabled = true;
+    UI.subscribeCompletionButton.classList.add(...disabledClasses);
+    if (btn === UI.subscribeCompletionButton) {
+      UI.subscribeCompletionButton.textContent = activeLabel;
+    }
   }
 
   try {
-    if (currently) await unsubscribeContent(content);
-    else await subscribeContent(content);
+    if (currently) await unsubscribeContent(content, normalizedType);
+    else await subscribeContent(content, normalizedType);
 
-    applySubscriptionChange({ content, subscribed: nextState });
+    applySubscriptionChange({ content, alertType: normalizedType, subscribed: nextState });
     showToast(nextState ? '구독했습니다.' : '구독을 해제했습니다.', { type: 'success' });
     loadSubscriptions({ force: true }).catch((err) =>
       console.warn('Failed to refresh subscriptions after toggle', err)
@@ -4592,9 +4756,13 @@ window.toggleSubscriptionFromModal = async function () {
     }
   } finally {
     STATE.subscribeToggleInFlight = false;
-    if (btn) {
-      btn.disabled = false;
-      btn.classList.remove(...disabledClasses);
+    if (UI.subscribePublicationButton) {
+      UI.subscribePublicationButton.disabled = false;
+      UI.subscribePublicationButton.classList.remove(...disabledClasses);
+    }
+    if (UI.subscribeCompletionButton) {
+      UI.subscribeCompletionButton.disabled = false;
+      UI.subscribeCompletionButton.classList.remove(...disabledClasses);
     }
     if (content) syncSubscribeModalUI(content);
   }

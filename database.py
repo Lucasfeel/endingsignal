@@ -211,6 +211,20 @@ def setup_database_standalone():
             UNIQUE(user_id, content_id, source)
         )""")
         print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
+        print("LOG: [DB Setup] Ensuring subscription alert flags exist...")
+        cursor.execute(
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS wants_completion BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        cursor.execute(
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS wants_publication BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        cursor.execute(
+            """
+            UPDATE subscriptions
+            SET wants_completion = TRUE
+            WHERE wants_completion = FALSE AND wants_publication = FALSE;
+            """
+        )
 
         print("LOG: [DB Setup] Creating 'admin_content_overrides' table...")
         cursor.execute("""

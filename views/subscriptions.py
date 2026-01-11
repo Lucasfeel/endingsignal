@@ -1,6 +1,7 @@
 # views/subscriptions.py
 
 import psycopg2
+from typing import Optional
 from flask import Blueprint, jsonify, request, g
 
 from database import get_db, get_cursor
@@ -9,6 +10,20 @@ from utils.auth import login_required, _error_response
 from utils.time import now_kst_naive
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
+
+ALERT_COMPLETION_COL = 'wants_completion'
+ALERT_PUBLICATION_COL = 'wants_publication'
+
+
+def _parse_alert_type(payload) -> Optional[str]:
+    value = (payload.get('alert_type') or payload.get('alertType') or '').strip().lower()
+    if not value:
+        return 'completion'
+    if value == 'completion':
+        return 'completion'
+    if value in ('publish', 'publication'):
+        return 'publication'
+    return None
 
 
 def _content_exists(cursor, content_id: str, source: str) -> bool:
@@ -35,6 +50,7 @@ def list_subscriptions():
         cursor.execute(
             """
             SELECT c.content_id, c.source, c.content_type, c.title, c.status, c.meta,
+                   s.wants_completion, s.wants_publication,
                    o.override_status, o.override_completed_at,
                    m.public_at AS public_at
             FROM subscriptions s
@@ -54,6 +70,8 @@ def list_subscriptions():
         data = []
         for row in rows:
             row_dict = dict(row)
+            wants_completion = bool(row_dict.pop('wants_completion', False))
+            wants_publication = bool(row_dict.pop('wants_publication', False))
             override_status = row_dict.pop('override_status', None)
             override_completed_at = row_dict.pop('override_completed_at', None)
             public_at = row_dict.pop('public_at', None)
@@ -69,6 +87,10 @@ def list_subscriptions():
                 'public_at': public_at.isoformat() if public_at else None,
                 'is_scheduled_publication': is_scheduled,
                 'is_published': is_published,
+            }
+            row_dict['subscription'] = {
+                'wants_completion': wants_completion,
+                'wants_publication': wants_publication,
             }
             row_dict['final_state'] = build_final_state_payload(
                 row_dict.get('status'), override, now=effective_now
@@ -89,16 +111,23 @@ def subscribe():
     data = request.get_json() or {}
     content_id = data.get('content_id') or data.get('contentId')
     source = data.get('source')
+    alert_type = _parse_alert_type(data)
 
     if not content_id or not source:
         return _error_response(
             400, 'INVALID_REQUEST', 'content_id/contentId와 source는 필수입니다.',
+        )
+    if alert_type is None:
+        return _error_response(
+            400, 'INVALID_ALERT_TYPE', 'alert_type이 올바르지 않습니다.',
         )
 
     conn = get_db()
     cursor = get_cursor(conn)
     user_id = g.current_user.get('id')
     user_email = g.current_user.get('email')
+    wants_completion = alert_type == 'completion'
+    wants_publication = alert_type == 'publication'
 
     try:
         if not _content_exists(cursor, content_id, source):
@@ -106,14 +135,28 @@ def subscribe():
 
         cursor.execute(
             """
-            INSERT INTO subscriptions (user_id, email, content_id, source)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (user_id, content_id, source) DO NOTHING
+            INSERT INTO subscriptions (
+                user_id, email, content_id, source, wants_completion, wants_publication
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, content_id, source)
+            DO UPDATE SET
+                wants_completion = subscriptions.wants_completion OR EXCLUDED.wants_completion,
+                wants_publication = subscriptions.wants_publication OR EXCLUDED.wants_publication,
+                email = COALESCE(subscriptions.email, EXCLUDED.email)
+            RETURNING wants_completion, wants_publication
             """,
-            (user_id, user_email, str(content_id), source),
+            (user_id, user_email, str(content_id), source, wants_completion, wants_publication),
         )
+        updated_flags = cursor.fetchone()
         conn.commit()
-        return jsonify({'success': True}), 200
+        subscription_payload = None
+        if updated_flags:
+            subscription_payload = {
+                'wants_completion': bool(updated_flags[0]),
+                'wants_publication': bool(updated_flags[1]),
+            }
+        return jsonify({'success': True, 'subscription': subscription_payload}), 200
     except psycopg2.Error:
         conn.rollback()
         return _error_response(500, 'DB_ERROR', '데이터베이스 오류가 발생했습니다.')
@@ -128,10 +171,15 @@ def unsubscribe():
     data = request.get_json() or {}
     content_id = data.get('content_id') or data.get('contentId')
     source = data.get('source')
+    alert_type = _parse_alert_type(data)
 
     if not content_id or not source:
         return _error_response(
             400, 'INVALID_REQUEST', 'content_id/contentId와 source는 필수입니다.',
+        )
+    if alert_type is None:
+        return _error_response(
+            400, 'INVALID_ALERT_TYPE', 'alert_type이 올바르지 않습니다.',
         )
 
     conn = get_db()
@@ -140,7 +188,26 @@ def unsubscribe():
 
     try:
         cursor.execute(
-            "DELETE FROM subscriptions WHERE user_id = %s AND content_id = %s AND source = %s",
+            """
+            UPDATE subscriptions
+            SET wants_completion = CASE
+                    WHEN %s = 'completion' THEN FALSE
+                    ELSE wants_completion
+                END,
+                wants_publication = CASE
+                    WHEN %s = 'publication' THEN FALSE
+                    ELSE wants_publication
+                END
+            WHERE user_id = %s AND content_id = %s AND source = %s
+            """,
+            (alert_type, alert_type, user_id, str(content_id), source),
+        )
+        cursor.execute(
+            """
+            DELETE FROM subscriptions
+            WHERE user_id = %s AND content_id = %s AND source = %s
+              AND wants_completion = FALSE AND wants_publication = FALSE
+            """,
             (user_id, str(content_id), source),
         )
         conn.commit()
