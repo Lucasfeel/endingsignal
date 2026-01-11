@@ -525,6 +525,8 @@ const STATE = {
   subscriptionsLoadPromise: null,
   subscriptionsRequestSeq: 0,
   subscriptionsAbortController: null,
+  subscriptionsSoftRefreshTimer: null,
+  subscriptionsSoftRefreshLastAt: 0,
 
   pagination: {
     completed: {
@@ -1381,6 +1383,16 @@ function logout({ silent = false } = {}) {
   STATE.auth.isAuthenticated = false;
   STATE.auth.user = null;
 
+  if (STATE.subscriptionsAbortController) {
+    STATE.subscriptionsAbortController.abort();
+    STATE.subscriptionsAbortController = null;
+  }
+  if (STATE.subscriptionsSoftRefreshTimer) {
+    clearTimeout(STATE.subscriptionsSoftRefreshTimer);
+    STATE.subscriptionsSoftRefreshTimer = null;
+  }
+  STATE.subscriptionsSoftRefreshLastAt = 0;
+
   STATE.subscriptionsSet = new Set();
   STATE.publicationSubscriptionsSet = new Set();
   STATE.mySubscriptions = [];
@@ -1560,6 +1572,8 @@ const safeBool = (v, fallback = false) =>
   typeof v === 'boolean' ? v : fallback;
 const safeObj = (v) => (v && typeof v === 'object' ? v : {});
 const isAbortError = (err) => err && (err.name === 'AbortError' || err.code === 20);
+const SUBS_SOFT_REFRESH_DEBOUNCE_MS = 1500;
+const SUBS_SOFT_REFRESH_MIN_INTERVAL_MS = 10000;
 
 function normalizeSearchText(s) {
   return (s || '')
@@ -1664,7 +1678,9 @@ const isAnySubscribedForCard = (content) => {
   return isCompletionSubscribed(content);
 };
 
-async function loadSubscriptions({ force = false } = {}) {
+async function loadSubscriptions(opts = {}) {
+  const force = Boolean(opts.force);
+  const silent = Boolean(opts.silent);
   const token = getAccessToken();
   if (!token) {
     if (STATE.subscriptionsAbortController) {
@@ -1737,6 +1753,7 @@ async function loadSubscriptions({ force = false } = {}) {
       return normalized;
     } catch (err) {
       if (isAbortError(err)) return STATE.mySubscriptions || [];
+      if (silent) return STATE.mySubscriptions || [];
       throw err;
     }
   })();
@@ -1832,6 +1849,37 @@ async function unsubscribeContent(content, alertType = 'completion') {
   } catch (e) {
     throw e;
   }
+}
+
+function scheduleSubscriptionsSoftRefresh(reason = 'toggle') {
+  const now = Date.now();
+  if (
+    now - (STATE.subscriptionsSoftRefreshLastAt || 0) <
+    SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
+  ) {
+    if (STATE.subscriptionsSoftRefreshTimer) return;
+  }
+
+  if (STATE.subscriptionsSoftRefreshTimer) {
+    clearTimeout(STATE.subscriptionsSoftRefreshTimer);
+  }
+
+  STATE.subscriptionsSoftRefreshTimer = setTimeout(async () => {
+    STATE.subscriptionsSoftRefreshTimer = null;
+
+    const token = getAccessToken();
+    if (!token) return;
+
+    const now2 = Date.now();
+    if (
+      now2 - (STATE.subscriptionsSoftRefreshLastAt || 0) <
+      SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
+    )
+      return;
+
+    STATE.subscriptionsSoftRefreshLastAt = now2;
+    await loadSubscriptions({ force: true, silent: true });
+  }, SUBS_SOFT_REFRESH_DEBOUNCE_MS);
 }
 
 function applyServerSubscriptionFlags(content, flags) {
@@ -4898,10 +4946,14 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
     showToast(isOn ? `${label}을 구독했습니다.` : `${label}을 해제했습니다.`, {
       type: 'success',
     });
-    loadSubscriptions({ force: true }).catch((err) => {
-      if (isAbortError(err)) return;
-      console.warn('Failed to refresh subscriptions after toggle', err);
-    });
+    if (res && Object.prototype.hasOwnProperty.call(res, 'subscription')) {
+      scheduleSubscriptionsSoftRefresh('toggle');
+    } else {
+      loadSubscriptions({ force: true, silent: true }).catch((err) => {
+        if (isAbortError(err)) return;
+        console.warn('Failed to refresh subscriptions after toggle', err);
+      });
+    }
   } catch (e) {
     if (e?.httpStatus === 401) {
       showToast('로그인이 필요합니다.', { type: 'error' });
