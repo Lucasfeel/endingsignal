@@ -228,8 +228,9 @@
                     <span id="subscribeStateText"></span>
                 </div>
                 <p id="subscribeInlineError" class="text-white/90 text-xs mt-2"></p>
-                <div class="flex justify-end gap-2">
-                    <button id="subscribeButton" data-ui="modal-primary" onclick="toggleSubscriptionFromModal()">구독/해제</button>
+                <div class="flex justify-end gap-2 w-full">
+                    <button id="subscribePublicationButton" data-ui="modal-secondary" class="flex-1" onclick="toggleSubscriptionFromModal('publication')" type="button">공개 구독</button>
+                    <button id="subscribeCompletionButton" data-ui="modal-primary" class="flex-1" onclick="toggleSubscriptionFromModal('completion')" type="button">완결 구독</button>
                 </div>
             </div>
         </div>
