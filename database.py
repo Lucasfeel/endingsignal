@@ -242,6 +242,9 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_content_metadata_public_at ON admin_content_metadata (public_at)"
+        )
 
         print("LOG: [DB Setup] Creating 'admin_action_logs' table...")
         cursor.execute("""
@@ -283,6 +286,9 @@ def setup_database_standalone():
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_cdc_events_source_created_at ON cdc_events (source, created_at)"
         )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cdc_events_created_at ON cdc_events (created_at DESC)"
+        )
         print("LOG: [DB Setup] 'cdc_events' table created or already exists.")
 
         # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
@@ -295,6 +301,9 @@ def setup_database_standalone():
             report_data JSONB NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
         )""")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_daily_crawler_reports_created_at ON daily_crawler_reports (created_at DESC)"
+        )
         print("LOG: [DB Setup] 'daily_crawler_reports' table created or already exists.")
         # ================================================
 
