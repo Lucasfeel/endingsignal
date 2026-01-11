@@ -485,6 +485,12 @@
     onConfirm: null,
   };
 
+  const detailState = {
+    jsonText: '',
+    contentId: null,
+    source: null,
+  };
+
   const openConfirm = ({ title, message, onConfirm }) => {
     const modal = document.getElementById('confirmModal');
     const titleEl = document.getElementById('confirmTitle');
@@ -499,12 +505,73 @@
     modal.classList.add('flex');
   };
 
+  const copyToClipboard = async (text) => {
+    if (!text) throw new Error('EMPTY');
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', 'true');
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    if (!ok) throw new Error('CLIPBOARD_FAILED');
+  };
+
   const closeConfirm = () => {
     const modal = document.getElementById('confirmModal');
     if (!modal) return;
     modal.classList.add('hidden');
     modal.classList.remove('flex');
     confirmState.onConfirm = null;
+  };
+
+  const openDetailModal = ({ title, subtitle, obj }) => {
+    const modal = document.getElementById('detailModal');
+    const titleEl = document.getElementById('detailTitle');
+    const subtitleEl = document.getElementById('detailSubtitle');
+    const preEl = document.getElementById('detailBodyPre');
+    const copyIdBtn = document.getElementById('detailCopyIdBtn');
+    const copyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
+    if (!modal || !preEl) return;
+
+    let jsonText = '';
+    try {
+      jsonText = JSON.stringify(obj ?? {}, null, 2);
+    } catch (err) {
+      showToast('JSON 표시 중 오류가 발생했습니다.', { type: 'error' });
+      return;
+    }
+
+    detailState.jsonText = jsonText;
+    detailState.contentId = obj?.content_id || null;
+    detailState.source = obj?.source || null;
+
+    if (titleEl) titleEl.textContent = title || 'Details';
+    if (subtitleEl) subtitleEl.textContent = subtitle || '';
+    preEl.textContent = jsonText;
+
+    const hasId = !!detailState.contentId && !!detailState.source;
+    if (copyIdBtn) copyIdBtn.classList.toggle('hidden', !hasId);
+    if (copyIdSourceBtn) copyIdSourceBtn.classList.toggle('hidden', !hasId);
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  };
+
+  const closeDetailModal = () => {
+    const modal = document.getElementById('detailModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    detailState.jsonText = '';
+    detailState.contentId = null;
+    detailState.source = null;
   };
 
   const initConfirmModal = () => {
@@ -1421,6 +1488,24 @@
         titleWrapper.appendChild(deletedBadge);
       }
 
+      const actions = document.createElement('div');
+      actions.className = 'flex items-center gap-2';
+
+      const jsonBtn = document.createElement('button');
+      jsonBtn.type = 'button';
+      jsonBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      jsonBtn.textContent = 'JSON';
+      jsonBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const titleText = item.title || item.content_id || '-';
+        openDetailModal({
+          title: `CDC Event · ${item.event_type || '-'}`,
+          subtitle: `${titleText} · ${item.source || '-'}`,
+          obj: item,
+        });
+      });
+
       const openBtn = document.createElement('button');
       openBtn.type = 'button';
       openBtn.className =
@@ -1430,8 +1515,11 @@
         openLookupInManage({ content_id: item.content_id, source: item.source }),
       );
 
+      actions.appendChild(jsonBtn);
+      actions.appendChild(openBtn);
+
       header.appendChild(titleWrapper);
-      header.appendChild(openBtn);
+      header.appendChild(actions);
 
       const meta = document.createElement('div');
       meta.className = 'mt-1 text-xs text-white/60';
@@ -1486,8 +1574,28 @@
             : 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/70';
       statusBadge.textContent = statusValue;
 
+      const right = document.createElement('div');
+      right.className = 'flex items-center gap-2';
+
+      const jsonBtn = document.createElement('button');
+      jsonBtn.type = 'button';
+      jsonBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      jsonBtn.textContent = 'JSON';
+      jsonBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openDetailModal({
+          title: 'Crawler Report',
+          subtitle: `${item.crawler_name || '-'} · ${formatTimestamp(item.created_at)}`,
+          obj: item,
+        });
+      });
+
+      right.appendChild(statusBadge);
+      right.appendChild(jsonBtn);
+
       header.appendChild(title);
-      header.appendChild(statusBadge);
+      header.appendChild(right);
 
       const meta = document.createElement('div');
       meta.className = 'mt-1 text-xs text-white/60';
@@ -1781,6 +1889,10 @@
     const reportsSearchBtn = document.getElementById('reportsSearchBtn');
     const reportsPrevBtn = document.getElementById('reportsPrevBtn');
     const reportsNextBtn = document.getElementById('reportsNextBtn');
+    const detailCloseBtn = document.getElementById('detailCloseBtn');
+    const detailCopyJsonBtn = document.getElementById('detailCopyJsonBtn');
+    const detailCopyIdBtn = document.getElementById('detailCopyIdBtn');
+    const detailCopyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
 
     manageSearchBtn?.addEventListener('click', () =>
       withLoading(manageSearchBtn, '검색 중...', performSearch),
@@ -2007,6 +2119,32 @@
         await loadCrawlerReports();
       }),
     );
+
+    const handleCopy = async (text) => {
+      try {
+        await copyToClipboard(text);
+        showToast('복사되었습니다.', { type: 'success' });
+      } catch (err) {
+        showToast('복사에 실패했습니다.', { type: 'error' });
+      }
+    };
+
+    detailCloseBtn?.addEventListener('click', closeDetailModal);
+    detailCopyJsonBtn?.addEventListener('click', () => handleCopy(detailState.jsonText));
+    detailCopyIdBtn?.addEventListener('click', () => handleCopy(detailState.contentId));
+    detailCopyIdSourceBtn?.addEventListener('click', () =>
+      handleCopy(`${detailState.contentId}::${detailState.source}`),
+    );
+    document.getElementById('detailModal')?.addEventListener('click', (event) => {
+      if (event.target?.id === 'detailModal') {
+        closeDetailModal();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeDetailModal();
+      }
+    });
   };
 
   document.addEventListener('DOMContentLoaded', async () => {

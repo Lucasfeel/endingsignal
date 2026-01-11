@@ -604,6 +604,52 @@
     </div>
   </div>
 
+  <div id="detailModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70">
+    <div class="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#111111] p-6 shadow-xl">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h3 id="detailTitle" class="truncate text-lg font-semibold text-white">Details</h3>
+          <p id="detailSubtitle" class="mt-1 truncate text-xs text-white/60"></p>
+        </div>
+        <div class="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            id="detailCopyIdBtn"
+            type="button"
+            class="hidden rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            Copy ID
+          </button>
+          <button
+            id="detailCopyIdSourceBtn"
+            type="button"
+            class="hidden rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            Copy ID+Source
+          </button>
+          <button
+            id="detailCopyJsonBtn"
+            type="button"
+            class="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            Copy JSON
+          </button>
+          <button
+            id="detailCloseBtn"
+            type="button"
+            class="rounded-xl border border-white/20 bg-transparent px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+
+      <pre
+        id="detailBodyPre"
+        class="mt-4 max-h-[60vh] overflow-auto rounded-xl border border-white/10 bg-black/40 p-4 text-xs text-white/80"
+      ></pre>
+    </div>
+  </div>
+
   <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 </body>
 </html>
