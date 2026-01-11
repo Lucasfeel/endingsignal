@@ -6,8 +6,8 @@ import utils.auth as auth
 
 
 class FakeCursor:
-    def __init__(self, fetchone_result=None):
-        self.fetchone_result = fetchone_result
+    def __init__(self, fetchone_results=None):
+        self.fetchone_results = list(fetchone_results or [])
         self.executed = []
         self.closed = False
 
@@ -15,7 +15,9 @@ class FakeCursor:
         self.executed.append((query, params))
 
     def fetchone(self):
-        return self.fetchone_result
+        if self.fetchone_results:
+            return self.fetchone_results.pop(0)
+        return None
 
     def close(self):
         self.closed = True
@@ -54,7 +56,7 @@ def auth_headers():
 
 
 def test_subscribe_accepts_canonical_content_id(monkeypatch, client, auth_headers):
-    fake_cursor = FakeCursor(fetchone_result=(1,))
+    fake_cursor = FakeCursor(fetchone_results=[(1,), (True, False)])
     fake_conn = FakeConnection()
     monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
     monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
@@ -70,10 +72,12 @@ def test_subscribe_accepts_canonical_content_id(monkeypatch, client, auth_header
     assert data['success'] is True
     assert fake_conn.committed is True
     assert fake_cursor.executed[-1][1][2] == 'abc-123'
+    assert fake_cursor.executed[-1][1][4] is True
+    assert fake_cursor.executed[-1][1][5] is False
 
 
 def test_subscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers):
-    fake_cursor = FakeCursor(fetchone_result=(1,))
+    fake_cursor = FakeCursor(fetchone_results=[(1,), (True, False)])
     fake_conn = FakeConnection()
     monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
     monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
@@ -89,6 +93,46 @@ def test_subscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers):
     assert data['success'] is True
     assert fake_conn.committed is True
     assert fake_cursor.executed[-1][1][2] == 'legacy-42'
+    assert fake_cursor.executed[-1][1][4] is True
+    assert fake_cursor.executed[-1][1][5] is False
+
+
+def test_subscribe_with_publication_alert_type(monkeypatch, client, auth_headers):
+    fake_cursor = FakeCursor(fetchone_results=[(1,), (False, True)])
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+
+    response = client.post(
+        '/api/me/subscriptions',
+        json={'content_id': 'pub-1', 'source': 'rss', 'alert_type': 'publication'},
+        headers=auth_headers,
+    )
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data['success'] is True
+    assert fake_conn.committed is True
+    assert fake_cursor.executed[-1][1][4] is False
+    assert fake_cursor.executed[-1][1][5] is True
+
+
+def test_subscribe_upsert_preserves_existing_flags(monkeypatch, client, auth_headers):
+    fake_cursor = FakeCursor(fetchone_results=[(1,), (True, True)])
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+
+    response = client.post(
+        '/api/me/subscriptions',
+        json={'content_id': 'both-1', 'source': 'rss', 'alert_type': 'completion'},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    insert_query = fake_cursor.executed[-1][0]
+    assert 'wants_completion = subscriptions.wants_completion OR EXCLUDED.wants_completion' in insert_query
+    assert 'wants_publication = subscriptions.wants_publication OR EXCLUDED.wants_publication' in insert_query
 
 
 def test_unsubscribe_accepts_canonical_content_id(monkeypatch, client, auth_headers):
@@ -107,7 +151,9 @@ def test_unsubscribe_accepts_canonical_content_id(monkeypatch, client, auth_head
     assert response.status_code == 200
     assert data['success'] is True
     assert fake_conn.committed is True
-    assert fake_cursor.executed[-1][1][1] == 'to-delete'
+    assert fake_cursor.executed[0][1][0] == 'completion'
+    assert fake_cursor.executed[0][1][3] == 'to-delete'
+    assert 'wants_completion = FALSE AND wants_publication = FALSE' in fake_cursor.executed[1][0]
 
 
 def test_unsubscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers):
@@ -126,7 +172,29 @@ def test_unsubscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers)
     assert response.status_code == 200
     assert data['success'] is True
     assert fake_conn.committed is True
-    assert fake_cursor.executed[-1][1][1] == 'legacy-delete'
+    assert fake_cursor.executed[0][1][0] == 'completion'
+    assert fake_cursor.executed[0][1][3] == 'legacy-delete'
+    assert 'wants_completion = FALSE AND wants_publication = FALSE' in fake_cursor.executed[1][0]
+
+
+def test_unsubscribe_with_publication_alert_type(monkeypatch, client, auth_headers):
+    fake_cursor = FakeCursor()
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+
+    response = client.delete(
+        '/api/me/subscriptions',
+        json={'content_id': 'pub-2', 'source': 'rss', 'alert_type': 'publication'},
+        headers=auth_headers,
+    )
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data['success'] is True
+    assert fake_conn.committed is True
+    assert fake_cursor.executed[0][1][1] == 'publication'
+    assert fake_cursor.executed[0][1][3] == 'pub-2'
 
 
 def test_subscribe_validation_mentions_both_keys(client, auth_headers):
