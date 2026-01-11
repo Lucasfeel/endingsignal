@@ -199,19 +199,38 @@ def unsubscribe():
                     ELSE wants_publication
                 END
             WHERE user_id = %s AND content_id = %s AND source = %s
+            RETURNING wants_completion, wants_publication
             """,
             (alert_type, alert_type, user_id, str(content_id), source),
         )
-        cursor.execute(
-            """
-            DELETE FROM subscriptions
-            WHERE user_id = %s AND content_id = %s AND source = %s
-              AND wants_completion = FALSE AND wants_publication = FALSE
-            """,
-            (user_id, str(content_id), source),
-        )
+        updated_flags = cursor.fetchone()
+        if not updated_flags:
+            conn.commit()
+            return jsonify({'success': True, 'subscription': None}), 200
+
+        wants_completion = bool(updated_flags[0])
+        wants_publication = bool(updated_flags[1])
+        if not wants_completion and not wants_publication:
+            cursor.execute(
+                """
+                DELETE FROM subscriptions
+                WHERE user_id = %s AND content_id = %s AND source = %s
+                """,
+                (user_id, str(content_id), source),
+            )
+            conn.commit()
+            return jsonify({'success': True, 'subscription': None}), 200
+
         conn.commit()
-        return jsonify({'success': True}), 200
+        return jsonify(
+            {
+                'success': True,
+                'subscription': {
+                    'wants_completion': wants_completion,
+                    'wants_publication': wants_publication,
+                },
+            }
+        ), 200
     except psycopg2.Error:
         conn.rollback()
         return _error_response(500, 'DB_ERROR', '데이터베이스 오류가 발생했습니다.')
