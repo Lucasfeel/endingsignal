@@ -170,9 +170,10 @@
                 <!-- Tab 5 Specific: Segmented Toggle -->
                 <div id="mySubToggleContainer" class="hidden px-4 py-3 h-[68px] items-center">
                     <div class="w-full bg-[#2A2A2A] h-[44px] rounded-lg p-1 flex relative">
-                        <div id="toggleIndicator" class="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-[#3F3F46] rounded-md transition-transform duration-300 translate-x-0"></div>
-                        <button class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-white" onclick="updateMySubTab('subscribing')">구독중</button>
-                        <button class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-gray-400" onclick="updateMySubTab('completed')">완결됨</button>
+                        <div id="toggleIndicator" class="absolute top-1 bottom-1 w-1/3 bg-[#3F3F46] rounded-md transition-transform duration-300 translate-x-0"></div>
+                        <button id="mySubTogglePublication" data-mode="publication" class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-gray-400" onclick="updateMySubTab('publication')">공개 구독</button>
+                        <button id="mySubToggleCompletion" data-mode="completion" class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-white" onclick="updateMySubTab('completion')">완결구독</button>
+                        <button id="mySubToggleCompleted" data-mode="completed" class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-gray-400" onclick="updateMySubTab('completed')">완결됨</button>
                     </div>
                 </div>
 
