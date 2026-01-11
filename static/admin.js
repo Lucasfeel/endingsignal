@@ -154,6 +154,7 @@
       selected: null,
       overridesMap: new Map(),
       publicationsMap: new Map(),
+      publicationActionMap: new Map(),
     },
     deleted: {
       items: [],
@@ -721,6 +722,7 @@
       if (publicationInput) publicationInput.value = '';
       if (publicationReason) publicationReason.value = '';
       renderFinalState(null, null);
+      renderPublicationCdcStatus();
       return;
     }
 
@@ -758,6 +760,7 @@
     }
 
     renderFinalState(item, override);
+    renderPublicationCdcStatus();
   };
 
   const selectManageItem = (item) => {
@@ -818,6 +821,73 @@
       typeof eventRecorded === 'boolean'
         ? `CDC event recorded: ${eventRecorded ? 'yes' : 'no'}`
         : '';
+  };
+
+  const buildPublicationCdcUiMessage = (action) => {
+    if (!action) {
+      return { tone: 'info', text: '' };
+    }
+
+    if (action.kind === 'delete') {
+      return { tone: 'success', text: '공개일이 삭제되었습니다.' };
+    }
+
+    const publicAtLabel = action.public_at ? ` · 공개일: ${formatTimestamp(action.public_at)}` : '';
+    if (action.event_due_now === false) {
+      return {
+        tone: 'info',
+        text: `공개일 저장됨 (도래 전: 배치에서 CDC 기록)${publicAtLabel}`,
+      };
+    }
+
+    if (action.event_due_now === true && action.event_recorded === true) {
+      if (action.event_inserted === true) {
+        return {
+          tone: 'success',
+          text: `공개일 저장 + CDC 기록됨 (신규)${publicAtLabel}`,
+        };
+      }
+      return {
+        tone: 'success',
+        text: `공개일 저장 + CDC 이미 존재 (멱등)${publicAtLabel}`,
+      };
+    }
+
+    if (action.event_due_now === true && action.event_recorded === false) {
+      const reason = action.event_skipped_reason || '사유 없음';
+      return {
+        tone: 'info',
+        text: `공개일 저장 (CDC 스킵: ${reason})${publicAtLabel}`,
+      };
+    }
+
+    return {
+      tone: 'success',
+      text: `공개일 저장됨${publicAtLabel}`,
+    };
+  };
+
+  const renderPublicationCdcStatus = () => {
+    const item = STATE.manage.selected;
+    const el = document.getElementById('publicationCdcStatus');
+    if (!el) return;
+
+    if (!item) {
+      el.textContent = '';
+      el.classList.add('hidden');
+      return;
+    }
+
+    const action = STATE.manage.publicationActionMap.get(getKey(item)) || null;
+    if (!action) {
+      el.textContent = '';
+      el.classList.add('hidden');
+      return;
+    }
+
+    const msg = buildPublicationCdcUiMessage(action);
+    el.textContent = msg.text;
+    el.classList.remove('hidden');
   };
 
   const performSearch = async () => {
@@ -943,8 +1013,19 @@
       if (payload?.publication) {
         STATE.manage.publicationsMap.set(getKey(item), payload.publication);
       }
+      const action = {
+        kind: 'save',
+        public_at: payload?.publication?.public_at || publicAt || null,
+        saved_at: new Date().toISOString(),
+        event_due_now: payload?.event_due_now ?? null,
+        event_recorded: payload?.event_recorded ?? null,
+        event_inserted: payload?.event_inserted ?? null,
+        event_skipped_reason: payload?.event_skipped_reason ?? null,
+      };
+      STATE.manage.publicationActionMap.set(getKey(item), action);
       renderSelectedContent();
-      showToast('공개일이 저장되었습니다.', { type: 'success' });
+      const message = buildPublicationCdcUiMessage(action);
+      showToast(message.text, { type: message.tone });
     } catch (err) {
       showToast(err.message || '공개일 저장 실패', { type: 'error' });
     }
@@ -977,8 +1058,19 @@
             },
           });
           STATE.manage.publicationsMap.delete(getKey(item));
+          const action = {
+            kind: 'delete',
+            public_at: null,
+            saved_at: new Date().toISOString(),
+            event_due_now: null,
+            event_recorded: null,
+            event_inserted: null,
+            event_skipped_reason: null,
+          };
+          STATE.manage.publicationActionMap.set(getKey(item), action);
           renderSelectedContent();
-          showToast('공개일 정보가 삭제되었습니다.', { type: 'success' });
+          const message = buildPublicationCdcUiMessage(action);
+          showToast(message.text, { type: message.tone });
         } catch (err) {
           showToast(err.message || '공개일 삭제 실패', { type: 'error' });
         }
