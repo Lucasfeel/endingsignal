@@ -1797,12 +1797,14 @@ async function subscribeContent(content, alertType = 'completion') {
   if (!contentId || !source) throw new Error('콘텐츠 정보가 없습니다.');
 
   try {
-    await apiRequest('POST', '/api/me/subscriptions', {
+    const res = await apiRequest('POST', '/api/me/subscriptions', {
       body: { content_id: contentId, contentId, source, alert_type: alertType },
       token,
     });
 
     STATE.subscriptionsLoadedAt = null;
+    applyServerSubscriptionFlags(content, res?.subscription ?? null);
+    return res;
 
   } catch (e) {
     throw e;
@@ -1819,27 +1821,33 @@ async function unsubscribeContent(content, alertType = 'completion') {
   if (!contentId || !source) throw new Error('콘텐츠 정보가 없습니다.');
 
   try {
-    await apiRequest('DELETE', '/api/me/subscriptions', {
+    const res = await apiRequest('DELETE', '/api/me/subscriptions', {
       body: { content_id: contentId, contentId, source, alert_type: alertType },
       token,
     });
 
     STATE.subscriptionsLoadedAt = null;
+    applyServerSubscriptionFlags(content, res?.subscription ?? null);
+    return res;
   } catch (e) {
     throw e;
   }
 }
 
-function applySubscriptionChange({ content, alertType, subscribed }) {
+function applyServerSubscriptionFlags(content, flags) {
   const key = subKey(content);
   if (!key) return;
 
-  if (alertType === 'publication') {
-    if (subscribed) STATE.publicationSubscriptionsSet.add(key);
-    else STATE.publicationSubscriptionsSet.delete(key);
+  if (!flags) {
+    STATE.subscriptionsSet.delete(key);
+    STATE.publicationSubscriptionsSet.delete(key);
   } else {
-    if (subscribed) STATE.subscriptionsSet.add(key);
+    const wantsCompletion = Boolean(flags.wants_completion);
+    const wantsPublication = Boolean(flags.wants_publication);
+    if (wantsCompletion) STATE.subscriptionsSet.add(key);
     else STATE.subscriptionsSet.delete(key);
+    if (wantsPublication) STATE.publicationSubscriptionsSet.add(key);
+    else STATE.publicationSubscriptionsSet.delete(key);
   }
 
   syncSubscribeModalUI(content);
@@ -4858,7 +4866,6 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
     normalizedType === 'publication'
       ? isPublicationSubscribed(content)
       : isCompletionSubscribed(content);
-  const nextState = !currently;
   if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
 
   STATE.subscribeToggleInFlight = true;
@@ -4879,15 +4886,18 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
   }
 
   try {
-    if (currently) await unsubscribeContent(content, normalizedType);
-    else await subscribeContent(content, normalizedType);
-
-    applySubscriptionChange({ content, alertType: normalizedType, subscribed: nextState });
+    const res = currently
+      ? await unsubscribeContent(content, normalizedType)
+      : await subscribeContent(content, normalizedType);
+    const flags = res?.subscription ?? null;
+    const isOn =
+      normalizedType === 'publication'
+        ? Boolean(flags?.wants_publication)
+        : Boolean(flags?.wants_completion);
     const label = normalizedType === 'publication' ? '공개 알림' : '완결 알림';
-    showToast(
-      nextState ? `${label}을 구독했습니다.` : `${label}을 해제했습니다.`,
-      { type: 'success' }
-    );
+    showToast(isOn ? `${label}을 구독했습니다.` : `${label}을 해제했습니다.`, {
+      type: 'success',
+    });
     loadSubscriptions({ force: true }).catch((err) => {
       if (isAbortError(err)) return;
       console.warn('Failed to refresh subscriptions after toggle', err);
