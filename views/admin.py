@@ -112,6 +112,44 @@ def _serialize_missing_content(row):
     }
 
 
+def _serialize_cdc_event(row):
+    return {
+        'id': row['id'],
+        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+        'content_id': row['content_id'],
+        'source': row['source'],
+        'event_type': row['event_type'],
+        'final_status': row['final_status'],
+        'final_completed_at': row['final_completed_at'].isoformat()
+        if row.get('final_completed_at')
+        else None,
+        'resolved_by': row['resolved_by'],
+        'title': _get_row_value(row, 'title'),
+        'content_type': _get_row_value(row, 'content_type'),
+        'status': _get_row_value(row, 'status'),
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
+        'is_deleted': bool(_get_row_value(row, 'is_deleted'))
+        if _get_row_value(row, 'is_deleted') is not None
+        else None,
+    }
+
+
+def _serialize_daily_crawler_report(row):
+    report_data = _get_row_value(row, 'report_data') or {}
+    if isinstance(report_data, str):
+        try:
+            report_data = json.loads(report_data)
+        except Exception:
+            report_data = {}
+    return {
+        'id': row['id'],
+        'crawler_name': row['crawler_name'],
+        'status': row['status'],
+        'report_data': report_data,
+        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+    }
+
+
 def _serialize_final_state(state):
     if not state:
         return state
@@ -457,6 +495,171 @@ def list_content_publications():
         {
             'success': True,
             'publications': [_serialize_publication(row) for row in publications],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/cdc/events', methods=['GET'])
+@login_required
+@admin_required
+def list_cdc_events():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    query = request.args.get('q')
+    query = query.strip() if isinstance(query, str) and query.strip() else None
+    event_type = request.args.get('event_type')
+    source = request.args.get('source')
+    content_id = request.args.get('content_id')
+
+    created_from_raw = request.args.get('created_from')
+    created_to_raw = request.args.get('created_to')
+    created_from = None
+    created_to = None
+    if created_from_raw:
+        created_from = parse_iso_naive_kst(created_from_raw)
+        if created_from is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_from must be a valid ISO 8601 datetime string')
+    if created_to_raw:
+        created_to = parse_iso_naive_kst(created_to_raw)
+        if created_to is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_to must be a valid ISO 8601 datetime string')
+
+    params = []
+    sql = """
+        SELECT
+            e.id,
+            e.content_id,
+            e.source,
+            e.event_type,
+            e.final_status,
+            e.final_completed_at,
+            e.resolved_by,
+            e.created_at,
+            c.title,
+            c.content_type,
+            c.status,
+            c.meta,
+            COALESCE(c.is_deleted, FALSE) AS is_deleted
+        FROM cdc_events e
+        LEFT JOIN contents c
+          ON c.content_id = e.content_id AND c.source = e.source
+        WHERE 1=1
+    """
+
+    if event_type:
+        sql += " AND e.event_type = %s"
+        params.append(event_type)
+    if source:
+        sql += " AND e.source = %s"
+        params.append(source)
+    if content_id:
+        sql += " AND e.content_id = %s"
+        params.append(content_id)
+    if created_from:
+        sql += " AND e.created_at >= %s"
+        params.append(created_from)
+    if created_to:
+        sql += " AND e.created_at <= %s"
+        params.append(created_to)
+    if query:
+        sql += " AND (c.title ILIKE %s OR e.content_id ILIKE %s)"
+        params.extend([f"%{query}%", f"%{query}%"])
+
+    sql += """
+        ORDER BY e.created_at DESC, e.id DESC
+        LIMIT %s OFFSET %s
+    """
+    params.extend([limit, offset])
+
+    conn = get_db()
+    cursor = get_cursor(conn)
+    cursor.execute(sql, tuple(params))
+    rows = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(
+        {
+            'success': True,
+            'events': [_serialize_cdc_event(row) for row in rows],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-crawler', methods=['GET'])
+@login_required
+@admin_required
+def list_daily_crawler_reports():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    crawler_name = request.args.get('crawler_name')
+    status = request.args.get('status')
+    created_from_raw = request.args.get('created_from')
+    created_to_raw = request.args.get('created_to')
+    created_from = None
+    created_to = None
+    if created_from_raw:
+        created_from = parse_iso_naive_kst(created_from_raw)
+        if created_from is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_from must be a valid ISO 8601 datetime string')
+    if created_to_raw:
+        created_to = parse_iso_naive_kst(created_to_raw)
+        if created_to is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_to must be a valid ISO 8601 datetime string')
+
+    params = []
+    sql = """
+        SELECT id, crawler_name, status, report_data, created_at
+        FROM daily_crawler_reports
+        WHERE 1=1
+    """
+
+    if crawler_name:
+        sql += " AND crawler_name = %s"
+        params.append(crawler_name)
+    if status:
+        sql += " AND status = %s"
+        params.append(status)
+    if created_from:
+        sql += " AND created_at >= %s"
+        params.append(created_from)
+    if created_to:
+        sql += " AND created_at <= %s"
+        params.append(created_to)
+
+    sql += """
+        ORDER BY created_at DESC, id DESC
+        LIMIT %s OFFSET %s
+    """
+    params.extend([limit, offset])
+
+    conn = get_db()
+    cursor = get_cursor(conn)
+    cursor.execute(sql, tuple(params))
+    rows = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(
+        {
+            'success': True,
+            'reports': [_serialize_daily_crawler_report(row) for row in rows],
             'limit': limit,
             'offset': offset,
         }
