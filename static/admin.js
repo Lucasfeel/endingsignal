@@ -154,6 +154,7 @@
       selected: null,
       overridesMap: new Map(),
       publicationsMap: new Map(),
+      publicationActionMap: new Map(),
     },
     deleted: {
       items: [],
@@ -191,6 +192,28 @@
       items: [],
       q: '',
       actionType: '',
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+    },
+    cdcEvents: {
+      items: [],
+      q: '',
+      eventType: '',
+      source: '',
+      contentId: '',
+      createdFrom: '',
+      createdTo: '',
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+    },
+    crawlerReports: {
+      items: [],
+      crawlerName: '',
+      status: '',
+      createdFrom: '',
+      createdTo: '',
       limit: 50,
       offset: 0,
       lastCount: 0,
@@ -280,6 +303,44 @@
       }
     }
     return {};
+  };
+
+  const formatReportSummary = (reportData) => {
+    if (!reportData) return '-';
+    let data = reportData;
+    if (typeof data === 'string') {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed && typeof parsed === 'object') {
+          data = parsed;
+        } else {
+          return data;
+        }
+      } catch (err) {
+        return data;
+      }
+    }
+    if (!data || typeof data !== 'object') return String(data);
+    const entries = Object.entries(data).filter(([, value]) => value !== undefined);
+    if (!entries.length) return '-';
+    return entries.slice(0, 4).map(([key, value]) => {
+      let text = '';
+      if (value === null || value === undefined) {
+        text = '-';
+      } else if (typeof value === 'object') {
+        try {
+          text = JSON.stringify(value);
+        } catch (err) {
+          text = String(value);
+        }
+      } else {
+        text = String(value);
+      }
+      if (text.length > 60) {
+        text = `${text.slice(0, 57)}...`;
+      }
+      return `${key}: ${text}`;
+    }).join(' · ');
   };
 
   const getThumbnailUrl = (item) => {
@@ -386,6 +447,8 @@
       missingCompletion: document.getElementById('panelMissingCompletion'),
       missingPublication: document.getElementById('panelMissingPublication'),
       audit: document.getElementById('panelAudit'),
+      cdcEvents: document.getElementById('panelCdcEvents'),
+      crawlerReports: document.getElementById('panelCrawlerReports'),
     };
     const tabs = {
       manage: document.getElementById('tabManage'),
@@ -394,6 +457,8 @@
       missingCompletion: document.getElementById('tabMissingCompletion'),
       missingPublication: document.getElementById('tabMissingPublication'),
       audit: document.getElementById('tabAudit'),
+      cdcEvents: document.getElementById('tabCdcEvents'),
+      crawlerReports: document.getElementById('tabCrawlerReports'),
     };
 
     Object.entries(panels).forEach(([key, panel]) => {
@@ -421,6 +486,12 @@
     onConfirm: null,
   };
 
+  const detailState = {
+    jsonText: '',
+    contentId: null,
+    source: null,
+  };
+
   const openConfirm = ({ title, message, onConfirm }) => {
     const modal = document.getElementById('confirmModal');
     const titleEl = document.getElementById('confirmTitle');
@@ -435,12 +506,73 @@
     modal.classList.add('flex');
   };
 
+  const copyToClipboard = async (text) => {
+    if (!text) throw new Error('EMPTY');
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', 'true');
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    if (!ok) throw new Error('CLIPBOARD_FAILED');
+  };
+
   const closeConfirm = () => {
     const modal = document.getElementById('confirmModal');
     if (!modal) return;
     modal.classList.add('hidden');
     modal.classList.remove('flex');
     confirmState.onConfirm = null;
+  };
+
+  const openDetailModal = ({ title, subtitle, obj }) => {
+    const modal = document.getElementById('detailModal');
+    const titleEl = document.getElementById('detailTitle');
+    const subtitleEl = document.getElementById('detailSubtitle');
+    const preEl = document.getElementById('detailBodyPre');
+    const copyIdBtn = document.getElementById('detailCopyIdBtn');
+    const copyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
+    if (!modal || !preEl) return;
+
+    let jsonText = '';
+    try {
+      jsonText = JSON.stringify(obj ?? {}, null, 2);
+    } catch (err) {
+      showToast('JSON 표시 중 오류가 발생했습니다.', { type: 'error' });
+      return;
+    }
+
+    detailState.jsonText = jsonText;
+    detailState.contentId = obj?.content_id || null;
+    detailState.source = obj?.source || null;
+
+    if (titleEl) titleEl.textContent = title || 'Details';
+    if (subtitleEl) subtitleEl.textContent = subtitle || '';
+    preEl.textContent = jsonText;
+
+    const hasId = !!detailState.contentId && !!detailState.source;
+    if (copyIdBtn) copyIdBtn.classList.toggle('hidden', !hasId);
+    if (copyIdSourceBtn) copyIdSourceBtn.classList.toggle('hidden', !hasId);
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  };
+
+  const closeDetailModal = () => {
+    const modal = document.getElementById('detailModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    detailState.jsonText = '';
+    detailState.contentId = null;
+    detailState.source = null;
   };
 
   const initConfirmModal = () => {
@@ -590,6 +722,7 @@
       if (publicationInput) publicationInput.value = '';
       if (publicationReason) publicationReason.value = '';
       renderFinalState(null, null);
+      renderPublicationCdcStatus();
       return;
     }
 
@@ -627,6 +760,7 @@
     }
 
     renderFinalState(item, override);
+    renderPublicationCdcStatus();
   };
 
   const selectManageItem = (item) => {
@@ -687,6 +821,73 @@
       typeof eventRecorded === 'boolean'
         ? `CDC event recorded: ${eventRecorded ? 'yes' : 'no'}`
         : '';
+  };
+
+  const buildPublicationCdcUiMessage = (action) => {
+    if (!action) {
+      return { tone: 'info', text: '' };
+    }
+
+    if (action.kind === 'delete') {
+      return { tone: 'success', text: '공개일이 삭제되었습니다.' };
+    }
+
+    const publicAtLabel = action.public_at ? ` · 공개일: ${formatTimestamp(action.public_at)}` : '';
+    if (action.event_due_now === false) {
+      return {
+        tone: 'info',
+        text: `공개일 저장됨 (도래 전: 배치에서 CDC 기록)${publicAtLabel}`,
+      };
+    }
+
+    if (action.event_due_now === true && action.event_recorded === true) {
+      if (action.event_inserted === true) {
+        return {
+          tone: 'success',
+          text: `공개일 저장 + CDC 기록됨 (신규)${publicAtLabel}`,
+        };
+      }
+      return {
+        tone: 'success',
+        text: `공개일 저장 + CDC 이미 존재 (멱등)${publicAtLabel}`,
+      };
+    }
+
+    if (action.event_due_now === true && action.event_recorded === false) {
+      const reason = action.event_skipped_reason || '사유 없음';
+      return {
+        tone: 'info',
+        text: `공개일 저장 (CDC 스킵: ${reason})${publicAtLabel}`,
+      };
+    }
+
+    return {
+      tone: 'success',
+      text: `공개일 저장됨${publicAtLabel}`,
+    };
+  };
+
+  const renderPublicationCdcStatus = () => {
+    const item = STATE.manage.selected;
+    const el = document.getElementById('publicationCdcStatus');
+    if (!el) return;
+
+    if (!item) {
+      el.textContent = '';
+      el.classList.add('hidden');
+      return;
+    }
+
+    const action = STATE.manage.publicationActionMap.get(getKey(item)) || null;
+    if (!action) {
+      el.textContent = '';
+      el.classList.add('hidden');
+      return;
+    }
+
+    const msg = buildPublicationCdcUiMessage(action);
+    el.textContent = msg.text;
+    el.classList.remove('hidden');
   };
 
   const performSearch = async () => {
@@ -812,8 +1013,19 @@
       if (payload?.publication) {
         STATE.manage.publicationsMap.set(getKey(item), payload.publication);
       }
+      const action = {
+        kind: 'save',
+        public_at: payload?.publication?.public_at || publicAt || null,
+        saved_at: new Date().toISOString(),
+        event_due_now: payload?.event_due_now ?? null,
+        event_recorded: payload?.event_recorded ?? null,
+        event_inserted: payload?.event_inserted ?? null,
+        event_skipped_reason: payload?.event_skipped_reason ?? null,
+      };
+      STATE.manage.publicationActionMap.set(getKey(item), action);
       renderSelectedContent();
-      showToast('공개일이 저장되었습니다.', { type: 'success' });
+      const message = buildPublicationCdcUiMessage(action);
+      showToast(message.text, { type: message.tone });
     } catch (err) {
       showToast(err.message || '공개일 저장 실패', { type: 'error' });
     }
@@ -846,8 +1058,19 @@
             },
           });
           STATE.manage.publicationsMap.delete(getKey(item));
+          const action = {
+            kind: 'delete',
+            public_at: null,
+            saved_at: new Date().toISOString(),
+            event_due_now: null,
+            event_recorded: null,
+            event_inserted: null,
+            event_skipped_reason: null,
+          };
+          STATE.manage.publicationActionMap.set(getKey(item), action);
           renderSelectedContent();
-          showToast('공개일 정보가 삭제되었습니다.', { type: 'success' });
+          const message = buildPublicationCdcUiMessage(action);
+          showToast(message.text, { type: message.tone });
         } catch (err) {
           showToast(err.message || '공개일 삭제 실패', { type: 'error' });
         }
@@ -1315,6 +1538,172 @@
     });
   };
 
+  const renderCdcEventsList = () => {
+    const container = document.getElementById('cdcEventsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!STATE.cdcEvents.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = 'CDC 이벤트가 없습니다.';
+      container.appendChild(empty);
+      return;
+    }
+
+    STATE.cdcEvents.items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const header = document.createElement('div');
+      header.className = 'flex items-start justify-between gap-2';
+
+      const titleWrapper = document.createElement('div');
+      titleWrapper.className = 'flex flex-wrap items-center gap-2';
+
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      title.textContent = item.title || item.content_id || '-';
+
+      const source = document.createElement('span');
+      source.className = 'text-xs text-white/50';
+      source.textContent = item.source || '-';
+
+      titleWrapper.appendChild(title);
+      titleWrapper.appendChild(source);
+
+      if (item.is_deleted) {
+        const deletedBadge = document.createElement('span');
+        deletedBadge.className =
+          'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+        deletedBadge.textContent = 'DELETED';
+        titleWrapper.appendChild(deletedBadge);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'flex items-center gap-2';
+
+      const jsonBtn = document.createElement('button');
+      jsonBtn.type = 'button';
+      jsonBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      jsonBtn.textContent = 'JSON';
+      jsonBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const titleText = item.title || item.content_id || '-';
+        openDetailModal({
+          title: `CDC Event · ${item.event_type || '-'}`,
+          subtitle: `${titleText} · ${item.source || '-'}`,
+          obj: item,
+        });
+      });
+
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () =>
+        openLookupInManage({ content_id: item.content_id, source: item.source }),
+      );
+
+      actions.appendChild(jsonBtn);
+      actions.appendChild(openBtn);
+
+      header.appendChild(titleWrapper);
+      header.appendChild(actions);
+
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      meta.textContent = `${item.event_type || '-'} · ${item.resolved_by || '-'} · ${formatTimestamp(
+        item.created_at,
+      )}`;
+
+      const detail = document.createElement('div');
+      detail.className = 'mt-1 text-[11px] text-white/50';
+      detail.textContent = `final: ${item.final_status || '-'} · at: ${
+        item.final_completed_at ? formatTimestamp(item.final_completed_at) : '-'
+      }`;
+
+      card.appendChild(header);
+      card.appendChild(meta);
+      card.appendChild(detail);
+      container.appendChild(card);
+    });
+  };
+
+  const renderCrawlerReportsList = () => {
+    const container = document.getElementById('crawlerReportsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!STATE.crawlerReports.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '배치 리포트가 없습니다.';
+      container.appendChild(empty);
+      return;
+    }
+
+    STATE.crawlerReports.items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const header = document.createElement('div');
+      header.className = 'flex items-start justify-between gap-2';
+
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      title.textContent = item.crawler_name || '-';
+
+      const statusBadge = document.createElement('span');
+      const statusValue = item.status || '-';
+      statusBadge.className =
+        statusValue === 'success'
+          ? 'inline-flex rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-100'
+          : statusValue === 'failure'
+            ? 'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100'
+            : 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/70';
+      statusBadge.textContent = statusValue;
+
+      const right = document.createElement('div');
+      right.className = 'flex items-center gap-2';
+
+      const jsonBtn = document.createElement('button');
+      jsonBtn.type = 'button';
+      jsonBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      jsonBtn.textContent = 'JSON';
+      jsonBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openDetailModal({
+          title: 'Crawler Report',
+          subtitle: `${item.crawler_name || '-'} · ${formatTimestamp(item.created_at)}`,
+          obj: item,
+        });
+      });
+
+      right.appendChild(statusBadge);
+      right.appendChild(jsonBtn);
+
+      header.appendChild(title);
+      header.appendChild(right);
+
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      meta.textContent = `${statusValue} · ${formatTimestamp(item.created_at)}`;
+
+      const summary = document.createElement('div');
+      summary.className = 'mt-1 text-[11px] text-white/50';
+      summary.textContent = formatReportSummary(item.report_data);
+
+      card.appendChild(header);
+      card.appendChild(meta);
+      card.appendChild(summary);
+      container.appendChild(card);
+    });
+  };
+
   const updateMissingCompletionPagination = () => {
     const prevBtn = document.getElementById('missingCompletionPrevBtn');
     const nextBtn = document.getElementById('missingCompletionNextBtn');
@@ -1441,11 +1830,96 @@
     }
   };
 
+  const loadCdcEvents = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.cdcEvents.limit);
+    params.set('offset', STATE.cdcEvents.offset);
+    if (STATE.cdcEvents.q) params.set('q', STATE.cdcEvents.q);
+    if (STATE.cdcEvents.eventType) params.set('event_type', STATE.cdcEvents.eventType);
+    if (STATE.cdcEvents.source) params.set('source', STATE.cdcEvents.source);
+    if (STATE.cdcEvents.contentId) params.set('content_id', STATE.cdcEvents.contentId);
+    if (STATE.cdcEvents.createdFrom) params.set('created_from', STATE.cdcEvents.createdFrom);
+    if (STATE.cdcEvents.createdTo) params.set('created_to', STATE.cdcEvents.createdTo);
+
+    try {
+      const payload = await apiRequest('GET', `/api/admin/cdc/events?${params.toString()}`, {
+        token: STATE.token,
+      });
+      STATE.cdcEvents.items = payload?.events || [];
+      STATE.cdcEvents.lastCount = STATE.cdcEvents.items.length;
+      renderCdcEventsList();
+      updateCdcPagination();
+    } catch (err) {
+      showToast(err.message || 'CDC 이벤트를 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const refreshCdcEventsFromInputs = async () => {
+    STATE.cdcEvents.q = document.getElementById('cdcSearchInput')?.value?.trim() || '';
+    STATE.cdcEvents.eventType = document.getElementById('cdcEventTypeSelect')?.value || '';
+    STATE.cdcEvents.source = document.getElementById('cdcSourceSelect')?.value || '';
+    STATE.cdcEvents.contentId = document.getElementById('cdcContentIdInput')?.value?.trim() || '';
+    STATE.cdcEvents.createdFrom = document.getElementById('cdcCreatedFrom')?.value || '';
+    STATE.cdcEvents.createdTo = document.getElementById('cdcCreatedTo')?.value || '';
+    STATE.cdcEvents.offset = 0;
+    await loadCdcEvents();
+  };
+
+  const loadCrawlerReports = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.crawlerReports.limit);
+    params.set('offset', STATE.crawlerReports.offset);
+    if (STATE.crawlerReports.crawlerName) {
+      params.set('crawler_name', STATE.crawlerReports.crawlerName);
+    }
+    if (STATE.crawlerReports.status) params.set('status', STATE.crawlerReports.status);
+    if (STATE.crawlerReports.createdFrom) params.set('created_from', STATE.crawlerReports.createdFrom);
+    if (STATE.crawlerReports.createdTo) params.set('created_to', STATE.crawlerReports.createdTo);
+
+    try {
+      const payload = await apiRequest(
+        'GET',
+        `/api/admin/reports/daily-crawler?${params.toString()}`,
+        { token: STATE.token },
+      );
+      STATE.crawlerReports.items = payload?.reports || [];
+      STATE.crawlerReports.lastCount = STATE.crawlerReports.items.length;
+      renderCrawlerReportsList();
+      updateReportsPagination();
+    } catch (err) {
+      showToast(err.message || '배치 리포트를 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const refreshCrawlerReportsFromInputs = async () => {
+    STATE.crawlerReports.crawlerName =
+      document.getElementById('reportsCrawlerNameInput')?.value?.trim() || '';
+    STATE.crawlerReports.status = document.getElementById('reportsStatusSelect')?.value || '';
+    STATE.crawlerReports.createdFrom = document.getElementById('reportsCreatedFrom')?.value || '';
+    STATE.crawlerReports.createdTo = document.getElementById('reportsCreatedTo')?.value || '';
+    STATE.crawlerReports.offset = 0;
+    await loadCrawlerReports();
+  };
+
   const updateAuditPagination = () => {
     const prevBtn = document.getElementById('auditPrevBtn');
     const nextBtn = document.getElementById('auditNextBtn');
     setButtonDisabled(prevBtn, STATE.audit.offset === 0);
     setButtonDisabled(nextBtn, STATE.audit.lastCount < STATE.audit.limit);
+  };
+
+  const updateCdcPagination = () => {
+    const prevBtn = document.getElementById('cdcPrevBtn');
+    const nextBtn = document.getElementById('cdcNextBtn');
+    setButtonDisabled(prevBtn, STATE.cdcEvents.offset === 0);
+    setButtonDisabled(nextBtn, STATE.cdcEvents.lastCount < STATE.cdcEvents.limit);
+  };
+
+  const updateReportsPagination = () => {
+    const prevBtn = document.getElementById('reportsPrevBtn');
+    const nextBtn = document.getElementById('reportsNextBtn');
+    setButtonDisabled(prevBtn, STATE.crawlerReports.offset === 0);
+    setButtonDisabled(nextBtn, STATE.crawlerReports.lastCount < STATE.crawlerReports.limit);
   };
 
   const updatePublicationsPagination = () => {
@@ -1485,6 +1959,8 @@
     const tabMissingCompletion = document.getElementById('tabMissingCompletion');
     const tabMissingPublication = document.getElementById('tabMissingPublication');
     const tabAudit = document.getElementById('tabAudit');
+    const tabCdcEvents = document.getElementById('tabCdcEvents');
+    const tabCrawlerReports = document.getElementById('tabCrawlerReports');
     const deletedSearchBtn = document.getElementById('deletedSearchBtn');
     const deletedPrevBtn = document.getElementById('deletedPrevBtn');
     const deletedNextBtn = document.getElementById('deletedNextBtn');
@@ -1499,6 +1975,16 @@
     const auditSearchBtn = document.getElementById('auditSearchBtn');
     const auditPrevBtn = document.getElementById('auditPrevBtn');
     const auditNextBtn = document.getElementById('auditNextBtn');
+    const cdcSearchBtn = document.getElementById('cdcSearchBtn');
+    const cdcPrevBtn = document.getElementById('cdcPrevBtn');
+    const cdcNextBtn = document.getElementById('cdcNextBtn');
+    const reportsSearchBtn = document.getElementById('reportsSearchBtn');
+    const reportsPrevBtn = document.getElementById('reportsPrevBtn');
+    const reportsNextBtn = document.getElementById('reportsNextBtn');
+    const detailCloseBtn = document.getElementById('detailCloseBtn');
+    const detailCopyJsonBtn = document.getElementById('detailCopyJsonBtn');
+    const detailCopyIdBtn = document.getElementById('detailCopyIdBtn');
+    const detailCopyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
 
     manageSearchBtn?.addEventListener('click', () =>
       withLoading(manageSearchBtn, '검색 중...', performSearch),
@@ -1529,6 +2015,14 @@
     tabAudit?.addEventListener('click', () => {
       setTab('audit');
       loadAudit();
+    });
+    tabCdcEvents?.addEventListener('click', () => {
+      setTab('cdcEvents');
+      loadCdcEvents();
+    });
+    tabCrawlerReports?.addEventListener('click', () => {
+      setTab('crawlerReports');
+      loadCrawlerReports();
     });
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
@@ -1668,6 +2162,81 @@
         await loadAudit();
       }),
     );
+
+    cdcSearchBtn?.addEventListener('click', () =>
+      withLoading(cdcSearchBtn, '불러오는 중...', refreshCdcEventsFromInputs),
+    );
+    document.getElementById('cdcSearchInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        withLoading(cdcSearchBtn, '불러오는 중...', refreshCdcEventsFromInputs);
+      }
+    });
+    cdcPrevBtn?.addEventListener('click', () =>
+      withLoading(cdcPrevBtn, '불러오는 중...', async () => {
+        if (STATE.cdcEvents.offset === 0) return;
+        STATE.cdcEvents.offset = Math.max(0, STATE.cdcEvents.offset - STATE.cdcEvents.limit);
+        await loadCdcEvents();
+      }),
+    );
+    cdcNextBtn?.addEventListener('click', () =>
+      withLoading(cdcNextBtn, '불러오는 중...', async () => {
+        if (STATE.cdcEvents.lastCount < STATE.cdcEvents.limit) return;
+        STATE.cdcEvents.offset += STATE.cdcEvents.limit;
+        await loadCdcEvents();
+      }),
+    );
+
+    reportsSearchBtn?.addEventListener('click', () =>
+      withLoading(reportsSearchBtn, '불러오는 중...', refreshCrawlerReportsFromInputs),
+    );
+    document.getElementById('reportsCrawlerNameInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        withLoading(reportsSearchBtn, '불러오는 중...', refreshCrawlerReportsFromInputs);
+      }
+    });
+    reportsPrevBtn?.addEventListener('click', () =>
+      withLoading(reportsPrevBtn, '불러오는 중...', async () => {
+        if (STATE.crawlerReports.offset === 0) return;
+        STATE.crawlerReports.offset = Math.max(
+          0,
+          STATE.crawlerReports.offset - STATE.crawlerReports.limit,
+        );
+        await loadCrawlerReports();
+      }),
+    );
+    reportsNextBtn?.addEventListener('click', () =>
+      withLoading(reportsNextBtn, '불러오는 중...', async () => {
+        if (STATE.crawlerReports.lastCount < STATE.crawlerReports.limit) return;
+        STATE.crawlerReports.offset += STATE.crawlerReports.limit;
+        await loadCrawlerReports();
+      }),
+    );
+
+    const handleCopy = async (text) => {
+      try {
+        await copyToClipboard(text);
+        showToast('복사되었습니다.', { type: 'success' });
+      } catch (err) {
+        showToast('복사에 실패했습니다.', { type: 'error' });
+      }
+    };
+
+    detailCloseBtn?.addEventListener('click', closeDetailModal);
+    detailCopyJsonBtn?.addEventListener('click', () => handleCopy(detailState.jsonText));
+    detailCopyIdBtn?.addEventListener('click', () => handleCopy(detailState.contentId));
+    detailCopyIdSourceBtn?.addEventListener('click', () =>
+      handleCopy(`${detailState.contentId}::${detailState.source}`),
+    );
+    document.getElementById('detailModal')?.addEventListener('click', (event) => {
+      if (event.target?.id === 'detailModal') {
+        closeDetailModal();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeDetailModal();
+      }
+    });
   };
 
   document.addEventListener('DOMContentLoaded', async () => {
