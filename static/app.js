@@ -518,6 +518,7 @@ const STATE = {
 
   // subscriptions
   subscriptionsSet: new Set(),
+  publicationSubscriptionsSet: new Set(),
   pendingSubOps: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
@@ -1372,6 +1373,7 @@ function logout({ silent = false } = {}) {
   STATE.auth.user = null;
 
   STATE.subscriptionsSet = new Set();
+  STATE.publicationSubscriptionsSet = new Set();
   STATE.mySubscriptions = [];
   STATE.subscriptionsLoadedAt = null;
 
@@ -1565,6 +1567,16 @@ const normalizeSubscriptionItem = (item) => {
   const source = safeString(item.source, '');
   if (!contentId || !source) return null;
 
+  const subscriptionRaw = safeObj(item.subscription);
+  const wantsCompletion =
+    'wants_completion' in subscriptionRaw
+      ? safeBool(subscriptionRaw.wants_completion, false)
+      : true;
+  const wantsPublication =
+    'wants_publication' in subscriptionRaw
+      ? safeBool(subscriptionRaw.wants_publication, false)
+      : false;
+
   const fsRaw = safeObj(item.final_state);
   const finalStatus = safeString(
     fsRaw.final_status,
@@ -1587,6 +1599,10 @@ const normalizeSubscriptionItem = (item) => {
     title: safeString(item.title, 'Untitled'),
     status: safeString(item.status, ''),
     meta: normalizeMeta(item.meta),
+    subscription: {
+      wants_completion: wantsCompletion,
+      wants_publication: wantsPublication,
+    },
     final_state: finalState,
   };
 };
@@ -1615,6 +1631,7 @@ async function loadSubscriptions({ force = false } = {}) {
   const token = getAccessToken();
   if (!token) {
     STATE.subscriptionsSet = new Set();
+    STATE.publicationSubscriptionsSet = new Set();
     STATE.mySubscriptions = [];
     STATE.subscriptionsLoadedAt = null;
     STATE.subscriptionsLoadPromise = null;
@@ -1642,13 +1659,17 @@ async function loadSubscriptions({ force = false } = {}) {
       .map((x) => normalizeSubscriptionItem(x))
       .filter(Boolean);
 
-    const nextSet = new Set();
+    const completionSet = new Set();
+    const publicationSet = new Set();
     normalized.forEach((item) => {
       const key = buildSubscriptionKey(item);
-      if (key) nextSet.add(key);
+      if (!key) return;
+      if (item.subscription?.wants_completion) completionSet.add(key);
+      if (item.subscription?.wants_publication) publicationSet.add(key);
     });
 
-    STATE.subscriptionsSet = nextSet;
+    STATE.subscriptionsSet = completionSet;
+    STATE.publicationSubscriptionsSet = publicationSet;
     STATE.mySubscriptions = normalized;
     STATE.subscriptionsLoadedAt = Date.now();
     syncAllRenderedStarBadges();
@@ -1706,7 +1727,7 @@ async function subscribeContent(content) {
 
   try {
     await apiRequest('POST', '/api/me/subscriptions', {
-      body: { content_id: contentId, contentId, source },
+      body: { content_id: contentId, contentId, source, alert_type: 'completion' },
       token,
     });
 
@@ -1728,7 +1749,7 @@ async function unsubscribeContent(content) {
 
   try {
     await apiRequest('DELETE', '/api/me/subscriptions', {
-      body: { content_id: contentId, contentId, source },
+      body: { content_id: contentId, contentId, source, alert_type: 'completion' },
       token,
     });
 
@@ -3807,6 +3828,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       const mode = STATE.filters?.my?.viewMode || 'subscribing';
 
       data = (subs || []).filter((item) => {
+        if (!item?.subscription?.wants_completion) return false;
         const fs = item?.final_state || {};
         const isScheduled = fs?.is_scheduled_completion === true;
         const isCompleted = fs?.final_status === '완결' && !isScheduled;
