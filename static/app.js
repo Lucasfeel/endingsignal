@@ -484,7 +484,7 @@ const STATE = {
     novel: { sources: [], day: 'all' },
     ott: { sources: [], genre: 'drama' },
     series: { sort: 'latest' },
-    my: { viewMode: 'subscribing' },
+    my: { viewMode: 'completion' },
   },
   search: {
     pageOpen: false,
@@ -523,6 +523,8 @@ const STATE = {
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
   subscriptionsLoadPromise: null,
+  subscriptionsRequestSeq: 0,
+  subscriptionsAbortController: null,
 
   pagination: {
     completed: {
@@ -1557,6 +1559,7 @@ const safeString = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
 const safeBool = (v, fallback = false) =>
   typeof v === 'boolean' ? v : fallback;
 const safeObj = (v) => (v && typeof v === 'object' ? v : {});
+const isAbortError = (err) => err && (err.name === 'AbortError' || err.code === 20);
 
 function normalizeSearchText(s) {
   return (s || '')
@@ -1664,6 +1667,10 @@ const isAnySubscribedForCard = (content) => {
 async function loadSubscriptions({ force = false } = {}) {
   const token = getAccessToken();
   if (!token) {
+    if (STATE.subscriptionsAbortController) {
+      STATE.subscriptionsAbortController.abort();
+      STATE.subscriptionsAbortController = null;
+    }
     STATE.subscriptionsSet = new Set();
     STATE.publicationSubscriptionsSet = new Set();
     STATE.mySubscriptions = [];
@@ -1683,34 +1690,55 @@ async function loadSubscriptions({ force = false } = {}) {
     return STATE.mySubscriptions;
   }
 
+  const seq = (STATE.subscriptionsRequestSeq || 0) + 1;
+  STATE.subscriptionsRequestSeq = seq;
+  const tokenSnapshot = token;
+
+  if (STATE.subscriptionsAbortController) {
+    STATE.subscriptionsAbortController.abort();
+  }
+  const ac = new AbortController();
+  STATE.subscriptionsAbortController = ac;
+
   const loadPromise = (async () => {
-    const res = await apiRequest('GET', '/api/me/subscriptions', { token });
-    if (!res || res.success !== true || !Array.isArray(res.data)) {
-      throw new Error('구독 정보를 불러오지 못했습니다.');
+    try {
+      const res = await apiRequest('GET', '/api/me/subscriptions', {
+        token,
+        signal: ac.signal,
+      });
+      if (!res || res.success !== true || !Array.isArray(res.data)) {
+        throw new Error('구독 정보를 불러오지 못했습니다.');
+      }
+
+      const normalized = res.data
+        .map((x) => normalizeSubscriptionItem(x))
+        .filter(Boolean);
+
+      if (seq !== STATE.subscriptionsRequestSeq) return normalized;
+      if (getAccessToken() !== tokenSnapshot) return normalized;
+
+      const completionSet = new Set();
+      const publicationSet = new Set();
+      normalized.forEach((item) => {
+        const key = buildSubscriptionKey(item);
+        if (!key) return;
+        if (item.subscription?.wants_completion) completionSet.add(key);
+        if (item.subscription?.wants_publication) publicationSet.add(key);
+      });
+
+      STATE.subscriptionsSet = completionSet;
+      STATE.publicationSubscriptionsSet = publicationSet;
+      STATE.mySubscriptions = normalized;
+      STATE.subscriptionsLoadedAt = Date.now();
+      syncAllRenderedStarBadges();
+      syncMySubListInPlace();
+      if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+
+      return normalized;
+    } catch (err) {
+      if (isAbortError(err)) return STATE.mySubscriptions || [];
+      throw err;
     }
-
-    const normalized = res.data
-      .map((x) => normalizeSubscriptionItem(x))
-      .filter(Boolean);
-
-    const completionSet = new Set();
-    const publicationSet = new Set();
-    normalized.forEach((item) => {
-      const key = buildSubscriptionKey(item);
-      if (!key) return;
-      if (item.subscription?.wants_completion) completionSet.add(key);
-      if (item.subscription?.wants_publication) publicationSet.add(key);
-    });
-
-    STATE.subscriptionsSet = completionSet;
-    STATE.publicationSubscriptionsSet = publicationSet;
-    STATE.mySubscriptions = normalized;
-    STATE.subscriptionsLoadedAt = Date.now();
-    syncAllRenderedStarBadges();
-    syncMySubListInPlace();
-    if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
-
-    return normalized;
   })();
 
   STATE.subscriptionsLoadPromise = loadPromise;
@@ -1720,6 +1748,9 @@ async function loadSubscriptions({ force = false } = {}) {
   } finally {
     if (STATE.subscriptionsLoadPromise === loadPromise) {
       STATE.subscriptionsLoadPromise = null;
+    }
+    if (STATE.subscriptionsAbortController === ac) {
+      STATE.subscriptionsAbortController = null;
     }
   }
 }
@@ -1743,6 +1774,12 @@ async function retryModalSubscriptionLoad(content) {
     STATE.subscribeModalState.loadFailed = false;
     syncSubscribeModalUI(content);
   } catch (e) {
+    if (isAbortError(e)) {
+      STATE.subscribeModalState.isLoading = false;
+      STATE.subscribeModalState.loadFailed = false;
+      syncSubscribeModalUI(content);
+      return;
+    }
     STATE.subscribeModalState.isLoading = false;
     STATE.subscribeModalState.loadFailed = true;
     showToast('구독 상태를 불러오지 못했습니다. 다시 시도해 주세요.', { type: 'error' });
@@ -1827,7 +1864,7 @@ function syncSubscribeModalUI(content) {
       : null;
   const showLoadingState = modalState.isLoading;
   const showSubscribedState = completionSubscribed === true || publicationSubscribed === true;
-  const shouldShowStateLine = showLoadingState || showSubscribedState;
+  const shouldShowStateLine = showLoadingState || !modalState.loadFailed;
 
   if (UI.subscribeStateLine) {
     UI.subscribeStateLine.classList.toggle('hidden', !shouldShowStateLine);
@@ -1837,13 +1874,13 @@ function syncSubscribeModalUI(content) {
     if (showLoadingState) {
       UI.subscribeStateText.textContent = '불러오는 중';
     } else if (completionSubscribed && publicationSubscribed) {
-      UI.subscribeStateText.textContent = '공개/완결 구독 중';
+      UI.subscribeStateText.textContent = '공개/완결 알림 구독 중';
     } else if (publicationSubscribed) {
       UI.subscribeStateText.textContent = '공개 알림 구독 중';
     } else if (completionSubscribed) {
       UI.subscribeStateText.textContent = '완결 알림 구독 중';
     } else {
-      UI.subscribeStateText.textContent = '';
+      UI.subscribeStateText.textContent = '알림 구독 없음';
     }
   }
   if (UI.subscribeStateDot) {
@@ -1938,6 +1975,88 @@ const formatDateKST = (isoString) => {
     console.warn('Failed to format date', isoString, e);
     return isoString;
   }
+};
+
+const parseKstNaiveToDate = (publicAtStr) => {
+  const raw = safeString(publicAtStr, '').trim();
+  if (!raw) return null;
+  const normalized = raw.replace('T', ' ').trim();
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+      normalized
+    );
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4] || 0);
+  const minute = Number(match[5] || 0);
+  const second = Number(match[6] || 0);
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const formatPublicAtShort = (publicAtStr, { includeTime = true } = {}) => {
+  const date = parseKstNaiveToDate(publicAtStr);
+  if (!date) return '';
+  const pad = (val) => String(val).padStart(2, '0');
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  if (!includeTime) return `${y}-${m}-${d}`;
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+};
+
+const getPublicationPublicAt = (item) =>
+  safeString(
+    item?.publication?.public_at ||
+      item?.publication_at ||
+      item?.publication?.publicAt ||
+      item?.publicationAt,
+    ''
+  );
+
+const buildPublicationStatusText = (item) => {
+  const publicAt = getPublicationPublicAt(item);
+  const date = parseKstNaiveToDate(publicAt);
+  if (!date) return '공개일 미정';
+  const now = new Date();
+  if (date.getTime() > now.getTime()) {
+    const formatted = formatPublicAtShort(publicAt, { includeTime: true });
+    return formatted ? `공개 예정 · ${formatted}` : '공개일 미정';
+  }
+  const formatted = formatPublicAtShort(publicAt, { includeTime: false });
+  return formatted ? `공개됨 · ${formatted}` : '공개일 미정';
+};
+
+const sortPublicationItems = (items) => {
+  const list = Array.isArray(items) ? [...items] : [];
+  list.sort((a, b) => {
+    const aDate = parseKstNaiveToDate(getPublicationPublicAt(a));
+    const bDate = parseKstNaiveToDate(getPublicationPublicAt(b));
+    const aHas = Boolean(aDate);
+    const bHas = Boolean(bDate);
+
+    if (aHas && bHas) {
+      const diff = aDate.getTime() - bDate.getTime();
+      if (diff !== 0) return diff;
+    } else if (aHas !== bHas) {
+      return aHas ? -1 : 1;
+    }
+
+    const aTitle = safeString(a?.title, '');
+    const bTitle = safeString(b?.title, '');
+    const titleDiff = aTitle.localeCompare(bTitle, 'ko-KR');
+    if (titleDiff !== 0) return titleDiff;
+
+    const aId = String(a?.content_id ?? a?.contentId ?? a?.id ?? '');
+    const bId = String(b?.content_id ?? b?.contentId ?? b?.id ?? '');
+    return aId.localeCompare(bId, 'ko-KR');
+  });
+  return list;
 };
 
 /* =========================
@@ -3595,6 +3714,7 @@ function updateFilterVisibility(tabId) {
     UI.seriesFooter.classList.remove('hidden');
   } else if (tabId === 'my') {
     UI.mySubToggle.classList.remove('hidden');
+    syncMySubToggleUI();
   }
 }
 
@@ -3690,14 +3810,32 @@ function renderL2Filters(tabId) {
   });
 }
 
-function updateMySubTab(mode) {
-  STATE.filters.my.viewMode = mode;
+function syncMySubToggleUI() {
+  const mode = STATE.filters?.my?.viewMode || 'completion';
 
   if (UI.toggleIndicator) {
-    UI.toggleIndicator.style.transform =
-      mode === 'subscribing' ? 'translateX(0)' : 'translateX(100%)';
+    const x =
+      mode === 'publication'
+        ? 'translateX(0%)'
+        : mode === 'completion'
+          ? 'translateX(100%)'
+          : 'translateX(200%)';
+    UI.toggleIndicator.style.transform = x;
   }
 
+  const btns = document.querySelectorAll(
+    '#mySubToggleContainer button[data-mode]'
+  );
+  btns.forEach((btn) => {
+    const active = btn.dataset.mode === mode;
+    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('text-gray-400', !active);
+  });
+}
+
+function updateMySubTab(mode) {
+  STATE.filters.my.viewMode = mode;
+  syncMySubToggleUI();
   fetchAndRenderContent('my');
 }
 
@@ -3903,20 +4041,49 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         return { stale: true };
       }
 
-      const mode = STATE.filters?.my?.viewMode || 'subscribing';
+      const mode = STATE.filters?.my?.viewMode || 'completion';
 
       data = (subs || []).filter((item) => {
-        if (!item?.subscription?.wants_completion) return false;
+        const sub = item?.subscription || {};
         const fs = item?.final_state || {};
         const isScheduled = fs?.is_scheduled_completion === true;
         const isCompleted = fs?.final_status === '완결' && !isScheduled;
+
+        if (mode === 'publication') {
+          if (sub.wants_publication !== true) return false;
+          if (!supportsPublicationUI(item)) return false;
+          return true;
+        }
+
+        if (sub.wants_completion !== true) return false;
 
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
 
+      if (mode === 'publication') {
+        data = sortPublicationItems(data);
+      }
+
       if (!data.length) {
-        if (mode === 'completed') {
+        if (mode === 'publication') {
+          emptyStateConfig = {
+            title: '공개 알림을 구독한 작품이 없습니다',
+            message: '작품 화면에서 공개 알림을 설정해보세요.',
+            actions: [
+              {
+                label: '검색하기',
+                variant: 'primary',
+                onClick: () => openSearchAndFocus(),
+              },
+              {
+                label: '시리즈 보기',
+                variant: 'secondary',
+                onClick: () => updateTab('series'),
+              },
+            ],
+          };
+        } else if (mode === 'completed') {
           emptyStateConfig = {
             title: '완결된 구독 작품이 아직 없습니다',
             message: '구독 중인 작품이 완결되면 여기에 표시됩니다.',
@@ -3925,7 +4092,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
                 label: '구독 목록 보기',
                 variant: 'primary',
                 onClick: () => {
-                  STATE.filters.my.viewMode = 'subscribing';
+                  STATE.filters.my.viewMode = 'completion';
                   updateTab('my');
                 },
               },
@@ -3938,8 +4105,8 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           };
         } else {
           emptyStateConfig = {
-            title: '구독한 작품이 없습니다',
-            message: '작품을 검색한 뒤, 작품 화면에서 알림을 설정해보세요.',
+            title: '완결 알림을 구독한 작품이 없습니다',
+            message: '작품 화면에서 완결 알림을 설정해보세요.',
             actions: [
               {
                 label: '검색하기',
@@ -4349,6 +4516,7 @@ function createCard(content, tabId, aspectClass) {
 
   // Badge logic
   if (tabId === 'my') {
+    const myViewMode = STATE.filters?.my?.viewMode || 'completion';
     const fs = safeObj(content?.final_state);
     const isScheduled = fs?.is_scheduled_completion === true;
     const scheduledDate = safeString(fs?.scheduled_completed_at, '');
@@ -4358,23 +4526,25 @@ function createCard(content, tabId, aspectClass) {
 
     const badgeEl = document.createElement('div');
 
-    if (isScheduled) {
-      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-yellow-500/80'));
-      const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
-      badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
-        formatted
-          ? `<span class="text-[10px] text-black leading-none">${formatted}</span>`
-          : ''
-      }`;
-      cardContainer.appendChild(badgeEl);
-    } else if (isCompleted) {
-      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-green-500/80'));
-      badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
-      cardContainer.appendChild(badgeEl);
-    } else if (isHiatus) {
-      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-gray-600/80'));
-      badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">휴재</span>`;
-      cardContainer.appendChild(badgeEl);
+    if (myViewMode !== 'publication') {
+      if (isScheduled) {
+        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-yellow-500/80'));
+        const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
+        badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
+          formatted
+            ? `<span class="text-[10px] text-black leading-none">${formatted}</span>`
+            : ''
+        }`;
+        cardContainer.appendChild(badgeEl);
+      } else if (isCompleted) {
+        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-green-500/80'));
+        badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
+        cardContainer.appendChild(badgeEl);
+      } else if (isHiatus) {
+        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-gray-600/80'));
+        badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">휴재</span>`;
+        cardContainer.appendChild(badgeEl);
+      }
     }
   } else if (content.status === '완결') {
     const badgeEl = document.createElement('div');
@@ -4410,6 +4580,17 @@ function createCard(content, tabId, aspectClass) {
 
   textContainer.appendChild(titleEl);
   textContainer.appendChild(authorEl);
+
+  if (tabId === 'my') {
+    const myViewMode = STATE.filters?.my?.viewMode || 'completion';
+    if (myViewMode === 'publication') {
+      const publicationText = buildPublicationStatusText(content);
+      const publicationEl = document.createElement('div');
+      setClasses(publicationEl, 'mt-1 text-xs text-white/60');
+      publicationEl.textContent = publicationText;
+      textContainer.appendChild(publicationEl);
+    }
+  }
   el.appendChild(textContainer);
 
   const showPress = () => {
@@ -4702,10 +4883,15 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
     else await subscribeContent(content, normalizedType);
 
     applySubscriptionChange({ content, alertType: normalizedType, subscribed: nextState });
-    showToast(nextState ? '구독했습니다.' : '구독을 해제했습니다.', { type: 'success' });
-    loadSubscriptions({ force: true }).catch((err) =>
-      console.warn('Failed to refresh subscriptions after toggle', err)
+    const label = normalizedType === 'publication' ? '공개 알림' : '완결 알림';
+    showToast(
+      nextState ? `${label}을 구독했습니다.` : `${label}을 해제했습니다.`,
+      { type: 'success' }
     );
+    loadSubscriptions({ force: true }).catch((err) => {
+      if (isAbortError(err)) return;
+      console.warn('Failed to refresh subscriptions after toggle', err);
+    });
   } catch (e) {
     if (e?.httpStatus === 401) {
       showToast('로그인이 필요합니다.', { type: 'error' });
