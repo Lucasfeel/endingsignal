@@ -35,12 +35,15 @@ def list_subscriptions():
         cursor.execute(
             """
             SELECT c.content_id, c.source, c.content_type, c.title, c.status, c.meta,
-                   o.override_status, o.override_completed_at
+                   o.override_status, o.override_completed_at,
+                   m.public_at AS public_at
             FROM subscriptions s
             JOIN contents c
                 ON s.content_id = c.content_id AND s.source = c.source
             LEFT JOIN admin_content_overrides o
                 ON o.content_id = c.content_id AND o.source = c.source
+            LEFT JOIN admin_content_metadata m
+                ON m.content_id = c.content_id AND m.source = c.source
             WHERE s.user_id = %s AND COALESCE(c.is_deleted, FALSE) = FALSE
             ORDER BY c.title
             """,
@@ -53,12 +56,20 @@ def list_subscriptions():
             row_dict = dict(row)
             override_status = row_dict.pop('override_status', None)
             override_completed_at = row_dict.pop('override_completed_at', None)
+            public_at = row_dict.pop('public_at', None)
+            is_scheduled = bool(public_at is not None and effective_now < public_at)
+            is_published = bool(public_at is not None and effective_now >= public_at)
             override = None
             if override_status is not None or override_completed_at is not None:
                 override = {
                     'override_status': override_status,
                     'override_completed_at': override_completed_at,
                 }
+            row_dict['publication'] = {
+                'public_at': public_at.isoformat() if public_at else None,
+                'is_scheduled_publication': is_scheduled,
+                'is_published': is_published,
+            }
             row_dict['final_state'] = build_final_state_payload(
                 row_dict.get('status'), override, now=effective_now
             )
