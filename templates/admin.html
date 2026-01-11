@@ -93,6 +93,20 @@
             >
               운영 로그
             </button>
+            <button
+              id="tabCdcEvents"
+              class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
+              type="button"
+            >
+              CDC 이벤트
+            </button>
+            <button
+              id="tabCrawlerReports"
+              class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
+              type="button"
+            >
+              배치 리포트
+            </button>
           </div>
         </section>
 
@@ -235,6 +249,10 @@
                       삭제
                     </button>
                   </div>
+                  <div
+                    id="publicationCdcStatus"
+                    class="mt-2 hidden rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70"
+                  ></div>
                 </div>
               </div>
 
@@ -442,6 +460,117 @@
             <div id="auditList" class="mt-3 space-y-2 text-sm text-white/80"></div>
           </div>
         </section>
+
+        <section id="panelCdcEvents" class="hidden grid gap-6 lg:grid-cols-[360px_1fr]">
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h2 class="text-lg font-semibold">CDC 이벤트</h2>
+            <div class="mt-4 space-y-3">
+              <input
+                id="cdcSearchInput"
+                type="text"
+                placeholder="검색어 (제목/콘텐츠 ID)"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <select
+                id="cdcEventTypeSelect"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="">전체 이벤트</option>
+                <option value="CONTENT_COMPLETED">완결</option>
+                <option value="CONTENT_PUBLISHED">공개</option>
+              </select>
+              <select
+                id="cdcSourceSelect"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="">전체 소스</option>
+                <option value="naver_webtoon">네이버 웹툰</option>
+                <option value="kakao_webtoon">카카오 웹툰</option>
+                <option value="kakaopage_webtoon">카카오페이지 웹툰</option>
+              </select>
+              <input
+                id="cdcContentIdInput"
+                type="text"
+                placeholder="content_id (정확히)"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <input
+                id="cdcCreatedFrom"
+                type="datetime-local"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <input
+                id="cdcCreatedTo"
+                type="datetime-local"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <button
+                id="cdcSearchBtn"
+                type="button"
+                class="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm text-white transition hover:border-white/40"
+              >
+                검색
+              </button>
+            </div>
+            <div class="mt-6 flex items-center justify-between text-xs text-white/60">
+              <button id="cdcPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
+              <button id="cdcNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h3 class="text-sm font-semibold text-white/80">이벤트 목록</h3>
+            <div id="cdcEventsList" class="mt-3 space-y-2 text-sm text-white/80"></div>
+          </div>
+        </section>
+
+        <section id="panelCrawlerReports" class="hidden grid gap-6 lg:grid-cols-[360px_1fr]">
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h2 class="text-lg font-semibold">배치 리포트</h2>
+            <div class="mt-4 space-y-3">
+              <input
+                id="reportsCrawlerNameInput"
+                type="text"
+                placeholder="crawler_name (예: scheduled publication cdc)"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <select
+                id="reportsStatusSelect"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              >
+                <option value="">전체 상태</option>
+                <option value="success">success</option>
+                <option value="failure">failure</option>
+              </select>
+              <input
+                id="reportsCreatedFrom"
+                type="datetime-local"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <input
+                id="reportsCreatedTo"
+                type="datetime-local"
+                class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              />
+              <button
+                id="reportsSearchBtn"
+                type="button"
+                class="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm text-white transition hover:border-white/40"
+              >
+                검색
+              </button>
+            </div>
+            <div class="mt-6 flex items-center justify-between text-xs text-white/60">
+              <button id="reportsPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
+              <button id="reportsNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h3 class="text-sm font-semibold text-white/80">리포트 목록</h3>
+            <div id="crawlerReportsList" class="mt-3 space-y-2 text-sm text-white/80"></div>
+          </div>
+        </section>
       </main>
     </div>
   </div>
@@ -476,6 +605,52 @@
           취소
         </button>
       </div>
+    </div>
+  </div>
+
+  <div id="detailModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70">
+    <div class="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#111111] p-6 shadow-xl">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h3 id="detailTitle" class="truncate text-lg font-semibold text-white">Details</h3>
+          <p id="detailSubtitle" class="mt-1 truncate text-xs text-white/60"></p>
+        </div>
+        <div class="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            id="detailCopyIdBtn"
+            type="button"
+            class="hidden rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            Copy ID
+          </button>
+          <button
+            id="detailCopyIdSourceBtn"
+            type="button"
+            class="hidden rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            Copy ID+Source
+          </button>
+          <button
+            id="detailCopyJsonBtn"
+            type="button"
+            class="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            Copy JSON
+          </button>
+          <button
+            id="detailCloseBtn"
+            type="button"
+            class="rounded-xl border border-white/20 bg-transparent px-3 py-2 text-xs text-white/80 transition hover:border-white/40"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+
+      <pre
+        id="detailBodyPre"
+        class="mt-4 max-h-[60vh] overflow-auto rounded-xl border border-white/10 bg-black/40 p-4 text-xs text-white/80"
+      ></pre>
     </div>
   </div>
 
