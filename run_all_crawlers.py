@@ -12,7 +12,10 @@ load_dotenv()
 from database import create_standalone_connection, get_cursor
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
-from services.cdc_event_service import record_due_scheduled_completions
+from services.cdc_event_service import (
+    record_due_scheduled_completions,
+    record_due_scheduled_publications,
+)
 from utils.time import now_kst_naive
 
 ALL_CRAWLERS = [
@@ -189,6 +192,57 @@ def run_scheduled_completion_cdc():
             report_conn.close()
 
 
+def run_scheduled_publication_cdc():
+    report = {"status": "성공"}
+    start_time = time.time()
+    conn = None
+    cursor = None
+    try:
+        conn = create_standalone_connection()
+        cursor = get_cursor(conn)
+        result = record_due_scheduled_publications(conn, cursor, now_kst_naive())
+        conn.commit()
+        report.update(result)
+    except Exception as e:
+        print(f"FATAL: [scheduled publication cdc] 실행 실패: {e}", file=sys.stderr)
+        report["status"] = "실패"
+        report["error_message"] = traceback.format_exc()
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            conn.close()
+
+    report["duration"] = time.time() - start_time
+    report_conn = None
+    try:
+        report_conn = create_standalone_connection()
+        report_cursor = get_cursor(report_conn)
+        report_cursor.execute(
+            """
+            INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
+            VALUES (%s, %s, %s)
+            """,
+            ("scheduled publication cdc", report["status"], json.dumps(report))
+        )
+        report_conn.commit()
+        report_cursor.close()
+        print("LOG: [scheduled publication cdc] 실행 결과를 DB에 성공적으로 저장했습니다.")
+    except Exception as report_e:
+        print(f"FATAL: [scheduled publication cdc] 보고서 저장 실패: {report_e}", file=sys.stderr)
+    finally:
+        if report_conn:
+            report_conn.close()
+
+
 async def main():
     """
     등록된 모든 크롤러를 병렬로 실행하고, 각 크롤러의 실행 결과를 DB에 저장합니다.
@@ -258,6 +312,7 @@ async def main():
     print(f"Final rollup payload: {json.dumps(rollup, ensure_ascii=False)}")
 
     run_scheduled_completion_cdc()
+    run_scheduled_publication_cdc()
 
     total_duration = time.time() - start_time
     print("\n==========================================")
