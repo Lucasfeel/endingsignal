@@ -305,42 +305,139 @@
     return {};
   };
 
-  const formatReportSummary = (reportData) => {
+  const tryParseJsonObject = (value) => {
+    if (typeof value !== 'string') return null;
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    } catch (err) {
+      return null;
+    }
+    return null;
+  };
+
+  const formatSummaryValue = (value) => {
+    if (value === null || value === undefined) return '-';
+    let text = '';
+    if (typeof value === 'number') {
+      text = value.toLocaleString();
+    } else if (typeof value === 'boolean') {
+      text = value ? 'true' : 'false';
+    } else if (typeof value === 'object') {
+      try {
+        text = JSON.stringify(value);
+      } catch (err) {
+        text = String(value);
+      }
+    } else {
+      text = String(value);
+    }
+    const maxLength = 80;
+    if (text.length > maxLength) {
+      text = `${text.slice(0, maxLength - 3)}...`;
+    }
+    return text;
+  };
+
+  const pickFirstExistingKey = (obj, keys) => {
+    if (!obj) return null;
+    for (const key of keys) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && value !== '') {
+        return { key, value };
+      }
+    }
+    return null;
+  };
+
+  const SUMMARY_LABELS = {
+    cdc_events_inserted_count: 'CDC inserted',
+    scheduled_publication_events_inserted_count: 'Pub inserted',
+    scheduled_publication_due_count: 'Pub due',
+    scheduled_completion_events_inserted_count: 'Comp inserted',
+    scheduled_completion_due_count: 'Comp due',
+    duration_ms: 'Duration(ms)',
+    elapsed_ms: 'Elapsed(ms)',
+    runtime_ms: 'Runtime(ms)',
+  };
+
+  const formatReportSummary = (reportData, statusValue) => {
     if (!reportData) return '-';
     let data = reportData;
     if (typeof data === 'string') {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && typeof parsed === 'object') {
-          data = parsed;
-        } else {
-          return data;
-        }
-      } catch (err) {
-        return data;
+      const parsed = tryParseJsonObject(data);
+      if (parsed) {
+        data = parsed;
+      } else {
+        return formatSummaryValue(data);
       }
     }
-    if (!data || typeof data !== 'object') return String(data);
-    const entries = Object.entries(data).filter(([, value]) => value !== undefined);
-    if (!entries.length) return '-';
-    return entries.slice(0, 4).map(([key, value]) => {
-      let text = '';
-      if (value === null || value === undefined) {
-        text = '-';
-      } else if (typeof value === 'object') {
-        try {
-          text = JSON.stringify(value);
-        } catch (err) {
-          text = String(value);
-        }
-      } else {
-        text = String(value);
+    if (!data || typeof data !== 'object') return formatSummaryValue(data);
+
+    const pairs = [];
+    const usedKeys = new Set();
+
+    if (statusValue === 'failure') {
+      const errorPick = pickFirstExistingKey(data, [
+        'error',
+        'message',
+        'exception',
+        'traceback',
+        'reason',
+        'detail',
+      ]);
+      if (errorPick) {
+        pairs.push({ label: 'Error', value: formatSummaryValue(errorPick.value) });
+        usedKeys.add(errorPick.key);
       }
-      if (text.length > 60) {
-        text = `${text.slice(0, 57)}...`;
+    }
+
+    const countKeys = [
+      'cdc_events_inserted_count',
+      'scheduled_publication_events_inserted_count',
+      'scheduled_publication_due_count',
+      'scheduled_completion_events_inserted_count',
+      'scheduled_completion_due_count',
+    ];
+    countKeys.forEach((key) => {
+      if (data[key] !== undefined && data[key] !== null) {
+        pairs.push({ label: SUMMARY_LABELS[key] || key, value: formatSummaryValue(data[key]) });
+        usedKeys.add(key);
       }
-      return `${key}: ${text}`;
-    }).join(' · ');
+    });
+
+    const durationPick = pickFirstExistingKey(data, ['duration_ms', 'elapsed_ms', 'runtime_ms']);
+    if (durationPick && !usedKeys.has(durationPick.key)) {
+      pairs.push({
+        label: SUMMARY_LABELS[durationPick.key] || durationPick.key,
+        value: formatSummaryValue(durationPick.value),
+      });
+      usedKeys.add(durationPick.key);
+    }
+
+    ['inserted_count', 'due_count', 'status'].forEach((key) => {
+      if (data[key] !== undefined && data[key] !== null && !usedKeys.has(key)) {
+        pairs.push({ label: SUMMARY_LABELS[key] || key, value: formatSummaryValue(data[key]) });
+        usedKeys.add(key);
+      }
+    });
+
+    const noisyKeys = new Set(['traceback']);
+    const remainingKeys = Object.keys(data)
+      .filter((key) => !usedKeys.has(key) && !noisyKeys.has(key))
+      .sort();
+    remainingKeys.slice(0, 2).forEach((key) => {
+      pairs.push({ label: SUMMARY_LABELS[key] || key, value: formatSummaryValue(data[key]) });
+      usedKeys.add(key);
+    });
+
+    if (!pairs.length) return '-';
+    return pairs
+      .slice(0, 6)
+      .map((pair) => `${pair.label}: ${pair.value}`)
+      .join(' · ');
   };
 
   const getThumbnailUrl = (item) => {
@@ -1695,7 +1792,7 @@
 
       const summary = document.createElement('div');
       summary.className = 'mt-1 text-[11px] text-white/50';
-      summary.textContent = formatReportSummary(item.report_data);
+      summary.textContent = formatReportSummary(item.report_data, item.status);
 
       card.appendChild(header);
       card.appendChild(meta);
