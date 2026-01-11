@@ -195,6 +195,28 @@
       offset: 0,
       lastCount: 0,
     },
+    cdcEvents: {
+      items: [],
+      q: '',
+      eventType: '',
+      source: '',
+      contentId: '',
+      createdFrom: '',
+      createdTo: '',
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+    },
+    crawlerReports: {
+      items: [],
+      crawlerName: '',
+      status: '',
+      createdFrom: '',
+      createdTo: '',
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+    },
   };
 
   const parseKstNaiveIsoToEpoch = (value) => {
@@ -280,6 +302,44 @@
       }
     }
     return {};
+  };
+
+  const formatReportSummary = (reportData) => {
+    if (!reportData) return '-';
+    let data = reportData;
+    if (typeof data === 'string') {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed && typeof parsed === 'object') {
+          data = parsed;
+        } else {
+          return data;
+        }
+      } catch (err) {
+        return data;
+      }
+    }
+    if (!data || typeof data !== 'object') return String(data);
+    const entries = Object.entries(data).filter(([, value]) => value !== undefined);
+    if (!entries.length) return '-';
+    return entries.slice(0, 4).map(([key, value]) => {
+      let text = '';
+      if (value === null || value === undefined) {
+        text = '-';
+      } else if (typeof value === 'object') {
+        try {
+          text = JSON.stringify(value);
+        } catch (err) {
+          text = String(value);
+        }
+      } else {
+        text = String(value);
+      }
+      if (text.length > 60) {
+        text = `${text.slice(0, 57)}...`;
+      }
+      return `${key}: ${text}`;
+    }).join(' · ');
   };
 
   const getThumbnailUrl = (item) => {
@@ -386,6 +446,8 @@
       missingCompletion: document.getElementById('panelMissingCompletion'),
       missingPublication: document.getElementById('panelMissingPublication'),
       audit: document.getElementById('panelAudit'),
+      cdcEvents: document.getElementById('panelCdcEvents'),
+      crawlerReports: document.getElementById('panelCrawlerReports'),
     };
     const tabs = {
       manage: document.getElementById('tabManage'),
@@ -394,6 +456,8 @@
       missingCompletion: document.getElementById('tabMissingCompletion'),
       missingPublication: document.getElementById('tabMissingPublication'),
       audit: document.getElementById('tabAudit'),
+      cdcEvents: document.getElementById('tabCdcEvents'),
+      crawlerReports: document.getElementById('tabCrawlerReports'),
     };
 
     Object.entries(panels).forEach(([key, panel]) => {
@@ -1315,6 +1379,131 @@
     });
   };
 
+  const renderCdcEventsList = () => {
+    const container = document.getElementById('cdcEventsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!STATE.cdcEvents.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = 'CDC 이벤트가 없습니다.';
+      container.appendChild(empty);
+      return;
+    }
+
+    STATE.cdcEvents.items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const header = document.createElement('div');
+      header.className = 'flex items-start justify-between gap-2';
+
+      const titleWrapper = document.createElement('div');
+      titleWrapper.className = 'flex flex-wrap items-center gap-2';
+
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      title.textContent = item.title || item.content_id || '-';
+
+      const source = document.createElement('span');
+      source.className = 'text-xs text-white/50';
+      source.textContent = item.source || '-';
+
+      titleWrapper.appendChild(title);
+      titleWrapper.appendChild(source);
+
+      if (item.is_deleted) {
+        const deletedBadge = document.createElement('span');
+        deletedBadge.className =
+          'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+        deletedBadge.textContent = 'DELETED';
+        titleWrapper.appendChild(deletedBadge);
+      }
+
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () =>
+        openLookupInManage({ content_id: item.content_id, source: item.source }),
+      );
+
+      header.appendChild(titleWrapper);
+      header.appendChild(openBtn);
+
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      meta.textContent = `${item.event_type || '-'} · ${item.resolved_by || '-'} · ${formatTimestamp(
+        item.created_at,
+      )}`;
+
+      const detail = document.createElement('div');
+      detail.className = 'mt-1 text-[11px] text-white/50';
+      detail.textContent = `final: ${item.final_status || '-'} · at: ${
+        item.final_completed_at ? formatTimestamp(item.final_completed_at) : '-'
+      }`;
+
+      card.appendChild(header);
+      card.appendChild(meta);
+      card.appendChild(detail);
+      container.appendChild(card);
+    });
+  };
+
+  const renderCrawlerReportsList = () => {
+    const container = document.getElementById('crawlerReportsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!STATE.crawlerReports.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '배치 리포트가 없습니다.';
+      container.appendChild(empty);
+      return;
+    }
+
+    STATE.crawlerReports.items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const header = document.createElement('div');
+      header.className = 'flex items-start justify-between gap-2';
+
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      title.textContent = item.crawler_name || '-';
+
+      const statusBadge = document.createElement('span');
+      const statusValue = item.status || '-';
+      statusBadge.className =
+        statusValue === 'success'
+          ? 'inline-flex rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-100'
+          : statusValue === 'failure'
+            ? 'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100'
+            : 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/70';
+      statusBadge.textContent = statusValue;
+
+      header.appendChild(title);
+      header.appendChild(statusBadge);
+
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      meta.textContent = `${statusValue} · ${formatTimestamp(item.created_at)}`;
+
+      const summary = document.createElement('div');
+      summary.className = 'mt-1 text-[11px] text-white/50';
+      summary.textContent = formatReportSummary(item.report_data);
+
+      card.appendChild(header);
+      card.appendChild(meta);
+      card.appendChild(summary);
+      container.appendChild(card);
+    });
+  };
+
   const updateMissingCompletionPagination = () => {
     const prevBtn = document.getElementById('missingCompletionPrevBtn');
     const nextBtn = document.getElementById('missingCompletionNextBtn');
@@ -1441,11 +1630,96 @@
     }
   };
 
+  const loadCdcEvents = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.cdcEvents.limit);
+    params.set('offset', STATE.cdcEvents.offset);
+    if (STATE.cdcEvents.q) params.set('q', STATE.cdcEvents.q);
+    if (STATE.cdcEvents.eventType) params.set('event_type', STATE.cdcEvents.eventType);
+    if (STATE.cdcEvents.source) params.set('source', STATE.cdcEvents.source);
+    if (STATE.cdcEvents.contentId) params.set('content_id', STATE.cdcEvents.contentId);
+    if (STATE.cdcEvents.createdFrom) params.set('created_from', STATE.cdcEvents.createdFrom);
+    if (STATE.cdcEvents.createdTo) params.set('created_to', STATE.cdcEvents.createdTo);
+
+    try {
+      const payload = await apiRequest('GET', `/api/admin/cdc/events?${params.toString()}`, {
+        token: STATE.token,
+      });
+      STATE.cdcEvents.items = payload?.events || [];
+      STATE.cdcEvents.lastCount = STATE.cdcEvents.items.length;
+      renderCdcEventsList();
+      updateCdcPagination();
+    } catch (err) {
+      showToast(err.message || 'CDC 이벤트를 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const refreshCdcEventsFromInputs = async () => {
+    STATE.cdcEvents.q = document.getElementById('cdcSearchInput')?.value?.trim() || '';
+    STATE.cdcEvents.eventType = document.getElementById('cdcEventTypeSelect')?.value || '';
+    STATE.cdcEvents.source = document.getElementById('cdcSourceSelect')?.value || '';
+    STATE.cdcEvents.contentId = document.getElementById('cdcContentIdInput')?.value?.trim() || '';
+    STATE.cdcEvents.createdFrom = document.getElementById('cdcCreatedFrom')?.value || '';
+    STATE.cdcEvents.createdTo = document.getElementById('cdcCreatedTo')?.value || '';
+    STATE.cdcEvents.offset = 0;
+    await loadCdcEvents();
+  };
+
+  const loadCrawlerReports = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.crawlerReports.limit);
+    params.set('offset', STATE.crawlerReports.offset);
+    if (STATE.crawlerReports.crawlerName) {
+      params.set('crawler_name', STATE.crawlerReports.crawlerName);
+    }
+    if (STATE.crawlerReports.status) params.set('status', STATE.crawlerReports.status);
+    if (STATE.crawlerReports.createdFrom) params.set('created_from', STATE.crawlerReports.createdFrom);
+    if (STATE.crawlerReports.createdTo) params.set('created_to', STATE.crawlerReports.createdTo);
+
+    try {
+      const payload = await apiRequest(
+        'GET',
+        `/api/admin/reports/daily-crawler?${params.toString()}`,
+        { token: STATE.token },
+      );
+      STATE.crawlerReports.items = payload?.reports || [];
+      STATE.crawlerReports.lastCount = STATE.crawlerReports.items.length;
+      renderCrawlerReportsList();
+      updateReportsPagination();
+    } catch (err) {
+      showToast(err.message || '배치 리포트를 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const refreshCrawlerReportsFromInputs = async () => {
+    STATE.crawlerReports.crawlerName =
+      document.getElementById('reportsCrawlerNameInput')?.value?.trim() || '';
+    STATE.crawlerReports.status = document.getElementById('reportsStatusSelect')?.value || '';
+    STATE.crawlerReports.createdFrom = document.getElementById('reportsCreatedFrom')?.value || '';
+    STATE.crawlerReports.createdTo = document.getElementById('reportsCreatedTo')?.value || '';
+    STATE.crawlerReports.offset = 0;
+    await loadCrawlerReports();
+  };
+
   const updateAuditPagination = () => {
     const prevBtn = document.getElementById('auditPrevBtn');
     const nextBtn = document.getElementById('auditNextBtn');
     setButtonDisabled(prevBtn, STATE.audit.offset === 0);
     setButtonDisabled(nextBtn, STATE.audit.lastCount < STATE.audit.limit);
+  };
+
+  const updateCdcPagination = () => {
+    const prevBtn = document.getElementById('cdcPrevBtn');
+    const nextBtn = document.getElementById('cdcNextBtn');
+    setButtonDisabled(prevBtn, STATE.cdcEvents.offset === 0);
+    setButtonDisabled(nextBtn, STATE.cdcEvents.lastCount < STATE.cdcEvents.limit);
+  };
+
+  const updateReportsPagination = () => {
+    const prevBtn = document.getElementById('reportsPrevBtn');
+    const nextBtn = document.getElementById('reportsNextBtn');
+    setButtonDisabled(prevBtn, STATE.crawlerReports.offset === 0);
+    setButtonDisabled(nextBtn, STATE.crawlerReports.lastCount < STATE.crawlerReports.limit);
   };
 
   const updatePublicationsPagination = () => {
@@ -1485,6 +1759,8 @@
     const tabMissingCompletion = document.getElementById('tabMissingCompletion');
     const tabMissingPublication = document.getElementById('tabMissingPublication');
     const tabAudit = document.getElementById('tabAudit');
+    const tabCdcEvents = document.getElementById('tabCdcEvents');
+    const tabCrawlerReports = document.getElementById('tabCrawlerReports');
     const deletedSearchBtn = document.getElementById('deletedSearchBtn');
     const deletedPrevBtn = document.getElementById('deletedPrevBtn');
     const deletedNextBtn = document.getElementById('deletedNextBtn');
@@ -1499,6 +1775,12 @@
     const auditSearchBtn = document.getElementById('auditSearchBtn');
     const auditPrevBtn = document.getElementById('auditPrevBtn');
     const auditNextBtn = document.getElementById('auditNextBtn');
+    const cdcSearchBtn = document.getElementById('cdcSearchBtn');
+    const cdcPrevBtn = document.getElementById('cdcPrevBtn');
+    const cdcNextBtn = document.getElementById('cdcNextBtn');
+    const reportsSearchBtn = document.getElementById('reportsSearchBtn');
+    const reportsPrevBtn = document.getElementById('reportsPrevBtn');
+    const reportsNextBtn = document.getElementById('reportsNextBtn');
 
     manageSearchBtn?.addEventListener('click', () =>
       withLoading(manageSearchBtn, '검색 중...', performSearch),
@@ -1529,6 +1811,14 @@
     tabAudit?.addEventListener('click', () => {
       setTab('audit');
       loadAudit();
+    });
+    tabCdcEvents?.addEventListener('click', () => {
+      setTab('cdcEvents');
+      loadCdcEvents();
+    });
+    tabCrawlerReports?.addEventListener('click', () => {
+      setTab('crawlerReports');
+      loadCrawlerReports();
     });
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
@@ -1666,6 +1956,55 @@
         if (STATE.audit.lastCount < STATE.audit.limit) return;
         STATE.audit.offset += STATE.audit.limit;
         await loadAudit();
+      }),
+    );
+
+    cdcSearchBtn?.addEventListener('click', () =>
+      withLoading(cdcSearchBtn, '불러오는 중...', refreshCdcEventsFromInputs),
+    );
+    document.getElementById('cdcSearchInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        withLoading(cdcSearchBtn, '불러오는 중...', refreshCdcEventsFromInputs);
+      }
+    });
+    cdcPrevBtn?.addEventListener('click', () =>
+      withLoading(cdcPrevBtn, '불러오는 중...', async () => {
+        if (STATE.cdcEvents.offset === 0) return;
+        STATE.cdcEvents.offset = Math.max(0, STATE.cdcEvents.offset - STATE.cdcEvents.limit);
+        await loadCdcEvents();
+      }),
+    );
+    cdcNextBtn?.addEventListener('click', () =>
+      withLoading(cdcNextBtn, '불러오는 중...', async () => {
+        if (STATE.cdcEvents.lastCount < STATE.cdcEvents.limit) return;
+        STATE.cdcEvents.offset += STATE.cdcEvents.limit;
+        await loadCdcEvents();
+      }),
+    );
+
+    reportsSearchBtn?.addEventListener('click', () =>
+      withLoading(reportsSearchBtn, '불러오는 중...', refreshCrawlerReportsFromInputs),
+    );
+    document.getElementById('reportsCrawlerNameInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        withLoading(reportsSearchBtn, '불러오는 중...', refreshCrawlerReportsFromInputs);
+      }
+    });
+    reportsPrevBtn?.addEventListener('click', () =>
+      withLoading(reportsPrevBtn, '불러오는 중...', async () => {
+        if (STATE.crawlerReports.offset === 0) return;
+        STATE.crawlerReports.offset = Math.max(
+          0,
+          STATE.crawlerReports.offset - STATE.crawlerReports.limit,
+        );
+        await loadCrawlerReports();
+      }),
+    );
+    reportsNextBtn?.addEventListener('click', () =>
+      withLoading(reportsNextBtn, '불러오는 중...', async () => {
+        if (STATE.crawlerReports.lastCount < STATE.crawlerReports.limit) return;
+        STATE.crawlerReports.offset += STATE.crawlerReports.limit;
+        await loadCrawlerReports();
       }),
     );
   };
