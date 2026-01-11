@@ -242,6 +242,9 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_content_metadata_public_at ON admin_content_metadata (public_at)"
+        )
 
         print("LOG: [DB Setup] Creating 'admin_action_logs' table...")
         cursor.execute("""
