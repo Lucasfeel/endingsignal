@@ -849,16 +849,15 @@ def soft_delete_content_endpoint():
             content_id=content_id,
             source=source,
             reason=reason,
-            payload={'subscriptions_deleted': result.get('subscriptions_deleted')},
+            payload={'subscriptions_retained': True},
         )
         conn.commit()
 
         response = {
             'success': True,
             'content': _serialize_deleted_content(result['content']),
+            'subscriptions_retained': result.get('subscriptions_retained', True),
         }
-        if 'subscriptions_deleted' in result:
-            response['subscriptions_deleted'] = result['subscriptions_deleted']
         return jsonify(response)
     except Exception:
         if hasattr(conn, 'rollback'):
