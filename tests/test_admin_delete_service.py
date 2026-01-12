@@ -121,7 +121,7 @@ def test_soft_delete_missing_content_returns_not_found_and_no_commit(monkeypatch
     assert db.committed is False
 
 
-def test_soft_delete_marks_deleted_and_commits_and_deletes_subscriptions(monkeypatch):
+def test_soft_delete_marks_deleted_and_commits_and_retains_subscriptions(monkeypatch):
     contents = {
         ("CID", "SRC"): {
             "content_id": "CID",
@@ -156,8 +156,10 @@ def test_soft_delete_marks_deleted_and_commits_and_deletes_subscriptions(monkeyp
 
     assert result["content"]["is_deleted"] is True
     assert result["content"]["deleted_reason"] == "duplicate"
-    assert result["subscriptions_deleted"] == 2
-    assert ("CID", "SRC", 1) not in db.subscriptions
+    assert result["subscriptions_retained"] is True
+    assert "subscriptions_deleted" not in result
+    assert ("CID", "SRC", 1) in db.subscriptions
+    assert ("CID", "SRC", 2) in db.subscriptions
 
 
 def test_soft_delete_is_idempotent_when_already_deleted(monkeypatch):
@@ -191,6 +193,8 @@ def test_soft_delete_is_idempotent_when_already_deleted(monkeypatch):
 
     assert result["content"]["deleted_reason"] == "original"
     assert result["content"]["deleted_by"] == 2
+    assert result["subscriptions_retained"] is True
+    assert ("CID", "SRC", 1) in db.subscriptions
 
 
 def test_restore_missing_content_returns_not_found(monkeypatch):
