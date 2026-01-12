@@ -1201,11 +1201,8 @@
               reason,
             },
           });
-          const deletedCount = payload?.subscriptions_deleted;
           const message =
-            typeof deletedCount === 'number'
-              ? `콘텐츠 삭제 완료 (구독 ${deletedCount}건 정리)`
-              : '콘텐츠 삭제 완료';
+            '콘텐츠 삭제 완료 (구독 유지됨 · 삭제 콘텐츠는 유저 알림이 발송되지 않음)';
           showToast(message, { type: 'success' });
           STATE.manage.results = STATE.manage.results.filter(
             (entry) => !(entry.content_id === item.content_id && entry.source === item.source),

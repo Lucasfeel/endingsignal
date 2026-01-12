@@ -60,15 +60,10 @@ def soft_delete_content(conn, *, admin_id, content_id, source, reason):
             )
             row = cursor.fetchone()
 
-        cursor.execute(
-            "DELETE FROM subscriptions WHERE content_id = %s AND source = %s",
-            (content_id, source),
-        )
-        subscriptions_deleted = getattr(cursor, "rowcount", None)
-
-        result = {"content": _serialize_deleted_content_row(row)}
-        if subscriptions_deleted is not None:
-            result["subscriptions_deleted"] = subscriptions_deleted
+        result = {
+            "content": _serialize_deleted_content_row(row),
+            "subscriptions_retained": True,
+        }
         return result
     finally:
         cursor.close()
