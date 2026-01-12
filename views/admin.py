@@ -120,15 +120,17 @@ def _serialize_missing_content(row):
 
 
 def _serialize_cdc_event(row):
+    created_at = _get_row_value(row, 'created_at')
+    final_completed_at = _get_row_value(row, 'final_completed_at')
     return {
         'id': row['id'],
-        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+        'created_at': created_at.isoformat() if created_at else None,
         'content_id': row['content_id'],
         'source': row['source'],
         'event_type': row['event_type'],
         'final_status': row['final_status'],
-        'final_completed_at': row['final_completed_at'].isoformat()
-        if row.get('final_completed_at')
+        'final_completed_at': final_completed_at.isoformat()
+        if final_completed_at
         else None,
         'resolved_by': row['resolved_by'],
         'title': _get_row_value(row, 'title'),
@@ -148,12 +150,13 @@ def _serialize_daily_crawler_report(row):
             report_data = json.loads(report_data)
         except Exception:
             report_data = {}
+    created_at = _get_row_value(row, 'created_at')
     return {
         'id': row['id'],
         'crawler_name': row['crawler_name'],
         'status': row['status'],
         'report_data': report_data,
-        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+        'created_at': created_at.isoformat() if created_at else None,
     }
 
 
