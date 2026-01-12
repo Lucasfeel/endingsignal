@@ -527,6 +527,9 @@ const STATE = {
   subscriptionsAbortController: null,
   subscriptionsSoftRefreshTimer: null,
   subscriptionsSoftRefreshLastAt: 0,
+  subscriptionsSoftRefreshIdleHandle: null,
+  subscriptionsSoftRefreshPendingReason: null,
+  subscriptionsNeedFreshHintAt: 0,
 
   pagination: {
     completed: {
@@ -1391,7 +1394,11 @@ function logout({ silent = false } = {}) {
     clearTimeout(STATE.subscriptionsSoftRefreshTimer);
     STATE.subscriptionsSoftRefreshTimer = null;
   }
+  cancelIdle(STATE.subscriptionsSoftRefreshIdleHandle);
+  STATE.subscriptionsSoftRefreshIdleHandle = null;
+  STATE.subscriptionsSoftRefreshPendingReason = null;
   STATE.subscriptionsSoftRefreshLastAt = 0;
+  STATE.subscriptionsNeedFreshHintAt = 0;
 
   STATE.subscriptionsSet = new Set();
   STATE.publicationSubscriptionsSet = new Set();
@@ -1574,6 +1581,8 @@ const safeObj = (v) => (v && typeof v === 'object' ? v : {});
 const isAbortError = (err) => err && (err.name === 'AbortError' || err.code === 20);
 const SUBS_SOFT_REFRESH_DEBOUNCE_MS = 1500;
 const SUBS_SOFT_REFRESH_MIN_INTERVAL_MS = 10000;
+const SUBS_MY_TAB_EXPEDITE_MS = 500;
+const SUBS_IDLE_TIMEOUT_MS = 2000;
 
 function normalizeSearchText(s) {
   return (s || '')
@@ -1678,6 +1687,28 @@ const isAnySubscribedForCard = (content) => {
   return isCompletionSubscribed(content);
 };
 
+const setsEqual = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const val of a) {
+    if (!b.has(val)) return false;
+  }
+  return true;
+};
+
+function scheduleIdle(fn, timeoutMs = SUBS_IDLE_TIMEOUT_MS) {
+  if (typeof requestIdleCallback === 'function') {
+    return requestIdleCallback(fn, { timeout: timeoutMs });
+  }
+  return setTimeout(() => fn({ didTimeout: true, timeRemaining: () => 0 }), timeoutMs);
+}
+
+function cancelIdle(handle) {
+  if (!handle) return;
+  if (typeof cancelIdleCallback === 'function') cancelIdleCallback(handle);
+  else clearTimeout(handle);
+}
+
 async function loadSubscriptions(opts = {}) {
   const force = Boolean(opts.force);
   const silent = Boolean(opts.silent);
@@ -1742,13 +1773,22 @@ async function loadSubscriptions(opts = {}) {
         if (item.subscription?.wants_publication) publicationSet.add(key);
       });
 
+      const completionChanged = !setsEqual(STATE.subscriptionsSet, completionSet);
+      const publicationChanged = !setsEqual(
+        STATE.publicationSubscriptionsSet,
+        publicationSet
+      );
+      const shouldSync = completionChanged || publicationChanged;
+
       STATE.subscriptionsSet = completionSet;
       STATE.publicationSubscriptionsSet = publicationSet;
       STATE.mySubscriptions = normalized;
       STATE.subscriptionsLoadedAt = Date.now();
-      syncAllRenderedStarBadges();
-      syncMySubListInPlace();
-      if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+      if (shouldSync) {
+        syncAllRenderedStarBadges();
+        syncMySubListInPlace();
+        if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+      }
 
       return normalized;
     } catch (err) {
@@ -1851,11 +1891,18 @@ async function unsubscribeContent(content, alertType = 'completion') {
   }
 }
 
-function scheduleSubscriptionsSoftRefresh(reason = 'toggle') {
+function scheduleSubscriptionsSoftRefresh(reason = 'toggle', opts = {}) {
   const now = Date.now();
+  const expedite = Boolean(opts.expedite);
+
+  STATE.subscriptionsSoftRefreshPendingReason = reason;
+
+  const debounceMs = expedite ? SUBS_MY_TAB_EXPEDITE_MS : SUBS_SOFT_REFRESH_DEBOUNCE_MS;
+
   if (
+    !expedite &&
     now - (STATE.subscriptionsSoftRefreshLastAt || 0) <
-    SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
+      SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
   ) {
     if (STATE.subscriptionsSoftRefreshTimer) return;
   }
@@ -1864,22 +1911,36 @@ function scheduleSubscriptionsSoftRefresh(reason = 'toggle') {
     clearTimeout(STATE.subscriptionsSoftRefreshTimer);
   }
 
-  STATE.subscriptionsSoftRefreshTimer = setTimeout(async () => {
+  STATE.subscriptionsSoftRefreshTimer = setTimeout(() => {
     STATE.subscriptionsSoftRefreshTimer = null;
-
-    const token = getAccessToken();
-    if (!token) return;
 
     const now2 = Date.now();
     if (
+      !expedite &&
       now2 - (STATE.subscriptionsSoftRefreshLastAt || 0) <
-      SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
+        SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
     )
       return;
 
-    STATE.subscriptionsSoftRefreshLastAt = now2;
-    await loadSubscriptions({ force: true, silent: true });
-  }, SUBS_SOFT_REFRESH_DEBOUNCE_MS);
+    cancelIdle(STATE.subscriptionsSoftRefreshIdleHandle);
+    STATE.subscriptionsSoftRefreshIdleHandle = scheduleIdle(async () => {
+      STATE.subscriptionsSoftRefreshIdleHandle = null;
+
+      const token = getAccessToken();
+      if (!token) return;
+
+      const now3 = Date.now();
+      if (
+        !expedite &&
+        now3 - (STATE.subscriptionsSoftRefreshLastAt || 0) <
+          SUBS_SOFT_REFRESH_MIN_INTERVAL_MS
+      )
+        return;
+
+      STATE.subscriptionsSoftRefreshLastAt = now3;
+      await loadSubscriptions({ force: true, silent: true });
+    });
+  }, debounceMs);
 }
 
 function applyServerSubscriptionFlags(content, flags) {
@@ -3771,6 +3832,8 @@ function updateFilterVisibility(tabId) {
   } else if (tabId === 'my') {
     UI.mySubToggle.classList.remove('hidden');
     syncMySubToggleUI();
+    STATE.subscriptionsNeedFreshHintAt = Date.now();
+    scheduleSubscriptionsSoftRefresh('enter_my', { expedite: true });
   }
 }
 
