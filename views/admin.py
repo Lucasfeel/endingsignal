@@ -73,6 +73,13 @@ def _serialize_deleted_content(row):
         'deleted_at': row['deleted_at'].isoformat() if row['deleted_at'] else None,
         'deleted_reason': row['deleted_reason'],
         'deleted_by': row['deleted_by'],
+        'override_status': _get_row_value(row, 'override_status'),
+        'override_completed_at': (
+            _get_row_value(row, 'override_completed_at').isoformat()
+            if _get_row_value(row, 'override_completed_at')
+            else None
+        ),
+        'subscription_count': int(_get_row_value(row, 'subscription_count') or 0),
     }
 
 
@@ -849,16 +856,15 @@ def soft_delete_content_endpoint():
             content_id=content_id,
             source=source,
             reason=reason,
-            payload={'subscriptions_deleted': result.get('subscriptions_deleted')},
+            payload={'subscriptions_retained': True},
         )
         conn.commit()
 
         response = {
             'success': True,
             'content': _serialize_deleted_content(result['content']),
+            'subscriptions_retained': result.get('subscriptions_retained', True),
         }
-        if 'subscriptions_deleted' in result:
-            response['subscriptions_deleted'] = result['subscriptions_deleted']
         return jsonify(response)
     except Exception:
         if hasattr(conn, 'rollback'):

@@ -104,6 +104,17 @@ class FakeDB:
         self.rolled_back = True
 
 
+class RowNoGet:
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __contains__(self, key):
+        return key in self.data
+
+
 def test_soft_delete_missing_content_returns_not_found_and_no_commit(monkeypatch):
     db = FakeDB(contents={})
 
@@ -121,7 +132,7 @@ def test_soft_delete_missing_content_returns_not_found_and_no_commit(monkeypatch
     assert db.committed is False
 
 
-def test_soft_delete_marks_deleted_and_commits_and_deletes_subscriptions(monkeypatch):
+def test_soft_delete_marks_deleted_and_commits_and_retains_subscriptions(monkeypatch):
     contents = {
         ("CID", "SRC"): {
             "content_id": "CID",
@@ -156,8 +167,10 @@ def test_soft_delete_marks_deleted_and_commits_and_deletes_subscriptions(monkeyp
 
     assert result["content"]["is_deleted"] is True
     assert result["content"]["deleted_reason"] == "duplicate"
-    assert result["subscriptions_deleted"] == 2
-    assert ("CID", "SRC", 1) not in db.subscriptions
+    assert result["subscriptions_retained"] is True
+    assert "subscriptions_deleted" not in result
+    assert ("CID", "SRC", 1) in db.subscriptions
+    assert ("CID", "SRC", 2) in db.subscriptions
 
 
 def test_soft_delete_is_idempotent_when_already_deleted(monkeypatch):
@@ -191,6 +204,33 @@ def test_soft_delete_is_idempotent_when_already_deleted(monkeypatch):
 
     assert result["content"]["deleted_reason"] == "original"
     assert result["content"]["deleted_by"] == 2
+    assert result["subscriptions_retained"] is True
+    assert ("CID", "SRC", 1) in db.subscriptions
+
+
+def test_serialize_deleted_content_row_handles_row_without_get():
+    row = RowNoGet(
+        {
+            "content_id": "CID",
+            "source": "SRC",
+            "content_type": "comic",
+            "title": "Title",
+            "status": "active",
+            "is_deleted": True,
+            "meta": {},
+            "deleted_at": None,
+            "deleted_reason": "spam",
+            "deleted_by": 1,
+            "override_status": "완결",
+            "override_completed_at": None,
+        }
+    )
+
+    result = delete_service._serialize_deleted_content_row(row)
+
+    assert result["override_status"] == "완결"
+    assert result["override_completed_at"] is None
+    assert result["subscription_count"] == 0
 
 
 def test_restore_missing_content_returns_not_found(monkeypatch):
