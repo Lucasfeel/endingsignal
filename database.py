@@ -211,6 +211,9 @@ def setup_database_standalone():
             UNIQUE(user_id, content_id, source)
         )""")
         print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_content_source ON subscriptions (content_id, source)"
+        )
         print("LOG: [DB Setup] Ensuring subscription alert flags exist...")
         cursor.execute(
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS wants_completion BOOLEAN NOT NULL DEFAULT FALSE"

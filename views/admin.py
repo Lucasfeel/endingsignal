@@ -73,6 +73,13 @@ def _serialize_deleted_content(row):
         'deleted_at': row['deleted_at'].isoformat() if row['deleted_at'] else None,
         'deleted_reason': row['deleted_reason'],
         'deleted_by': row['deleted_by'],
+        'override_status': _get_row_value(row, 'override_status'),
+        'override_completed_at': (
+            _get_row_value(row, 'override_completed_at').isoformat()
+            if _get_row_value(row, 'override_completed_at')
+            else None
+        ),
+        'subscription_count': int(_get_row_value(row, 'subscription_count') or 0),
     }
 
 
