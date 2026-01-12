@@ -4,6 +4,13 @@ from database import get_cursor
 _DEF_NOT_FOUND = {"error": "CONTENT_NOT_FOUND"}
 
 
+def _read_field(row, key, default=None):
+    try:
+        return row[key]
+    except Exception:
+        return default
+
+
 def _serialize_deleted_content_row(row):
     if not row:
         return None
@@ -18,9 +25,9 @@ def _serialize_deleted_content_row(row):
         "deleted_at": row["deleted_at"],
         "deleted_reason": row["deleted_reason"],
         "deleted_by": row["deleted_by"],
-        "override_status": row.get("override_status"),
-        "override_completed_at": row.get("override_completed_at"),
-        "subscription_count": row.get("subscription_count", 0),
+        "override_status": _read_field(row, "override_status"),
+        "override_completed_at": _read_field(row, "override_completed_at"),
+        "subscription_count": int(_read_field(row, "subscription_count", 0) or 0),
     }
 
 
@@ -145,7 +152,9 @@ def list_deleted_contents(conn, *, limit, offset, q=None):
     """
     params.extend([limit, offset])
 
-    cursor.execute(query, tuple(params))
-    rows = cursor.fetchall()
-    cursor.close()
-    return [_serialize_deleted_content_row(row) for row in rows]
+    try:
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        return [_serialize_deleted_content_row(row) for row in rows]
+    finally:
+        cursor.close()
