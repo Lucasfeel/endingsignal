@@ -113,6 +113,9 @@ def test_admin_deleted_includes_title(monkeypatch, client, auth_headers):
                 "deleted_at": now,
                 "deleted_reason": "spam",
                 "deleted_by": 2,
+                "override_status": "완결",
+                "override_completed_at": now,
+                "subscription_count": 12,
             }
         ],
     )
@@ -124,6 +127,9 @@ def test_admin_deleted_includes_title(monkeypatch, client, auth_headers):
     item = payload["deleted_contents"][0]
     assert item["title"] == "Deleted Title"
     assert isinstance(item["meta"], dict)
+    assert item["override_status"] == "완결"
+    assert item["override_completed_at"] == now.isoformat()
+    assert item["subscription_count"] == 12
 
 
 def test_admin_lookup(monkeypatch, client, auth_headers):

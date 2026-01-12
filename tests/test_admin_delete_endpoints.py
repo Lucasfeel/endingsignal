@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 
 from app import app as flask_app
@@ -5,23 +7,16 @@ import utils.auth as auth
 import views.admin as admin_view
 
 
-class FakeCursor:
-    def __init__(self):
-        self.executed = []
-
-    def execute(self, query, params=None):
-        self.executed.append((query, params))
-
-    def close(self):
-        pass
-
-
 class FakeConnection:
     def __init__(self):
-        self.committed = False
+        self.commit_count = 0
+        self.rollback_count = 0
 
     def commit(self):
-        self.committed = True
+        self.commit_count += 1
+
+    def rollback(self):
+        self.rollback_count += 1
 
 
 @pytest.fixture(autouse=True)
@@ -44,67 +39,45 @@ def auth_headers():
     return {"Authorization": "Bearer testtoken"}
 
 
-def test_delete_override_requires_reason(client, auth_headers):
-    response = client.delete(
-        "/api/admin/contents/override",
-        json={"content_id": "CID", "source": "SRC"},
-        headers=auth_headers,
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["error"]["code"] == "INVALID_REQUEST"
-
-
-def test_delete_publication_requires_reason(client, auth_headers):
-    response = client.delete(
-        "/api/admin/contents/publication",
-        json={"content_id": "CID", "source": "SRC"},
-        headers=auth_headers,
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 400
-    assert payload["error"]["code"] == "INVALID_REQUEST"
-
-
-def test_delete_override_accepts_reason(monkeypatch, client, auth_headers):
+def test_admin_delete_retains_subscriptions_and_logs_payload(monkeypatch, client, auth_headers):
+    now = datetime(2024, 7, 1, 12, 0, 0)
     fake_conn = FakeConnection()
-    fake_cursor = FakeCursor()
-    monkeypatch.setattr(admin_view, "get_db", lambda: fake_conn)
-    monkeypatch.setattr(admin_view, "get_cursor", lambda conn: fake_cursor)
-
-    response = client.delete(
-        "/api/admin/contents/override",
-        json={"content_id": "CID", "source": "SRC", "reason": "cleanup"},
-        headers=auth_headers,
-    )
-
-    payload = response.get_json()
-    assert response.status_code == 200
-    assert payload["success"] is True
-    assert fake_conn.committed is True
-    assert fake_cursor.executed
-
-
-def test_delete_publication_accepts_reason_from_query(monkeypatch, client, auth_headers):
-    fake_conn = FakeConnection()
-    called = {}
-
-    def fake_delete_publication(conn, *, content_id, source):
-        called["content_id"] = content_id
-        called["source"] = source
+    payloads = []
+    result = {
+        "content": {
+            "content_id": "CID",
+            "source": "SRC",
+            "content_type": "webtoon",
+            "title": "Title",
+            "status": "active",
+            "is_deleted": True,
+            "meta": {},
+            "deleted_at": now,
+            "deleted_reason": "spam",
+            "deleted_by": 1,
+        },
+        "subscriptions_retained": True,
+    }
 
     monkeypatch.setattr(admin_view, "get_db", lambda: fake_conn)
-    monkeypatch.setattr(admin_view, "delete_publication", fake_delete_publication)
+    monkeypatch.setattr(admin_view, "soft_delete_content", lambda *args, **kwargs: result)
 
-    response = client.delete(
-        "/api/admin/contents/publication?reason=cleanup",
-        json={"content_id": "CID", "source": "SRC"},
+    def fake_insert_admin_action_log(conn, *, payload, **kwargs):
+        payloads.append(payload)
+
+    monkeypatch.setattr(admin_view, "insert_admin_action_log", fake_insert_admin_action_log)
+
+    response = client.post(
+        "/api/admin/contents/delete",
+        json={"content_id": "CID", "source": "SRC", "reason": "spam"},
         headers=auth_headers,
     )
 
-    payload = response.get_json()
+    data = response.get_json()
     assert response.status_code == 200
-    assert payload["success"] is True
-    assert called == {"content_id": "CID", "source": "SRC"}
+    assert data["success"] is True
+    assert data["content"]["content_id"] == "CID"
+    assert data["subscriptions_retained"] is True
+    assert "subscriptions_deleted" not in data
+    assert payloads == [{"subscriptions_retained": True}]
+    assert fake_conn.commit_count == 1

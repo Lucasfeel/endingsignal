@@ -211,6 +211,9 @@ def setup_database_standalone():
             UNIQUE(user_id, content_id, source)
         )""")
         print("LOG: [DB Setup] 'subscriptions' table created or already exists.")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_content_source ON subscriptions (content_id, source)"
+        )
         print("LOG: [DB Setup] Ensuring subscription alert flags exist...")
         cursor.execute(
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS wants_completion BOOLEAN NOT NULL DEFAULT FALSE"
@@ -304,6 +307,97 @@ def setup_database_standalone():
             "CREATE INDEX IF NOT EXISTS idx_cdc_events_created_at ON cdc_events (created_at DESC)"
         )
         print("LOG: [DB Setup] 'cdc_events' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'cdc_event_consumptions' table...")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cdc_event_consumptions (
+            id SERIAL PRIMARY KEY,
+            consumer TEXT NOT NULL,
+            event_id INTEGER NOT NULL REFERENCES cdc_events(id),
+            status TEXT NOT NULL,
+            reason TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE(consumer, event_id),
+            CONSTRAINT cdc_event_consumptions_status_check
+                CHECK (status IN ('processed', 'skipped', 'failed'))
+        )
+        """)
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS consumer TEXT"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS event_id INTEGER"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS status TEXT"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS reason TEXT"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ALTER COLUMN created_at SET DEFAULT NOW()"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ALTER COLUMN consumer SET NOT NULL"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ALTER COLUMN event_id SET NOT NULL"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ALTER COLUMN status SET NOT NULL"
+        )
+        cursor.execute(
+            "ALTER TABLE cdc_event_consumptions ALTER COLUMN created_at SET NOT NULL"
+        )
+        cursor.execute(
+            """
+            DO $$
+            BEGIN
+                ALTER TABLE cdc_event_consumptions
+                ADD CONSTRAINT cdc_event_consumptions_consumer_event_id_key
+                UNIQUE (consumer, event_id);
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+            """
+        )
+        cursor.execute(
+            """
+            DO $$
+            BEGIN
+                ALTER TABLE cdc_event_consumptions
+                ADD CONSTRAINT cdc_event_consumptions_event_id_fkey
+                FOREIGN KEY (event_id) REFERENCES cdc_events(id);
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+            """
+        )
+        cursor.execute(
+            """
+            DO $$
+            BEGIN
+                ALTER TABLE cdc_event_consumptions
+                ADD CONSTRAINT cdc_event_consumptions_status_check
+                CHECK (status IN ('processed', 'skipped', 'failed'));
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cdc_event_consumptions_consumer_created_at
+            ON cdc_event_consumptions (consumer, created_at DESC)
+            """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cdc_event_consumptions_event_id ON cdc_event_consumptions (event_id)"
+        )
+        print("LOG: [DB Setup] 'cdc_event_consumptions' table created or already exists.")
 
         # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")

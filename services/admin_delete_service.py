@@ -18,6 +18,9 @@ def _serialize_deleted_content_row(row):
         "deleted_at": row["deleted_at"],
         "deleted_reason": row["deleted_reason"],
         "deleted_by": row["deleted_by"],
+        "override_status": row.get("override_status"),
+        "override_completed_at": row.get("override_completed_at"),
+        "subscription_count": row.get("subscription_count", 0),
     }
 
 
@@ -60,15 +63,10 @@ def soft_delete_content(conn, *, admin_id, content_id, source, reason):
             )
             row = cursor.fetchone()
 
-        cursor.execute(
-            "DELETE FROM subscriptions WHERE content_id = %s AND source = %s",
-            (content_id, source),
-        )
-        subscriptions_deleted = getattr(cursor, "rowcount", None)
-
-        result = {"content": _serialize_deleted_content_row(row)}
-        if subscriptions_deleted is not None:
-            result["subscriptions_deleted"] = subscriptions_deleted
+        result = {
+            "content": _serialize_deleted_content_row(row),
+            "subscriptions_retained": True,
+        }
         return result
     finally:
         cursor.close()
@@ -122,17 +120,27 @@ def list_deleted_contents(conn, *, limit, offset, q=None):
     cursor = get_cursor(conn)
     params = []
     query = """
-        SELECT content_id, source, content_type, title, status,
-               is_deleted, meta, deleted_at, deleted_reason, deleted_by
-        FROM contents
-        WHERE COALESCE(is_deleted, FALSE) = TRUE
+        SELECT c.content_id, c.source, c.content_type, c.title, c.status,
+               c.is_deleted, c.meta, c.deleted_at, c.deleted_reason, c.deleted_by,
+               o.override_status, o.override_completed_at,
+               COALESCE(s.subscription_count, 0) AS subscription_count
+        FROM contents c
+        LEFT JOIN admin_content_overrides o
+          ON o.content_id = c.content_id AND o.source = c.source
+        LEFT JOIN (
+            SELECT content_id, source, COUNT(*) AS subscription_count
+            FROM subscriptions
+            GROUP BY content_id, source
+        ) s
+          ON s.content_id = c.content_id AND s.source = c.source
+        WHERE COALESCE(c.is_deleted, FALSE) = TRUE
     """
     if q:
-        query += " AND (title ILIKE %s OR normalized_title ILIKE %s)"
+        query += " AND (c.title ILIKE %s OR c.normalized_title ILIKE %s)"
         like_value = f"%{q}%"
         params.extend([like_value, like_value])
     query += """
-        ORDER BY deleted_at DESC NULLS LAST, title ASC
+        ORDER BY c.deleted_at DESC NULLS LAST, c.title ASC
         LIMIT %s OFFSET %s
     """
     params.extend([limit, offset])
