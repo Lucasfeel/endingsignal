@@ -136,7 +136,7 @@ def test_subscribe_upsert_preserves_existing_flags(monkeypatch, client, auth_hea
 
 
 def test_unsubscribe_accepts_canonical_content_id(monkeypatch, client, auth_headers):
-    fake_cursor = FakeCursor()
+    fake_cursor = FakeCursor(fetchone_results=[(False, False)])
     fake_conn = FakeConnection()
     monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
     monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
@@ -150,14 +150,15 @@ def test_unsubscribe_accepts_canonical_content_id(monkeypatch, client, auth_head
     data = response.get_json()
     assert response.status_code == 200
     assert data['success'] is True
+    assert data['subscription'] is None
     assert fake_conn.committed is True
     assert fake_cursor.executed[0][1][0] == 'completion'
     assert fake_cursor.executed[0][1][3] == 'to-delete'
-    assert 'wants_completion = FALSE AND wants_publication = FALSE' in fake_cursor.executed[1][0]
+    assert 'DELETE FROM subscriptions' in fake_cursor.executed[1][0]
 
 
 def test_unsubscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers):
-    fake_cursor = FakeCursor()
+    fake_cursor = FakeCursor(fetchone_results=[(False, False)])
     fake_conn = FakeConnection()
     monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
     monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
@@ -171,14 +172,15 @@ def test_unsubscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers)
     data = response.get_json()
     assert response.status_code == 200
     assert data['success'] is True
+    assert data['subscription'] is None
     assert fake_conn.committed is True
     assert fake_cursor.executed[0][1][0] == 'completion'
     assert fake_cursor.executed[0][1][3] == 'legacy-delete'
-    assert 'wants_completion = FALSE AND wants_publication = FALSE' in fake_cursor.executed[1][0]
+    assert 'DELETE FROM subscriptions' in fake_cursor.executed[1][0]
 
 
 def test_unsubscribe_with_publication_alert_type(monkeypatch, client, auth_headers):
-    fake_cursor = FakeCursor()
+    fake_cursor = FakeCursor(fetchone_results=[(False, True)])
     fake_conn = FakeConnection()
     monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
     monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
@@ -192,9 +194,72 @@ def test_unsubscribe_with_publication_alert_type(monkeypatch, client, auth_heade
     data = response.get_json()
     assert response.status_code == 200
     assert data['success'] is True
+    assert data['subscription']['wants_completion'] is False
+    assert data['subscription']['wants_publication'] is True
     assert fake_conn.committed is True
     assert fake_cursor.executed[0][1][1] == 'publication'
     assert fake_cursor.executed[0][1][3] == 'pub-2'
+
+
+def test_unsubscribe_preserves_other_flag(monkeypatch, client, auth_headers):
+    fake_cursor = FakeCursor(fetchone_results=[(False, True)])
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+
+    response = client.delete(
+        '/api/me/subscriptions',
+        json={'content_id': 'keep-pub', 'source': 'rss', 'alert_type': 'completion'},
+        headers=auth_headers,
+    )
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data['success'] is True
+    assert data['subscription']['wants_completion'] is False
+    assert data['subscription']['wants_publication'] is True
+    assert fake_conn.committed is True
+    assert len(fake_cursor.executed) == 1
+
+
+def test_unsubscribe_last_flag_deletes_row(monkeypatch, client, auth_headers):
+    fake_cursor = FakeCursor(fetchone_results=[(False, False)])
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+
+    response = client.delete(
+        '/api/me/subscriptions',
+        json={'content_id': 'remove-all', 'source': 'rss', 'alert_type': 'completion'},
+        headers=auth_headers,
+    )
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data['success'] is True
+    assert data['subscription'] is None
+    assert fake_conn.committed is True
+    assert 'DELETE FROM subscriptions' in fake_cursor.executed[1][0]
+
+
+def test_unsubscribe_idempotent_when_missing(monkeypatch, client, auth_headers):
+    fake_cursor = FakeCursor(fetchone_results=[None])
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+
+    response = client.delete(
+        '/api/me/subscriptions',
+        json={'content_id': 'missing', 'source': 'rss', 'alert_type': 'completion'},
+        headers=auth_headers,
+    )
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data['success'] is True
+    assert data['subscription'] is None
+    assert fake_conn.committed is True
+    assert len(fake_cursor.executed) == 1
 
 
 def test_subscribe_validation_mentions_both_keys(client, auth_headers):
