@@ -73,6 +73,13 @@ def _serialize_deleted_content(row):
         'deleted_at': row['deleted_at'].isoformat() if row['deleted_at'] else None,
         'deleted_reason': row['deleted_reason'],
         'deleted_by': row['deleted_by'],
+        'override_status': _get_row_value(row, 'override_status'),
+        'override_completed_at': (
+            _get_row_value(row, 'override_completed_at').isoformat()
+            if _get_row_value(row, 'override_completed_at')
+            else None
+        ),
+        'subscription_count': int(_get_row_value(row, 'subscription_count') or 0),
     }
 
 
@@ -113,15 +120,17 @@ def _serialize_missing_content(row):
 
 
 def _serialize_cdc_event(row):
+    created_at = _get_row_value(row, 'created_at')
+    final_completed_at = _get_row_value(row, 'final_completed_at')
     return {
         'id': row['id'],
-        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+        'created_at': created_at.isoformat() if created_at else None,
         'content_id': row['content_id'],
         'source': row['source'],
         'event_type': row['event_type'],
         'final_status': row['final_status'],
-        'final_completed_at': row['final_completed_at'].isoformat()
-        if row.get('final_completed_at')
+        'final_completed_at': final_completed_at.isoformat()
+        if final_completed_at
         else None,
         'resolved_by': row['resolved_by'],
         'title': _get_row_value(row, 'title'),
@@ -141,12 +150,13 @@ def _serialize_daily_crawler_report(row):
             report_data = json.loads(report_data)
         except Exception:
             report_data = {}
+    created_at = _get_row_value(row, 'created_at')
     return {
         'id': row['id'],
         'crawler_name': row['crawler_name'],
         'status': row['status'],
         'report_data': report_data,
-        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+        'created_at': created_at.isoformat() if created_at else None,
     }
 
 
@@ -849,16 +859,15 @@ def soft_delete_content_endpoint():
             content_id=content_id,
             source=source,
             reason=reason,
-            payload={'subscriptions_deleted': result.get('subscriptions_deleted')},
+            payload={'subscriptions_retained': True},
         )
         conn.commit()
 
         response = {
             'success': True,
             'content': _serialize_deleted_content(result['content']),
+            'subscriptions_retained': result.get('subscriptions_retained', True),
         }
-        if 'subscriptions_deleted' in result:
-            response['subscriptions_deleted'] = result['subscriptions_deleted']
         return jsonify(response)
     except Exception:
         if hasattr(conn, 'rollback'):

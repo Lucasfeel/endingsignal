@@ -1201,11 +1201,8 @@
               reason,
             },
           });
-          const deletedCount = payload?.subscriptions_deleted;
           const message =
-            typeof deletedCount === 'number'
-              ? `콘텐츠 삭제 완료 (구독 ${deletedCount}건 정리)`
-              : '콘텐츠 삭제 완료';
+            '콘텐츠 삭제 완료 (구독 유지됨 · 삭제 콘텐츠는 유저 알림이 발송되지 않음)';
           showToast(message, { type: 'success' });
           STATE.manage.results = STATE.manage.results.filter(
             (entry) => !(entry.content_id === item.content_id && entry.source === item.source),
@@ -1281,9 +1278,34 @@
       reason.className = 'mt-1 text-[11px] text-white/50';
       reason.textContent = `사유: ${item.deleted_reason || '-'}`;
 
+      const extra = document.createElement('div');
+      extra.className = 'mt-1 flex flex-wrap gap-2 text-[11px] text-white/50';
+      const subscriptionCount = Number.isFinite(item.subscription_count)
+        ? item.subscription_count
+        : Number(item.subscription_count) || 0;
+      const subscriptionBadge = document.createElement('span');
+      subscriptionBadge.className = 'rounded-full border border-white/10 bg-black/40 px-2 py-0.5';
+      subscriptionBadge.textContent = `구독: ${subscriptionCount}`;
+      extra.appendChild(subscriptionBadge);
+
+      if (item.override_status) {
+        const overrideBadge = document.createElement('span');
+        overrideBadge.className = 'rounded-full border border-white/10 bg-black/40 px-2 py-0.5';
+        overrideBadge.textContent = `완결 override: ${item.override_status}`;
+        extra.appendChild(overrideBadge);
+      }
+
+      if (item.override_completed_at) {
+        const overrideDateBadge = document.createElement('span');
+        overrideDateBadge.className = 'rounded-full border border-white/10 bg-black/40 px-2 py-0.5';
+        overrideDateBadge.textContent = `override 시각: ${formatTimestamp(item.override_completed_at)}`;
+        extra.appendChild(overrideDateBadge);
+      }
+
       contentBox.appendChild(title);
       contentBox.appendChild(meta);
       contentBox.appendChild(reason);
+      contentBox.appendChild(extra);
 
       const actions = document.createElement('div');
       actions.className = 'flex flex-col gap-2';
@@ -1326,6 +1348,12 @@
     const entries = [
       ['제목', item.title || item.normalized_title || item.content_id],
       ['소스', item.source || '-'],
+      ['구독자 수', `${item.subscription_count ?? 0}`],
+      ['완결 override', item.override_status || '-'],
+      [
+        'override 시각',
+        item.override_completed_at ? formatTimestamp(item.override_completed_at) : '-',
+      ],
       ['삭제 시각', item.deleted_at ? formatTimestamp(item.deleted_at) : '-'],
       ['삭제 사유', item.deleted_reason || '-'],
       ['삭제자', item.deleted_by || '-'],
