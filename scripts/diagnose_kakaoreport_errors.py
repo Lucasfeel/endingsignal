@@ -3,6 +3,20 @@
 import json
 
 from database import create_standalone_connection, get_cursor
+from utils.record import read_field
+
+
+def _extract_report_row(row):
+    report = read_field(row, "report_data") or {}
+    fetch_meta = (report.get("cdc_info") or {}).get("fetch_meta") or {}
+    return {
+        "id": read_field(row, "id"),
+        "created_at": read_field(row, "created_at"),
+        "errors": fetch_meta.get("errors") or [],
+        "request_samples": fetch_meta.get("request_samples") or [],
+        "status": report.get("status") or fetch_meta.get("status"),
+        "summary": report.get("summary") or fetch_meta.get("summary"),
+    }
 
 
 def main(limit: int = 5):
@@ -20,16 +34,17 @@ def main(limit: int = 5):
     )
 
     for row in cursor.fetchall():
-        report = row.get("report_data") or {}
-        fetch_meta = (report.get("cdc_info") or {}).get("fetch_meta") or {}
-        errors = fetch_meta.get("errors") or []
-        request_samples = fetch_meta.get("request_samples") or []
-        status = report.get("status") or fetch_meta.get("status")
-        summary = report.get("summary") or fetch_meta.get("summary")
-        print(f"ID={row.get('id')} created_at={row.get('created_at')} status={status}")
-        print(f"  summary={summary}")
-        print(f"  errors={json.dumps(errors)[:400]}")
-        print(f"  request_samples={json.dumps(request_samples)[:400]}")
+        extracted = _extract_report_row(row)
+        print(
+            "ID={id} created_at={created_at} status={status}".format(
+                id=extracted["id"],
+                created_at=extracted["created_at"],
+                status=extracted["status"],
+            )
+        )
+        print(f"  summary={extracted['summary']}")
+        print(f"  errors={json.dumps(extracted['errors'])[:400]}")
+        print(f"  request_samples={json.dumps(extracted['request_samples'])[:400]}")
         print("-")
 
     cursor.close()
