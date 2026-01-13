@@ -6,6 +6,7 @@
 from flask import Flask, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
+import config
 
 # --- 1. Blueprint 및 초기 설정 ---
 # 환경 변수 로드
@@ -21,7 +22,14 @@ from database import close_db
 
 # --- 2. Flask 앱 생성 및 설정 ---
 app = Flask(__name__)
-CORS(app)
+if config.CORS_ALLOW_ORIGINS:
+    CORS(
+        app,
+        origins=config.CORS_ALLOW_ORIGINS,
+        supports_credentials=config.CORS_SUPPORTS_CREDENTIALS,
+    )
+else:
+    CORS(app)
 
 # Blueprint 등록
 app.register_blueprint(contents_bp)
