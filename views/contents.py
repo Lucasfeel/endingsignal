@@ -6,6 +6,7 @@ from utils.text import normalize_search_text
 import base64
 import json
 import math
+import os
 
 contents_bp = Blueprint('contents', __name__)
 
@@ -90,6 +91,50 @@ def decode_cursor(cursor):
         return None, None
 
 
+def _parse_float_env(name):
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        parsed = float(stripped)
+    except ValueError:
+        return None
+    if parsed < 0 or parsed > 1:
+        return None
+    return parsed
+
+
+def _get_search_limit():
+    default_limit = 100
+    raw = os.getenv("SEARCH_MAX_RESULTS")
+    if raw is None:
+        return default_limit
+    stripped = raw.strip()
+    if not stripped:
+        return default_limit
+    try:
+        parsed = int(stripped)
+    except ValueError:
+        return default_limit
+    return parsed if parsed > 0 else default_limit
+
+
+def _apply_threshold_overrides(defaults, _q_len):
+    if defaults is None:
+        return None
+    title_threshold, author_threshold = defaults
+    title_override = _parse_float_env("SEARCH_SIMILARITY_TITLE_THRESHOLD")
+    author_override = _parse_float_env("SEARCH_SIMILARITY_AUTHOR_THRESHOLD")
+    if title_override is not None:
+        title_threshold = title_override
+    if author_override is not None:
+        author_threshold = author_override
+    return title_threshold, author_threshold
+
+
 @contents_bp.route('/api/contents/search', methods=['GET'])
 def search_contents():
     """전체 DB에서 콘텐츠 제목을 검색하여 결과를 반환합니다."""
@@ -129,7 +174,7 @@ def search_contents():
                 return (0.15, 0.2)
             return (0.12, 0.18)
 
-        thresholds = compute_thresholds(q_len)
+        thresholds = _apply_threshold_overrides(compute_thresholds(q_len), q_len)
 
         where_clauses = [
             "COALESCE(is_deleted, FALSE) = FALSE",
@@ -152,6 +197,7 @@ def search_contents():
             )
             params.extend([normalized_query, title_threshold, normalized_query, author_threshold])
 
+        search_limit = _get_search_limit()
         search_query = f"""
             SELECT content_id, title, status, meta, source, content_type
             FROM contents
@@ -164,7 +210,7 @@ def search_contents():
               END,
               GREATEST(similarity({title_expr}, %s), similarity({author_expr}, %s)) DESC,
               content_id ASC
-            LIMIT 100
+            LIMIT {search_limit}
         """
 
         params.extend([like_param, like_param, normalized_query, normalized_query])

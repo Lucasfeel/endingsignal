@@ -215,6 +215,17 @@ def setup_database_standalone():
             WHERE updated_at IS NULL;
             """
         )
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_users_updated_at ON users;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_users_updated_at
+            BEFORE UPDATE ON users
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
 
         print("LOG: [DB Setup] Creating 'subscriptions' table...")
         cursor.execute("""
@@ -260,6 +271,17 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_admin_content_overrides_updated_at ON admin_content_overrides;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_admin_content_overrides_updated_at
+            BEFORE UPDATE ON admin_content_overrides
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
 
         print("LOG: [DB Setup] Creating 'admin_content_metadata' table...")
         cursor.execute("""
@@ -275,6 +297,17 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_admin_content_metadata_updated_at ON admin_content_metadata;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_admin_content_metadata_updated_at
+            BEFORE UPDATE ON admin_content_metadata
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_content_metadata_public_at ON admin_content_metadata (public_at)"
         )
