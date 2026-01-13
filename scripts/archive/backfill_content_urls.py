@@ -14,15 +14,11 @@ import urllib.parse
 from dotenv import load_dotenv
 
 from database import create_standalone_connection, get_cursor
+from utils.record import read_field
 
 
 def get_field(row, key):
-    if isinstance(row, dict):
-        return row.get(key)
-    try:
-        return row[key]
-    except Exception:
-        return getattr(row, key, None)
+    return read_field(row, key)
 
 
 def infer_url(source, content_id, title=None):
