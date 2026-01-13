@@ -3,6 +3,7 @@
 import psycopg2
 import psycopg2.extras
 from flask import g
+from contextlib import contextmanager
 import os
 import sys
 
@@ -40,6 +41,18 @@ def get_db():
 def get_cursor(db):
     """지정된 DB 연결로부터 DictCursor를 반환합니다."""
     return db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+
+@contextmanager
+def managed_cursor(conn):
+    cursor = get_cursor(conn)
+    try:
+        yield cursor
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
 
 def close_db(exception=None):
     """요청(request)이 끝나면 자동으로 호출되어 DB 연결을 닫습니다."""
