@@ -4,7 +4,7 @@ import json
 
 from flask import Blueprint, jsonify, request, g, render_template
 
-from database import get_db, get_cursor
+from database import get_db, get_cursor, managed_cursor
 from services.admin_override_service import upsert_override_and_record_event
 from services.admin_publication_service import (
     delete_publication,
@@ -286,20 +286,18 @@ def list_content_overrides():
     offset = max(0, offset)
 
     conn = get_db()
-    cursor = get_cursor(conn)
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT id, content_id, source, override_status, override_completed_at, reason, admin_id, created_at, updated_at
+            FROM admin_content_overrides
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (limit, offset),
+        )
 
-    cursor.execute(
-        """
-        SELECT id, content_id, source, override_status, override_completed_at, reason, admin_id, created_at, updated_at
-        FROM admin_content_overrides
-        ORDER BY created_at DESC
-        LIMIT %s OFFSET %s
-        """,
-        (limit, offset),
-    )
-
-    overrides = [_serialize_override(row) for row in cursor.fetchall()]
-    cursor.close()
+        overrides = [_serialize_override(row) for row in cursor.fetchall()]
 
     return jsonify({'success': True, 'overrides': overrides, 'limit': limit, 'offset': offset})
 
@@ -591,10 +589,9 @@ def list_cdc_events():
     params.extend([limit, offset])
 
     conn = get_db()
-    cursor = get_cursor(conn)
-    cursor.execute(sql, tuple(params))
-    rows = cursor.fetchall()
-    cursor.close()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
 
     return jsonify(
         {
@@ -661,10 +658,9 @@ def list_daily_crawler_reports():
     params.extend([limit, offset])
 
     conn = get_db()
-    cursor = get_cursor(conn)
-    cursor.execute(sql, tuple(params))
-    rows = cursor.fetchall()
-    cursor.close()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
 
     return jsonify(
         {
@@ -738,10 +734,9 @@ def list_missing_completion_contents():
     params.extend([limit, offset])
 
     conn = get_db()
-    cursor = get_cursor(conn)
-    cursor.execute(sql, tuple(params))
-    rows = cursor.fetchall()
-    cursor.close()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
 
     return jsonify(
         {
@@ -810,10 +805,9 @@ def list_missing_publication_contents():
     params.extend([limit, offset])
 
     conn = get_db()
-    cursor = get_cursor(conn)
-    cursor.execute(sql, tuple(params))
-    rows = cursor.fetchall()
-    cursor.close()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
 
     return jsonify(
         {
@@ -1017,10 +1011,9 @@ def list_admin_audit_logs():
     params.extend([limit, offset])
 
     conn = get_db()
-    cursor = get_cursor(conn)
-    cursor.execute(sql, tuple(params))
-    logs = cursor.fetchall()
-    cursor.close()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        logs = cursor.fetchall()
 
     return jsonify(
         {
