@@ -11,9 +11,11 @@ def _create_connection():
     환경 변수를 기반으로 새로운 데이터베이스 연결을 생성합니다.
     DATABASE_URL이 있으면 우선 사용하고, 없으면 개별 변수를 사용합니다.
     """
+    db_timezone = os.environ.get('DB_TIMEZONE', '').strip() or 'Asia/Seoul'
+    options = f"-c timezone={db_timezone}"
     database_url = os.environ.get('DATABASE_URL')
     if database_url:
-        return psycopg2.connect(database_url)
+        return psycopg2.connect(database_url, options=options)
 
     # 로컬 개발 환경을 위한 개별 변수 확인
     required_vars = ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']
@@ -25,7 +27,8 @@ def _create_connection():
         user=os.environ.get('DB_USER'),
         password=os.environ.get('DB_PASSWORD'),
         host=os.environ.get('DB_HOST'),
-        port=os.environ.get('DB_PORT')
+        port=os.environ.get('DB_PORT'),
+        options=options
     )
 
 def get_db():
