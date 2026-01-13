@@ -18,3 +18,11 @@
   ```bash
   python -c "import secrets; print(secrets.token_hex(32))"
   ```
+
+## Testing
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+PYTHONPATH=. pytest -q
+```

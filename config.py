@@ -1,4 +1,20 @@
+import json
 import os
+
+
+def _parse_cors_allow_origins(raw_value):
+    if raw_value is None:
+        return None
+    stripped = raw_value.strip()
+    if not stripped:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
+    return [item.strip() for item in stripped.split(",") if item.strip()]
 
 # --- Crawler ---
 CRAWLER_HEADERS = {
@@ -8,6 +24,10 @@ CRAWLER_HEADERS = {
         "Chrome/108.0.0.0 Safari/537.36"
     )
 }
+
+# --- CORS ---
+CORS_ALLOW_ORIGINS = _parse_cors_allow_origins(os.getenv("CORS_ALLOW_ORIGINS"))
+CORS_SUPPORTS_CREDENTIALS = os.getenv("CORS_SUPPORTS_CREDENTIALS", "0") == "1"
 
 # --- HTTP Client Defaults ---
 CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS = int(os.getenv("CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS", 60))
