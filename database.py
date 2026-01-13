@@ -3,6 +3,7 @@
 import psycopg2
 import psycopg2.extras
 from flask import g
+from contextlib import contextmanager
 import os
 import sys
 
@@ -11,9 +12,11 @@ def _create_connection():
     환경 변수를 기반으로 새로운 데이터베이스 연결을 생성합니다.
     DATABASE_URL이 있으면 우선 사용하고, 없으면 개별 변수를 사용합니다.
     """
+    db_timezone = os.environ.get('DB_TIMEZONE', '').strip() or 'Asia/Seoul'
+    options = f"-c timezone={db_timezone}"
     database_url = os.environ.get('DATABASE_URL')
     if database_url:
-        return psycopg2.connect(database_url)
+        return psycopg2.connect(database_url, options=options)
 
     # 로컬 개발 환경을 위한 개별 변수 확인
     required_vars = ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']
@@ -25,7 +28,8 @@ def _create_connection():
         user=os.environ.get('DB_USER'),
         password=os.environ.get('DB_PASSWORD'),
         host=os.environ.get('DB_HOST'),
-        port=os.environ.get('DB_PORT')
+        port=os.environ.get('DB_PORT'),
+        options=options
     )
 
 def get_db():
@@ -37,6 +41,18 @@ def get_db():
 def get_cursor(db):
     """지정된 DB 연결로부터 DictCursor를 반환합니다."""
     return db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+
+@contextmanager
+def managed_cursor(conn):
+    cursor = get_cursor(conn)
+    try:
+        yield cursor
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
 
 def close_db(exception=None):
     """요청(request)이 끝나면 자동으로 호출되어 DB 연결을 닫습니다."""
@@ -199,6 +215,17 @@ def setup_database_standalone():
             WHERE updated_at IS NULL;
             """
         )
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_users_updated_at ON users;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_users_updated_at
+            BEFORE UPDATE ON users
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
 
         print("LOG: [DB Setup] Creating 'subscriptions' table...")
         cursor.execute("""
@@ -244,6 +271,17 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_admin_content_overrides_updated_at ON admin_content_overrides;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_admin_content_overrides_updated_at
+            BEFORE UPDATE ON admin_content_overrides
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
 
         print("LOG: [DB Setup] Creating 'admin_content_metadata' table...")
         cursor.execute("""
@@ -259,6 +297,17 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_admin_content_metadata_updated_at ON admin_content_metadata;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_admin_content_metadata_updated_at
+            BEFORE UPDATE ON admin_content_metadata
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_content_metadata_public_at ON admin_content_metadata (public_at)"
         )

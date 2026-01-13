@@ -25,6 +25,7 @@ from utils.reporting import (
     now_iso,
     redact_headers,
 )
+from utils.record import read_field
 from utils.text import normalize_search_text
 from .base_crawler import ContentCrawler
 
@@ -541,7 +542,7 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
         attempts = []
         for row in cursor.fetchall():
             meta = (
-                (row.get("report_data") or {})
+                (read_field(row, "report_data") or {})
                 .get("cdc_info", {})
                 .get("fetch_meta", {})
             )
@@ -551,7 +552,9 @@ class KakaoPageWebtoonCrawler(ContentCrawler):
                 bootstrap_success = None
             else:
                 bootstrap_success = bool(success_value)
-            attempts.append((row.get("created_at"), attempted, bootstrap_success))
+            attempts.append(
+                (read_field(row, "created_at"), attempted, bootstrap_success)
+            )
 
         cursor.close()
         return attempts
