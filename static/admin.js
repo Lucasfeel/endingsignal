@@ -217,6 +217,8 @@
       limit: 50,
       offset: 0,
       lastCount: 0,
+      summaryText: '',
+      dailyNotificationText: '',
     },
   };
 
@@ -260,6 +262,16 @@
     const parts = formatter.formatToParts(date);
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
+  };
+
+  const getTodayKstDateString = () => {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(new Date());
   };
 
   const toDatetimeLocalValueKst = (value) => {
@@ -363,7 +375,39 @@
     runtime_ms: 'Runtime(ms)',
   };
 
-  const formatReportSummary = (reportData, statusValue) => {
+  const normalizeReportStatus = (raw) => {
+    if (!raw && raw !== 0) return 'unknown';
+    const value = String(raw).trim();
+    if (!value) return 'unknown';
+    const lowered = value.toLowerCase();
+    if (['success', 'ok', '성공'].some((alias) => alias.toLowerCase() === lowered)) {
+      return 'success';
+    }
+    if (['warning', 'warn', '경고'].some((alias) => alias.toLowerCase() === lowered)) {
+      return 'warning';
+    }
+    if (['failure', 'fail', '실패'].some((alias) => alias.toLowerCase() === lowered)) {
+      return 'failure';
+    }
+    return 'unknown';
+  };
+
+  const getStatusBadgeClasses = (statusValue) => {
+    switch (statusValue) {
+      case 'success':
+        return 'inline-flex rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-100';
+      case 'warning':
+        return 'inline-flex rounded-full border border-amber-300/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100';
+      case 'failure':
+        return 'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+      case 'empty':
+        return 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/60';
+      default:
+        return 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/70';
+    }
+  };
+
+  const formatReportSummary = (reportData, normalizedStatus) => {
     if (!reportData) return '-';
     let data = reportData;
     if (typeof data === 'string') {
@@ -379,7 +423,7 @@
     const pairs = [];
     const usedKeys = new Set();
 
-    if (statusValue === 'failure') {
+    if (normalizedStatus === 'failure') {
       const errorPick = pickFirstExistingKey(data, [
         'error',
         'message',
@@ -546,6 +590,7 @@
       audit: document.getElementById('panelAudit'),
       cdcEvents: document.getElementById('panelCdcEvents'),
       crawlerReports: document.getElementById('panelCrawlerReports'),
+      dailyNotificationReport: document.getElementById('panelDailyNotificationReport'),
     };
     const tabs = {
       manage: document.getElementById('tabManage'),
@@ -556,6 +601,7 @@
       audit: document.getElementById('tabAudit'),
       cdcEvents: document.getElementById('tabCdcEvents'),
       crawlerReports: document.getElementById('tabCrawlerReports'),
+      dailyNotificationReport: document.getElementById('tabDailyNotificationReport'),
     };
 
     Object.entries(panels).forEach(([key, panel]) => {
@@ -1783,12 +1829,8 @@
 
       const statusBadge = document.createElement('span');
       const statusValue = item.status || '-';
-      statusBadge.className =
-        statusValue === 'success'
-          ? 'inline-flex rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-100'
-          : statusValue === 'failure'
-            ? 'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100'
-            : 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/70';
+      const normalizedStatus = item.normalized_status || normalizeReportStatus(statusValue);
+      statusBadge.className = getStatusBadgeClasses(normalizedStatus);
       statusBadge.textContent = statusValue;
 
       const right = document.createElement('div');
@@ -1820,7 +1862,7 @@
 
       const summary = document.createElement('div');
       summary.className = 'mt-1 text-[11px] text-white/50';
-      summary.textContent = formatReportSummary(item.report_data, item.status);
+      summary.textContent = formatReportSummary(item.report_data, normalizedStatus);
 
       card.appendChild(header);
       card.appendChild(meta);
@@ -2016,6 +2058,191 @@
     }
   };
 
+  const renderDailyNotificationReport = (payload) => {
+    const summaryEl = document.getElementById('dailyNotificationSummary');
+    const listEl = document.getElementById('dailyNotificationCompletedList');
+    const copyBtn = document.getElementById('dailyNotificationCopyBtn');
+    if (!summaryEl || !listEl) return;
+
+    const stats = payload?.stats || {};
+    const durationValue = stats.duration_seconds;
+    const durationText =
+      durationValue === null || durationValue === undefined
+        ? '-'
+        : `${Number(durationValue).toFixed(2)}초`;
+
+    summaryEl.textContent = `작업 시간: ${payload?.generated_at || '-'} · 실행 시간: ${durationText} · 신규 DB 등록 콘텐츠: ${
+      stats.new_contents_total ?? 0
+    }개 · 총 알림 발생 인원: ${stats.total_recipients ?? 0}명 · 완결 이벤트: ${
+      stats.completed_total ?? 0
+    }건`;
+
+    listEl.innerHTML = '';
+    const items = payload?.completed_items || [];
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '(없음)';
+      listEl.appendChild(empty);
+    } else {
+      items.forEach((item) => {
+        const card = document.createElement('div');
+        card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+        const header = document.createElement('div');
+        header.className = 'flex flex-wrap items-center gap-2';
+
+        const title = document.createElement('div');
+        title.className = 'font-semibold text-white';
+        title.textContent = item.title || item.content_id || '-';
+
+        header.appendChild(title);
+
+        if (item.notification_excluded) {
+          const excludedBadge = document.createElement('span');
+          excludedBadge.className =
+            'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+          excludedBadge.textContent = '삭제됨';
+          header.appendChild(excludedBadge);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'mt-1 text-xs text-white/60';
+        meta.textContent = `${item.content_id || '-'} · ${item.source || '-'} · ${
+          item.subscriber_count ? `${item.subscriber_count}명` : '구독자 없음'
+        }`;
+
+        card.appendChild(header);
+        card.appendChild(meta);
+        listEl.appendChild(card);
+      });
+    }
+
+    STATE.crawlerReports.dailyNotificationText = payload?.text_report || '';
+    setButtonDisabled(copyBtn, !STATE.crawlerReports.dailyNotificationText);
+  };
+
+  const loadDailyNotificationReport = async () => {
+    const dateInput = document.getElementById('dailyNotificationDateInput');
+    const includeDeleted = document.getElementById('dailyNotificationIncludeDeleted');
+    if (dateInput && !dateInput.value) {
+      dateInput.value = getTodayKstDateString();
+    }
+    const params = new URLSearchParams();
+    if (dateInput?.value) params.set('date', dateInput.value);
+    if (includeDeleted?.checked) params.set('include_deleted', '1');
+
+    const url = `/api/admin/reports/daily-notification?${params.toString()}`;
+    try {
+      const payload = await apiRequest('GET', url, { token: STATE.token });
+      renderDailyNotificationReport(payload);
+    } catch (err) {
+      showToast(err.message || '일일 리포트를 불러오지 못했습니다.', { type: 'error' });
+      STATE.crawlerReports.dailyNotificationText = '';
+      const copyBtn = document.getElementById('dailyNotificationCopyBtn');
+      setButtonDisabled(copyBtn, true);
+    }
+  };
+
+  const renderDailySummary = (payload) => {
+    const badgeEl = document.getElementById('dailySummaryBadge');
+    const titleEl = document.getElementById('dailySummaryTitle');
+    const metaEl = document.getElementById('dailySummaryMeta');
+    const listEl = document.getElementById('dailySummaryList');
+    const copyBtn = document.getElementById('dailySummaryCopyBtn');
+
+    if (!listEl) return;
+
+    const overallStatus = payload?.overall_status || 'empty';
+    const statusLabelMap = {
+      success: '성공',
+      warning: '경고',
+      failure: '실패',
+      empty: '없음',
+      unknown: '알 수 없음',
+    };
+
+    if (badgeEl) {
+      badgeEl.className = getStatusBadgeClasses(overallStatus);
+      badgeEl.textContent = statusLabelMap[overallStatus] || overallStatus;
+    }
+    if (titleEl) {
+      titleEl.textContent = payload?.subject_text || 'Daily Consolidated Summary';
+    }
+
+    const rangeText = payload?.range
+      ? `${payload.range.created_from || '-'} ~ ${payload.range.created_to || '-'}`
+      : '-';
+    const counts = payload?.counts || {};
+    if (metaEl) {
+      metaEl.textContent = `기간: ${rangeText} · 총 ${payload?.total_reports ?? 0}건 · 성공 ${
+        counts.success ?? 0
+      } / 경고 ${counts.warning ?? 0} / 실패 ${counts.failure ?? 0} / 미확인 ${
+        counts.unknown ?? 0
+      }`;
+    }
+
+    listEl.innerHTML = '';
+    const items = payload?.items || [];
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '요약할 배치 리포트가 없습니다.';
+      listEl.appendChild(empty);
+    } else {
+      items.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/70';
+
+        const header = document.createElement('div');
+        header.className = 'flex flex-wrap items-center gap-2';
+
+        const name = document.createElement('span');
+        name.className = 'text-sm font-semibold text-white';
+        name.textContent = item.crawler_name || '-';
+
+        const badge = document.createElement('span');
+        const normalized = item.normalized_status || normalizeReportStatus(item.status);
+        badge.className = getStatusBadgeClasses(normalized);
+        badge.textContent = item.status || normalized;
+
+        header.appendChild(name);
+        header.appendChild(badge);
+
+        const detail = document.createElement('div');
+        detail.className = 'mt-1 text-[11px] text-white/50';
+        detail.textContent = formatReportSummary(item.report_data, normalized);
+
+        row.appendChild(header);
+        row.appendChild(detail);
+        listEl.appendChild(row);
+      });
+    }
+
+    STATE.crawlerReports.summaryText = payload?.summary_text || '';
+    setButtonDisabled(copyBtn, !STATE.crawlerReports.summaryText);
+  };
+
+  const loadDailySummary = async () => {
+    const params = new URLSearchParams();
+    if (STATE.crawlerReports.createdFrom) params.set('created_from', STATE.crawlerReports.createdFrom);
+    if (STATE.crawlerReports.createdTo) params.set('created_to', STATE.crawlerReports.createdTo);
+
+    const url = params.toString()
+      ? `/api/admin/reports/daily-summary?${params.toString()}`
+      : '/api/admin/reports/daily-summary';
+
+    try {
+      const payload = await apiRequest('GET', url, { token: STATE.token });
+      renderDailySummary(payload);
+    } catch (err) {
+      showToast(err.message || '요약 정보를 불러오지 못했습니다.', { type: 'error' });
+      STATE.crawlerReports.summaryText = '';
+      const copyBtn = document.getElementById('dailySummaryCopyBtn');
+      setButtonDisabled(copyBtn, true);
+    }
+  };
+
   const refreshCrawlerReportsFromInputs = async () => {
     STATE.crawlerReports.crawlerName =
       document.getElementById('reportsCrawlerNameInput')?.value?.trim() || '';
@@ -2023,7 +2250,7 @@
     STATE.crawlerReports.createdFrom = document.getElementById('reportsCreatedFrom')?.value || '';
     STATE.crawlerReports.createdTo = document.getElementById('reportsCreatedTo')?.value || '';
     STATE.crawlerReports.offset = 0;
-    await loadCrawlerReports();
+    await Promise.all([loadCrawlerReports(), loadDailySummary()]);
   };
 
   const updateAuditPagination = () => {
@@ -2086,6 +2313,7 @@
     const tabAudit = document.getElementById('tabAudit');
     const tabCdcEvents = document.getElementById('tabCdcEvents');
     const tabCrawlerReports = document.getElementById('tabCrawlerReports');
+    const tabDailyNotificationReport = document.getElementById('tabDailyNotificationReport');
     const deletedSearchBtn = document.getElementById('deletedSearchBtn');
     const deletedPrevBtn = document.getElementById('deletedPrevBtn');
     const deletedNextBtn = document.getElementById('deletedNextBtn');
@@ -2106,6 +2334,11 @@
     const reportsSearchBtn = document.getElementById('reportsSearchBtn');
     const reportsPrevBtn = document.getElementById('reportsPrevBtn');
     const reportsNextBtn = document.getElementById('reportsNextBtn');
+    const dailyNotificationLoadBtn = document.getElementById('dailyNotificationLoadBtn');
+    const dailyNotificationCopyBtn = document.getElementById('dailyNotificationCopyBtn');
+    const dailySummaryCopyBtn = document.getElementById('dailySummaryCopyBtn');
+    const dailySummaryCleanupBtn = document.getElementById('dailySummaryCleanupBtn');
+    const dailySummaryKeepDaysInput = document.getElementById('dailySummaryKeepDaysInput');
     const detailCloseBtn = document.getElementById('detailCloseBtn');
     const detailCopyJsonBtn = document.getElementById('detailCopyJsonBtn');
     const detailCopyIdBtn = document.getElementById('detailCopyIdBtn');
@@ -2148,6 +2381,11 @@
     tabCrawlerReports?.addEventListener('click', () => {
       setTab('crawlerReports');
       loadCrawlerReports();
+      loadDailySummary();
+    });
+    tabDailyNotificationReport?.addEventListener('click', () => {
+      setTab('dailyNotificationReport');
+      loadDailyNotificationReport();
     });
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
@@ -2345,6 +2583,35 @@
         showToast('복사에 실패했습니다.', { type: 'error' });
       }
     };
+
+    dailyNotificationLoadBtn?.addEventListener('click', () =>
+      withLoading(dailyNotificationLoadBtn, '불러오는 중...', loadDailyNotificationReport),
+    );
+    dailyNotificationCopyBtn?.addEventListener('click', () =>
+      handleCopy(STATE.crawlerReports.dailyNotificationText),
+    );
+
+    dailySummaryCopyBtn?.addEventListener('click', () => handleCopy(STATE.crawlerReports.summaryText));
+    dailySummaryCleanupBtn?.addEventListener('click', () => {
+      const keepDaysValue = Number.parseInt(dailySummaryKeepDaysInput?.value || '', 10);
+      const keepDays = Number.isNaN(keepDaysValue) ? null : keepDaysValue;
+      openConfirm({
+        title: '배치 리포트 정리',
+        message: `보관 기간 ${keepDays ?? 14}일 이전의 리포트를 삭제할까요?`,
+        onConfirm: async () => {
+          const body = keepDays ? { keep_days: keepDays } : {};
+          const payload = await apiRequest('POST', '/api/admin/reports/daily-crawler/cleanup', {
+            token: STATE.token,
+            body,
+          });
+          if (dailySummaryKeepDaysInput) {
+            dailySummaryKeepDaysInput.value = String(payload?.keep_days ?? keepDays ?? 14);
+          }
+          showToast(`삭제 완료: ${payload?.deleted_count ?? 0}건`, { type: 'success' });
+          await Promise.all([loadCrawlerReports(), loadDailySummary()]);
+        },
+      });
+    });
 
     detailCloseBtn?.addEventListener('click', closeDetailModal);
     detailCopyJsonBtn?.addEventListener('click', () => handleCopy(detailState.jsonText));
