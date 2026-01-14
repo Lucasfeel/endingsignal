@@ -590,6 +590,7 @@
       audit: document.getElementById('panelAudit'),
       cdcEvents: document.getElementById('panelCdcEvents'),
       crawlerReports: document.getElementById('panelCrawlerReports'),
+      dailyNotificationReport: document.getElementById('panelDailyNotificationReport'),
     };
     const tabs = {
       manage: document.getElementById('tabManage'),
@@ -600,6 +601,7 @@
       audit: document.getElementById('tabAudit'),
       cdcEvents: document.getElementById('tabCdcEvents'),
       crawlerReports: document.getElementById('tabCrawlerReports'),
+      dailyNotificationReport: document.getElementById('tabDailyNotificationReport'),
     };
 
     Object.entries(panels).forEach(([key, panel]) => {
@@ -2311,6 +2313,7 @@
     const tabAudit = document.getElementById('tabAudit');
     const tabCdcEvents = document.getElementById('tabCdcEvents');
     const tabCrawlerReports = document.getElementById('tabCrawlerReports');
+    const tabDailyNotificationReport = document.getElementById('tabDailyNotificationReport');
     const deletedSearchBtn = document.getElementById('deletedSearchBtn');
     const deletedPrevBtn = document.getElementById('deletedPrevBtn');
     const deletedNextBtn = document.getElementById('deletedNextBtn');
@@ -2378,8 +2381,11 @@
     tabCrawlerReports?.addEventListener('click', () => {
       setTab('crawlerReports');
       loadCrawlerReports();
-      loadDailyNotificationReport();
       loadDailySummary();
+    });
+    tabDailyNotificationReport?.addEventListener('click', () => {
+      setTab('dailyNotificationReport');
+      loadDailyNotificationReport();
     });
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
