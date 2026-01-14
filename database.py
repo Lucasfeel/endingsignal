@@ -404,12 +404,75 @@ def setup_database_standalone():
         cursor.execute(
             """
             DO $$
+            DECLARE
+                has_unique_constraint BOOLEAN;
+                has_named_index BOOLEAN;
+                named_index_is_unique BOOLEAN;
+                constraint_name TEXT;
             BEGIN
-                ALTER TABLE cdc_event_consumptions
-                ADD CONSTRAINT cdc_event_consumptions_consumer_event_id_key
-                UNIQUE (consumer, event_id);
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint c
+                    JOIN pg_class t ON t.oid = c.conrelid
+                    JOIN pg_namespace n ON n.oid = t.relnamespace
+                    WHERE t.relname = 'cdc_event_consumptions'
+                      AND n.nspname = current_schema()
+                      AND c.contype = 'u'
+                      AND c.conkey @> (
+                          SELECT array_agg(attnum ORDER BY attnum)
+                          FROM pg_attribute
+                          WHERE attrelid = t.oid
+                            AND attname IN ('consumer', 'event_id')
+                      )
+                      AND array_length(c.conkey, 1) = 2
+                ) INTO has_unique_constraint;
+
+                IF has_unique_constraint THEN
+                    RETURN;
+                END IF;
+
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_class cls
+                    JOIN pg_namespace n ON n.oid = cls.relnamespace
+                    WHERE cls.relname = 'cdc_event_consumptions_consumer_event_id_key'
+                      AND n.nspname = current_schema()
+                ) INTO has_named_index;
+
+                SELECT COALESCE(i.indisunique, FALSE)
+                INTO named_index_is_unique
+                FROM pg_class cls
+                JOIN pg_index i ON i.indexrelid = cls.oid
+                JOIN pg_namespace n ON n.oid = cls.relnamespace
+                WHERE cls.relname = 'cdc_event_consumptions_consumer_event_id_key'
+                  AND n.nspname = current_schema();
+
+                IF has_named_index AND named_index_is_unique THEN
+                    BEGIN
+                        ALTER TABLE cdc_event_consumptions
+                        ADD CONSTRAINT cdc_event_consumptions_consumer_event_id_key
+                        UNIQUE USING INDEX cdc_event_consumptions_consumer_event_id_key;
+                    EXCEPTION
+                        WHEN duplicate_object OR duplicate_table THEN NULL;
+                    END;
+                ELSE
+                    IF has_named_index AND NOT named_index_is_unique THEN
+                        constraint_name := 'cdc_event_consumptions_consumer_event_id_uniq';
+                    ELSE
+                        constraint_name := 'cdc_event_consumptions_consumer_event_id_key';
+                    END IF;
+
+                    BEGIN
+                        EXECUTE format(
+                            'ALTER TABLE cdc_event_consumptions ADD CONSTRAINT %I UNIQUE (consumer, event_id)',
+                            constraint_name
+                        );
+                    EXCEPTION
+                        WHEN duplicate_object OR duplicate_table THEN NULL;
+                    END;
+                END IF;
             EXCEPTION
-                WHEN duplicate_object THEN NULL;
+                WHEN duplicate_object OR duplicate_table THEN NULL;
             END $$;
             """
         )
