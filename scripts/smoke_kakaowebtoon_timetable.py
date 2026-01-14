@@ -1,33 +1,49 @@
 import asyncio
 
-import aiohttp
-
 import config
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
 
 
 async def main():
     crawler = KakaoWebtoonCrawler()
-    headers = crawler._build_headers()
-    timeout = aiohttp.ClientTimeout(
-        total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
-        connect=config.CRAWLER_HTTP_CONNECT_TIMEOUT_SECONDS,
-        sock_read=config.CRAWLER_HTTP_SOCK_READ_TIMEOUT_SECONDS,
-    )
-    connector = aiohttp.TCPConnector(limit=config.CRAWLER_HTTP_CONCURRENCY_LIMIT, ttl_dns_cache=300)
-    placements = ["timetable_tue", config.KAKAOWEBTOON_PLACEMENT_COMPLETED]
+    (
+        ongoing_today,
+        hiatus_today,
+        finished_today,
+        all_content_today,
+        fetch_meta,
+    ) = await crawler.fetch_all_data()
 
-    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-        for placement in placements:
-            entries, meta, error = await crawler._fetch_placement_entries(session, placement, headers)
-            label = "completed" if placement == config.KAKAOWEBTOON_PLACEMENT_COMPLETED else "weekday"
-            print(f"\n[{label}:{placement}] http={meta.get('http_status')} count={meta.get('count')} error={error}")
-            for entry in entries[:3]:
-                print(
-                    f"  - {entry['title']} ({entry['content_id']}) "
-                    f"thumbnail_url={entry.get('thumbnail_url')} "
-                    f"kakao_ongoing_status={entry.get('kakao_ongoing_status')}"
-                )
+    print("\n[KakaoWebtoon] Profile lookup summary")
+    print(
+        "  candidates="
+        f"{fetch_meta.get('completed_candidate_total')} "
+        "budget="
+        f"{config.KAKAOWEBTOON_PROFILE_LOOKUP_BUDGET} "
+        "lookups="
+        f"{fetch_meta.get('profile_lookup_total')} "
+        "ok="
+        f"{fetch_meta.get('profile_lookup_ok')} "
+        "failed="
+        f"{fetch_meta.get('profile_lookup_failed')} "
+        "skipped_due_to_budget="
+        f"{fetch_meta.get('lookup_skipped_due_to_budget')}"
+    )
+
+    completed_candidates = [
+        entry
+        for entry in all_content_today.values()
+        if entry.get("kakao_completed_candidate")
+    ]
+    print(f"  completed_candidates_sample={len(completed_candidates)}")
+    for entry in completed_candidates[:5]:
+        checked_at = entry.get("kakao_profile_status_checked_at")
+        print(
+            f"  - {entry['title']} ({entry['content_id']}) "
+            f"profile_status={entry.get('kakao_profile_status')} "
+            f"lookup_performed={bool(checked_at)} "
+            f"unverified_candidate={entry.get('kakao_unverified_completed_candidate')}"
+        )
 
 
 if __name__ == "__main__":
