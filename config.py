@@ -116,11 +116,3 @@ KAKAOPAGE_BOOTSTRAP_MAX_CONSECUTIVE_FAILURES = int(
     os.getenv("KAKAOPAGE_BOOTSTRAP_MAX_CONSECUTIVE_FAILURES", 3)
 )
 KAKAOPAGE_FORCE_BOOTSTRAP = os.getenv("KAKAOPAGE_FORCE_BOOTSTRAP", "false").lower() == "true"
-
-# --- Email ---
-# [신규] 어떤 이메일 서비스를 사용할지 결정 (smtp 또는 sendgrid)
-EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "smtp").lower()
-
-# [기존] SMTP 설정 (SmtpService가 사용)
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
