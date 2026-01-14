@@ -218,6 +218,7 @@
       offset: 0,
       lastCount: 0,
       summaryText: '',
+      dailyNotificationText: '',
     },
   };
 
@@ -261,6 +262,16 @@
     const parts = formatter.formatToParts(date);
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
+  };
+
+  const getTodayKstDateString = () => {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(new Date());
   };
 
   const toDatetimeLocalValueKst = (value) => {
@@ -2045,6 +2056,92 @@
     }
   };
 
+  const renderDailyNotificationReport = (payload) => {
+    const summaryEl = document.getElementById('dailyNotificationSummary');
+    const listEl = document.getElementById('dailyNotificationCompletedList');
+    const copyBtn = document.getElementById('dailyNotificationCopyBtn');
+    if (!summaryEl || !listEl) return;
+
+    const stats = payload?.stats || {};
+    const durationValue = stats.duration_seconds;
+    const durationText =
+      durationValue === null || durationValue === undefined
+        ? '-'
+        : `${Number(durationValue).toFixed(2)}초`;
+
+    summaryEl.textContent = `작업 시간: ${payload?.generated_at || '-'} · 실행 시간: ${durationText} · 신규 DB 등록 콘텐츠: ${
+      stats.new_contents_total ?? 0
+    }개 · 총 알림 발생 인원: ${stats.total_recipients ?? 0}명 · 완결 이벤트: ${
+      stats.completed_total ?? 0
+    }건`;
+
+    listEl.innerHTML = '';
+    const items = payload?.completed_items || [];
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '(없음)';
+      listEl.appendChild(empty);
+    } else {
+      items.forEach((item) => {
+        const card = document.createElement('div');
+        card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+        const header = document.createElement('div');
+        header.className = 'flex flex-wrap items-center gap-2';
+
+        const title = document.createElement('div');
+        title.className = 'font-semibold text-white';
+        title.textContent = item.title || item.content_id || '-';
+
+        header.appendChild(title);
+
+        if (item.notification_excluded) {
+          const excludedBadge = document.createElement('span');
+          excludedBadge.className =
+            'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+          excludedBadge.textContent = '삭제됨';
+          header.appendChild(excludedBadge);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'mt-1 text-xs text-white/60';
+        meta.textContent = `${item.content_id || '-'} · ${item.source || '-'} · ${
+          item.subscriber_count ? `${item.subscriber_count}명` : '구독자 없음'
+        }`;
+
+        card.appendChild(header);
+        card.appendChild(meta);
+        listEl.appendChild(card);
+      });
+    }
+
+    STATE.crawlerReports.dailyNotificationText = payload?.text_report || '';
+    setButtonDisabled(copyBtn, !STATE.crawlerReports.dailyNotificationText);
+  };
+
+  const loadDailyNotificationReport = async () => {
+    const dateInput = document.getElementById('dailyNotificationDateInput');
+    const includeDeleted = document.getElementById('dailyNotificationIncludeDeleted');
+    if (dateInput && !dateInput.value) {
+      dateInput.value = getTodayKstDateString();
+    }
+    const params = new URLSearchParams();
+    if (dateInput?.value) params.set('date', dateInput.value);
+    if (includeDeleted?.checked) params.set('include_deleted', '1');
+
+    const url = `/api/admin/reports/daily-notification?${params.toString()}`;
+    try {
+      const payload = await apiRequest('GET', url, { token: STATE.token });
+      renderDailyNotificationReport(payload);
+    } catch (err) {
+      showToast(err.message || '일일 리포트를 불러오지 못했습니다.', { type: 'error' });
+      STATE.crawlerReports.dailyNotificationText = '';
+      const copyBtn = document.getElementById('dailyNotificationCopyBtn');
+      setButtonDisabled(copyBtn, true);
+    }
+  };
+
   const renderDailySummary = (payload) => {
     const badgeEl = document.getElementById('dailySummaryBadge');
     const titleEl = document.getElementById('dailySummaryTitle');
@@ -2234,6 +2331,8 @@
     const reportsSearchBtn = document.getElementById('reportsSearchBtn');
     const reportsPrevBtn = document.getElementById('reportsPrevBtn');
     const reportsNextBtn = document.getElementById('reportsNextBtn');
+    const dailyNotificationLoadBtn = document.getElementById('dailyNotificationLoadBtn');
+    const dailyNotificationCopyBtn = document.getElementById('dailyNotificationCopyBtn');
     const dailySummaryCopyBtn = document.getElementById('dailySummaryCopyBtn');
     const dailySummaryCleanupBtn = document.getElementById('dailySummaryCleanupBtn');
     const dailySummaryKeepDaysInput = document.getElementById('dailySummaryKeepDaysInput');
@@ -2279,6 +2378,7 @@
     tabCrawlerReports?.addEventListener('click', () => {
       setTab('crawlerReports');
       loadCrawlerReports();
+      loadDailyNotificationReport();
       loadDailySummary();
     });
 
@@ -2477,6 +2577,13 @@
         showToast('복사에 실패했습니다.', { type: 'error' });
       }
     };
+
+    dailyNotificationLoadBtn?.addEventListener('click', () =>
+      withLoading(dailyNotificationLoadBtn, '불러오는 중...', loadDailyNotificationReport),
+    );
+    dailyNotificationCopyBtn?.addEventListener('click', () =>
+      handleCopy(STATE.crawlerReports.dailyNotificationText),
+    );
 
     dailySummaryCopyBtn?.addEventListener('click', () => handleCopy(STATE.crawlerReports.summaryText));
     dailySummaryCleanupBtn?.addEventListener('click', () => {

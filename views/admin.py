@@ -2,7 +2,7 @@
 
 import json
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request, g, render_template
 
@@ -25,6 +25,7 @@ from services.report_summary_service import (
     expand_status_filter,
     normalize_report_status,
 )
+from services.daily_notification_report_service import build_daily_notification_text
 from utils.auth import admin_required, login_required
 from utils.time import now_kst_naive, parse_iso_naive_kst
 
@@ -213,6 +214,16 @@ def _normalize_meta(value):
         return dict(value)
     except Exception:
         return {}
+
+
+def _parse_date_param(date_raw):
+    if not date_raw:
+        return None
+    try:
+        parsed = datetime.strptime(date_raw, '%Y-%m-%d')
+    except ValueError:
+        return None
+    return date(parsed.year, parsed.month, parsed.day)
 
 
 @admin_bp.route('/admin', methods=['GET'])
@@ -769,6 +780,174 @@ def get_daily_crawler_summary():
             'total_reports': len(items),
             'counts': summary_payload['counts'],
             'items': items,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-notification', methods=['GET'])
+@login_required
+@admin_required
+def get_daily_notification_report():
+    date_raw = request.args.get('date')
+    include_deleted_raw = request.args.get('include_deleted', '0')
+    include_deleted = str(include_deleted_raw).lower() in {'1', 'true', 'yes'}
+
+    report_date = _parse_date_param(date_raw)
+    if date_raw and report_date is None:
+        return _error_response(400, 'INVALID_REQUEST', 'date must be in YYYY-MM-DD format')
+
+    if report_date is None:
+        today = now_kst_naive()
+        report_date = date(today.year, today.month, today.day)
+
+    start_dt = datetime(report_date.year, report_date.month, report_date.day, 0, 0, 0)
+    end_dt = start_dt + timedelta(days=1)
+    generated_at = now_kst_naive()
+
+    conn = get_db()
+    completed_items = []
+    total_recipients = 0
+    duration_seconds_total = 0.0
+    duration_found = False
+    new_contents_total = 0
+    new_contents_by_type = {}
+
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT report_data
+            FROM daily_crawler_reports
+            WHERE created_at >= %s AND created_at < %s
+            """,
+            (start_dt, end_dt),
+        )
+        report_rows = cursor.fetchall()
+        for row in report_rows:
+            report_data = _get_row_value(row, 'report_data')
+            if isinstance(report_data, str):
+                try:
+                    report_data = json.loads(report_data)
+                except Exception:
+                    report_data = None
+            if isinstance(report_data, dict):
+                duration_value = report_data.get('duration')
+                if isinstance(duration_value, (int, float)):
+                    duration_seconds_total += float(duration_value)
+                    duration_found = True
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM contents
+            WHERE created_at >= %s AND created_at < %s
+            """,
+            (start_dt, end_dt),
+        )
+        total_row = cursor.fetchone()
+        if total_row:
+            new_contents_total = int(_get_row_value(total_row, 'total') or 0)
+
+        cursor.execute(
+            """
+            SELECT content_type, COUNT(*) AS total
+            FROM contents
+            WHERE created_at >= %s AND created_at < %s
+            GROUP BY content_type
+            """,
+            (start_dt, end_dt),
+        )
+        type_rows = cursor.fetchall()
+        new_contents_by_type = {
+            row['content_type']: int(_get_row_value(row, 'total') or 0) for row in type_rows
+        }
+
+        cursor.execute(
+            """
+            SELECT
+                e.content_id,
+                e.source,
+                e.created_at AS event_created_at,
+                e.final_completed_at,
+                e.resolved_by,
+                c.title,
+                c.content_type,
+                COALESCE(c.is_deleted, FALSE) AS is_deleted
+            FROM cdc_events e
+            LEFT JOIN contents c
+              ON c.content_id = e.content_id AND c.source = e.source
+            WHERE e.event_type = 'CONTENT_COMPLETED'
+              AND e.created_at >= %s AND e.created_at < %s
+            ORDER BY e.created_at DESC, e.id DESC
+            """,
+            (start_dt, end_dt),
+        )
+        completed_rows = cursor.fetchall()
+
+        for row in completed_rows:
+            is_deleted = bool(_get_row_value(row, 'is_deleted'))
+            if is_deleted and not include_deleted:
+                continue
+            content_id = row['content_id']
+            source = row['source']
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS subscriber_count
+                FROM subscriptions
+                WHERE content_id = %s AND source = %s AND wants_completion = TRUE
+                """,
+                (content_id, source),
+            )
+            subscriber_row = cursor.fetchone()
+            subscriber_count = int(_get_row_value(subscriber_row, 'subscriber_count') or 0)
+
+            if not is_deleted:
+                total_recipients += subscriber_count
+
+            title = _get_row_value(row, 'title') or content_id or '-'
+            event_created_at = _get_row_value(row, 'event_created_at')
+            final_completed_at = _get_row_value(row, 'final_completed_at')
+
+            completed_items.append(
+                {
+                    'content_id': content_id,
+                    'source': source,
+                    'title': title,
+                    'content_type': _get_row_value(row, 'content_type'),
+                    'event_created_at': event_created_at.isoformat() if event_created_at else None,
+                    'final_completed_at': final_completed_at.isoformat() if final_completed_at else None,
+                    'resolved_by': _get_row_value(row, 'resolved_by'),
+                    'is_deleted': is_deleted,
+                    'subscriber_count': subscriber_count,
+                    'notification_excluded': is_deleted,
+                }
+            )
+
+    duration_seconds = duration_seconds_total if duration_found else None
+
+    stats = {
+        'duration_seconds': duration_seconds,
+        'new_contents_total': new_contents_total,
+        'new_contents_by_type': new_contents_by_type,
+        'completed_total': len(completed_items),
+        'total_recipients': total_recipients,
+    }
+
+    text_report = build_daily_notification_text(
+        generated_at.isoformat(),
+        stats,
+        completed_items,
+    )
+
+    return jsonify(
+        {
+            'success': True,
+            'date': report_date.isoformat(),
+            'range': {'from': start_dt.isoformat(), 'to': end_dt.isoformat()},
+            'generated_at': generated_at.isoformat(),
+            'stats': stats,
+            'completed_items': completed_items,
+            'text_report': text_report,
         }
     )
 
