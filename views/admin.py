@@ -1,10 +1,12 @@
 # views/admin.py
 
 import json
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request, g, render_template
 
-from database import get_db, get_cursor, managed_cursor
+from database import get_db, get_cursor
 from services.admin_override_service import upsert_override_and_record_event
 from services.admin_publication_service import (
     delete_publication,
@@ -18,6 +20,12 @@ from services.admin_delete_service import (
     soft_delete_content,
 )
 from services.cdc_event_service import record_content_published_event
+from services.report_summary_service import (
+    build_daily_summary,
+    expand_status_filter,
+    normalize_report_status,
+)
+from services.daily_notification_report_service import build_daily_notification_text
 from utils.auth import admin_required, login_required
 from utils.time import now_kst_naive, parse_iso_naive_kst
 
@@ -27,6 +35,18 @@ admin_bp = Blueprint('admin', __name__)
 
 def _error_response(status_code: int, code: str, message: str):
     return jsonify({'success': False, 'error': {'code': code, 'message': message}}), status_code
+
+
+@contextmanager
+def managed_cursor(conn):
+    cursor = get_cursor(conn)
+    try:
+        yield cursor
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
 
 
 def _serialize_override(row):
@@ -155,6 +175,7 @@ def _serialize_daily_crawler_report(row):
         'id': row['id'],
         'crawler_name': row['crawler_name'],
         'status': row['status'],
+        'normalized_status': normalize_report_status(row['status']),
         'report_data': report_data,
         'created_at': created_at.isoformat() if created_at else None,
     }
@@ -193,6 +214,16 @@ def _normalize_meta(value):
         return dict(value)
     except Exception:
         return {}
+
+
+def _parse_date_param(date_raw):
+    if not date_raw:
+        return None
+    try:
+        parsed = datetime.strptime(date_raw, '%Y-%m-%d')
+    except ValueError:
+        return None
+    return date(parsed.year, parsed.month, parsed.day)
 
 
 @admin_bp.route('/admin', methods=['GET'])
@@ -642,8 +673,13 @@ def list_daily_crawler_reports():
         sql += " AND crawler_name = %s"
         params.append(crawler_name)
     if status:
-        sql += " AND status = %s"
-        params.append(status)
+        expanded_statuses = expand_status_filter(status)
+        if expanded_statuses:
+            sql += " AND status = ANY(%s)"
+            params.append(expanded_statuses)
+        else:
+            sql += " AND status = %s"
+            params.append(status)
     if created_from:
         sql += " AND created_at >= %s"
         params.append(created_from)
@@ -668,6 +704,283 @@ def list_daily_crawler_reports():
             'reports': [_serialize_daily_crawler_report(row) for row in rows],
             'limit': limit,
             'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-summary', methods=['GET'])
+@login_required
+@admin_required
+def get_daily_crawler_summary():
+    created_from_raw = request.args.get('created_from')
+    created_to_raw = request.args.get('created_to')
+    created_from = None
+    created_to = None
+
+    if created_from_raw:
+        created_from = parse_iso_naive_kst(created_from_raw)
+        if created_from is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_from must be a valid ISO 8601 datetime string')
+    if created_to_raw:
+        created_to = parse_iso_naive_kst(created_to_raw)
+        if created_to is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_to must be a valid ISO 8601 datetime string')
+
+    if not created_from and not created_to:
+        now = now_kst_naive()
+        created_from = datetime(now.year, now.month, now.day, 0, 0, 0)
+        created_to = now
+
+    params = []
+    sql = """
+        SELECT id, crawler_name, status, report_data, created_at
+        FROM daily_crawler_reports
+        WHERE 1=1
+    """
+
+    if created_from:
+        sql += " AND created_at >= %s"
+        params.append(created_from)
+    if created_to:
+        sql += " AND created_at <= %s"
+        params.append(created_to)
+
+    sql += " ORDER BY created_at DESC, id DESC"
+
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
+
+    items = [_serialize_daily_crawler_report(row) for row in rows]
+
+    range_label = None
+    if created_from and created_to:
+        range_label = f"{created_from.isoformat()} ~ {created_to.isoformat()}"
+    elif created_from:
+        range_label = f"{created_from.isoformat()} ~ -"
+    elif created_to:
+        range_label = f"- ~ {created_to.isoformat()}"
+
+    date_basis = created_to or created_from or now_kst_naive()
+    date_label = date_basis.strftime('%Y-%m-%d')
+
+    summary_payload = build_daily_summary(items, range_label, date_label)
+
+    return jsonify(
+        {
+            'success': True,
+            'range': {
+                'created_from': created_from.isoformat() if created_from else None,
+                'created_to': created_to.isoformat() if created_to else None,
+            },
+            'overall_status': summary_payload['overall_status'],
+            'subject_text': summary_payload['subject_text'],
+            'summary_text': summary_payload['summary_text'],
+            'total_reports': len(items),
+            'counts': summary_payload['counts'],
+            'items': items,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-notification', methods=['GET'])
+@login_required
+@admin_required
+def get_daily_notification_report():
+    date_raw = request.args.get('date')
+    include_deleted_raw = request.args.get('include_deleted', '0')
+    include_deleted = str(include_deleted_raw).lower() in {'1', 'true', 'yes'}
+
+    report_date = _parse_date_param(date_raw)
+    if date_raw and report_date is None:
+        return _error_response(400, 'INVALID_REQUEST', 'date must be in YYYY-MM-DD format')
+
+    if report_date is None:
+        today = now_kst_naive()
+        report_date = date(today.year, today.month, today.day)
+
+    start_dt = datetime(report_date.year, report_date.month, report_date.day, 0, 0, 0)
+    end_dt = start_dt + timedelta(days=1)
+    generated_at = now_kst_naive()
+
+    conn = get_db()
+    completed_items = []
+    total_recipients = 0
+    duration_seconds_total = 0.0
+    duration_found = False
+    new_contents_total = 0
+    new_contents_by_type = {}
+
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT report_data
+            FROM daily_crawler_reports
+            WHERE created_at >= %s AND created_at < %s
+            """,
+            (start_dt, end_dt),
+        )
+        report_rows = cursor.fetchall()
+        for row in report_rows:
+            report_data = _get_row_value(row, 'report_data')
+            if isinstance(report_data, str):
+                try:
+                    report_data = json.loads(report_data)
+                except Exception:
+                    report_data = None
+            if isinstance(report_data, dict):
+                duration_value = report_data.get('duration')
+                if isinstance(duration_value, (int, float)):
+                    duration_seconds_total += float(duration_value)
+                    duration_found = True
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM contents
+            WHERE created_at >= %s AND created_at < %s
+            """,
+            (start_dt, end_dt),
+        )
+        total_row = cursor.fetchone()
+        if total_row:
+            new_contents_total = int(_get_row_value(total_row, 'total') or 0)
+
+        cursor.execute(
+            """
+            SELECT content_type, COUNT(*) AS total
+            FROM contents
+            WHERE created_at >= %s AND created_at < %s
+            GROUP BY content_type
+            """,
+            (start_dt, end_dt),
+        )
+        type_rows = cursor.fetchall()
+        new_contents_by_type = {
+            row['content_type']: int(_get_row_value(row, 'total') or 0) for row in type_rows
+        }
+
+        cursor.execute(
+            """
+            SELECT
+                e.content_id,
+                e.source,
+                e.created_at AS event_created_at,
+                e.final_completed_at,
+                e.resolved_by,
+                c.title,
+                c.content_type,
+                COALESCE(c.is_deleted, FALSE) AS is_deleted
+            FROM cdc_events e
+            LEFT JOIN contents c
+              ON c.content_id = e.content_id AND c.source = e.source
+            WHERE e.event_type = 'CONTENT_COMPLETED'
+              AND e.created_at >= %s AND e.created_at < %s
+            ORDER BY e.created_at DESC, e.id DESC
+            """,
+            (start_dt, end_dt),
+        )
+        completed_rows = cursor.fetchall()
+
+        for row in completed_rows:
+            is_deleted = bool(_get_row_value(row, 'is_deleted'))
+            if is_deleted and not include_deleted:
+                continue
+            content_id = row['content_id']
+            source = row['source']
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS subscriber_count
+                FROM subscriptions
+                WHERE content_id = %s AND source = %s AND wants_completion = TRUE
+                """,
+                (content_id, source),
+            )
+            subscriber_row = cursor.fetchone()
+            subscriber_count = int(_get_row_value(subscriber_row, 'subscriber_count') or 0)
+
+            if not is_deleted:
+                total_recipients += subscriber_count
+
+            title = _get_row_value(row, 'title') or content_id or '-'
+            event_created_at = _get_row_value(row, 'event_created_at')
+            final_completed_at = _get_row_value(row, 'final_completed_at')
+
+            completed_items.append(
+                {
+                    'content_id': content_id,
+                    'source': source,
+                    'title': title,
+                    'content_type': _get_row_value(row, 'content_type'),
+                    'event_created_at': event_created_at.isoformat() if event_created_at else None,
+                    'final_completed_at': final_completed_at.isoformat() if final_completed_at else None,
+                    'resolved_by': _get_row_value(row, 'resolved_by'),
+                    'is_deleted': is_deleted,
+                    'subscriber_count': subscriber_count,
+                    'notification_excluded': is_deleted,
+                }
+            )
+
+    duration_seconds = duration_seconds_total if duration_found else None
+
+    stats = {
+        'duration_seconds': duration_seconds,
+        'new_contents_total': new_contents_total,
+        'new_contents_by_type': new_contents_by_type,
+        'completed_total': len(completed_items),
+        'total_recipients': total_recipients,
+    }
+
+    text_report = build_daily_notification_text(
+        generated_at.isoformat(),
+        stats,
+        completed_items,
+    )
+
+    return jsonify(
+        {
+            'success': True,
+            'date': report_date.isoformat(),
+            'range': {'from': start_dt.isoformat(), 'to': end_dt.isoformat()},
+            'generated_at': generated_at.isoformat(),
+            'stats': stats,
+            'completed_items': completed_items,
+            'text_report': text_report,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-crawler/cleanup', methods=['POST'])
+@login_required
+@admin_required
+def cleanup_daily_crawler_reports():
+    payload = request.get_json() or {}
+    keep_days_raw = payload.get('keep_days')
+    keep_days = 14
+
+    if keep_days_raw is not None:
+        try:
+            keep_days = int(keep_days_raw)
+        except (TypeError, ValueError):
+            return _error_response(400, 'INVALID_REQUEST', 'keep_days must be an integer')
+
+    keep_days = max(1, min(keep_days, 365))
+    cutoff = now_kst_naive() - timedelta(days=keep_days)
+
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute("DELETE FROM daily_crawler_reports WHERE created_at < %s", (cutoff,))
+        deleted_count = cursor.rowcount
+    conn.commit()
+
+    return jsonify(
+        {
+            'success': True,
+            'deleted_count': deleted_count,
+            'cutoff': cutoff.isoformat(),
+            'keep_days': keep_days,
         }
     )
 
