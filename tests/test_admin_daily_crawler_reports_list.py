@@ -70,6 +70,7 @@ def test_admin_daily_reports_list_basic_serialization(monkeypatch, client, auth_
     report = payload["reports"][0]
     assert report["created_at"] == created_at.isoformat()
     assert report["report_data"] == {"status": "성공"}
+    assert report["normalized_status"] == "success"
 
 
 def test_admin_daily_reports_list_with_filters_does_not_error(monkeypatch, client, auth_headers):
@@ -84,7 +85,7 @@ def test_admin_daily_reports_list_with_filters_does_not_error(monkeypatch, clien
             "limit": "10",
             "offset": "5",
             "crawler_name": "scheduled completion cdc",
-            "status": "성공",
+            "status": "success",
             "created_from": "2025-01-01T00:00:00",
             "created_to": "2025-01-02T00:00:00",
         },
@@ -95,3 +96,7 @@ def test_admin_daily_reports_list_with_filters_does_not_error(monkeypatch, clien
     assert response.status_code == 200
     assert payload["success"] is True
     assert fake_cursor.executed
+    query, params = fake_cursor.executed[0]
+    assert "ANY" in query
+    assert isinstance(params, tuple)
+    assert isinstance(params[1], list)

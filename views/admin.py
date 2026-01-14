@@ -1,10 +1,12 @@
 # views/admin.py
 
 import json
+from contextlib import contextmanager
+from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request, g, render_template
 
-from database import get_db, get_cursor, managed_cursor
+from database import get_db, get_cursor
 from services.admin_override_service import upsert_override_and_record_event
 from services.admin_publication_service import (
     delete_publication,
@@ -18,6 +20,11 @@ from services.admin_delete_service import (
     soft_delete_content,
 )
 from services.cdc_event_service import record_content_published_event
+from services.report_summary_service import (
+    build_daily_summary,
+    expand_status_filter,
+    normalize_report_status,
+)
 from utils.auth import admin_required, login_required
 from utils.time import now_kst_naive, parse_iso_naive_kst
 
@@ -27,6 +34,18 @@ admin_bp = Blueprint('admin', __name__)
 
 def _error_response(status_code: int, code: str, message: str):
     return jsonify({'success': False, 'error': {'code': code, 'message': message}}), status_code
+
+
+@contextmanager
+def managed_cursor(conn):
+    cursor = get_cursor(conn)
+    try:
+        yield cursor
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
 
 
 def _serialize_override(row):
@@ -155,6 +174,7 @@ def _serialize_daily_crawler_report(row):
         'id': row['id'],
         'crawler_name': row['crawler_name'],
         'status': row['status'],
+        'normalized_status': normalize_report_status(row['status']),
         'report_data': report_data,
         'created_at': created_at.isoformat() if created_at else None,
     }
@@ -642,8 +662,13 @@ def list_daily_crawler_reports():
         sql += " AND crawler_name = %s"
         params.append(crawler_name)
     if status:
-        sql += " AND status = %s"
-        params.append(status)
+        expanded_statuses = expand_status_filter(status)
+        if expanded_statuses:
+            sql += " AND status = ANY(%s)"
+            params.append(expanded_statuses)
+        else:
+            sql += " AND status = %s"
+            params.append(status)
     if created_from:
         sql += " AND created_at >= %s"
         params.append(created_from)
@@ -668,6 +693,115 @@ def list_daily_crawler_reports():
             'reports': [_serialize_daily_crawler_report(row) for row in rows],
             'limit': limit,
             'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-summary', methods=['GET'])
+@login_required
+@admin_required
+def get_daily_crawler_summary():
+    created_from_raw = request.args.get('created_from')
+    created_to_raw = request.args.get('created_to')
+    created_from = None
+    created_to = None
+
+    if created_from_raw:
+        created_from = parse_iso_naive_kst(created_from_raw)
+        if created_from is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_from must be a valid ISO 8601 datetime string')
+    if created_to_raw:
+        created_to = parse_iso_naive_kst(created_to_raw)
+        if created_to is None:
+            return _error_response(400, 'INVALID_REQUEST', 'created_to must be a valid ISO 8601 datetime string')
+
+    if not created_from and not created_to:
+        now = now_kst_naive()
+        created_from = datetime(now.year, now.month, now.day, 0, 0, 0)
+        created_to = now
+
+    params = []
+    sql = """
+        SELECT id, crawler_name, status, report_data, created_at
+        FROM daily_crawler_reports
+        WHERE 1=1
+    """
+
+    if created_from:
+        sql += " AND created_at >= %s"
+        params.append(created_from)
+    if created_to:
+        sql += " AND created_at <= %s"
+        params.append(created_to)
+
+    sql += " ORDER BY created_at DESC, id DESC"
+
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
+
+    items = [_serialize_daily_crawler_report(row) for row in rows]
+
+    range_label = None
+    if created_from and created_to:
+        range_label = f"{created_from.isoformat()} ~ {created_to.isoformat()}"
+    elif created_from:
+        range_label = f"{created_from.isoformat()} ~ -"
+    elif created_to:
+        range_label = f"- ~ {created_to.isoformat()}"
+
+    date_basis = created_to or created_from or now_kst_naive()
+    date_label = date_basis.strftime('%Y-%m-%d')
+
+    summary_payload = build_daily_summary(items, range_label, date_label)
+
+    return jsonify(
+        {
+            'success': True,
+            'range': {
+                'created_from': created_from.isoformat() if created_from else None,
+                'created_to': created_to.isoformat() if created_to else None,
+            },
+            'overall_status': summary_payload['overall_status'],
+            'subject_text': summary_payload['subject_text'],
+            'summary_text': summary_payload['summary_text'],
+            'total_reports': len(items),
+            'counts': summary_payload['counts'],
+            'items': items,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/reports/daily-crawler/cleanup', methods=['POST'])
+@login_required
+@admin_required
+def cleanup_daily_crawler_reports():
+    payload = request.get_json() or {}
+    keep_days_raw = payload.get('keep_days')
+    keep_days = 14
+
+    if keep_days_raw is not None:
+        try:
+            keep_days = int(keep_days_raw)
+        except (TypeError, ValueError):
+            return _error_response(400, 'INVALID_REQUEST', 'keep_days must be an integer')
+
+    keep_days = max(1, min(keep_days, 365))
+    cutoff = now_kst_naive() - timedelta(days=keep_days)
+
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute("DELETE FROM daily_crawler_reports WHERE created_at < %s", (cutoff,))
+        deleted_count = cursor.rowcount
+    conn.commit()
+
+    return jsonify(
+        {
+            'success': True,
+            'deleted_count': deleted_count,
+            'cutoff': cutoff.isoformat(),
+            'keep_days': keep_days,
         }
     )
 
