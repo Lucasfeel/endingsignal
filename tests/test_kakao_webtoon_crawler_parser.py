@@ -67,6 +67,52 @@ def test_parse_completed_payload_shape():
     assert entries[0]["content_id"] == "1001"
 
 
+def test_parse_ongoing_status_from_content():
+    crawler = KakaoWebtoonCrawler()
+    payload = _build_payload([{"name": "작가A"}], {"onGoingStatus": "pause"})
+    entries = crawler._parse_timetable_payload(payload)
+
+    assert entries[0]["kakao_ongoing_status"] == "PAUSE"
+
+
+def test_parse_ongoing_status_from_card():
+    crawler = KakaoWebtoonCrawler()
+    payload = {
+        "data": [
+            {
+                "cardGroups": [
+                    {
+                        "cards": [
+                            {
+                                "onGoingStatus": "COMPLETED",
+                                "content": {
+                                    "id": 2002,
+                                    "title": "테스트웹툰",
+                                    "seoId": "test-seo",
+                                    "authors": [{"name": "작가A"}],
+                                    "backgroundImage": "https://example.com/bg-no-ext",
+                                },
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    entries = crawler._parse_timetable_payload(payload)
+
+    assert entries[0]["kakao_ongoing_status"] == "COMPLETED"
+
+
+def test_pause_status_classified_as_hiatus_in_completed():
+    crawler = KakaoWebtoonCrawler()
+    status = crawler._normalize_status_text("PAUSE")
+
+    classification = "hiatus" if crawler._is_pause_status(status) else "finished"
+
+    assert classification == "hiatus"
+
+
 def test_thumbnail_prefers_background_image():
     crawler = KakaoWebtoonCrawler()
     payload = _build_payload(
