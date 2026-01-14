@@ -202,6 +202,31 @@ class KakaoWebtoonCrawler(ContentCrawler):
             entry["kakao_assets"] = kakao_assets
         return entry
 
+    @staticmethod
+    def _normalize_status_text(value: Optional[str]) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        return trimmed.upper()
+
+    def _extract_ongoing_status(self, card: Dict, content: Dict) -> Optional[str]:
+        status = None
+        if isinstance(content, dict):
+            status = content.get("onGoingStatus")
+        if status is None and isinstance(card, dict):
+            status = card.get("onGoingStatus")
+        return self._normalize_status_text(status)
+
+    @staticmethod
+    def _is_pause_status(status: Optional[str]) -> bool:
+        return status == "PAUSE"
+
+    @staticmethod
+    def _is_completed_status(status: Optional[str]) -> bool:
+        return status == "COMPLETED"
+
     def _parse_timetable_payload(self, payload: Dict) -> List[Dict]:
         entries: List[Dict] = []
         if not isinstance(payload, dict):
@@ -223,6 +248,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
                         continue
                     entry = self._build_entry(content)
                     if entry:
+                        entry["kakao_ongoing_status"] = self._extract_ongoing_status(card, content)
                         entries.append(entry)
         return entries
 
@@ -239,6 +265,15 @@ class KakaoWebtoonCrawler(ContentCrawler):
                     **entry,
                     "weekdays": set(),
                 }
+            else:
+                existing_weekdays = ongoing_map[content_id].get("weekdays")
+                for key, value in entry.items():
+                    if key not in ongoing_map[content_id]:
+                        ongoing_map[content_id][key] = value
+                if existing_weekdays is not None:
+                    ongoing_map[content_id]["weekdays"] = existing_weekdays
+                else:
+                    ongoing_map[content_id]["weekdays"] = set()
             ongoing_map[content_id]["weekdays"].add(weekday)
 
     async def _fetch_placement_entries(
@@ -290,11 +325,18 @@ class KakaoWebtoonCrawler(ContentCrawler):
         )
         connector = aiohttp.TCPConnector(limit=config.CRAWLER_HTTP_CONCURRENCY_LIMIT, ttl_dns_cache=300)
 
-        fetch_meta = {"ongoing": {}, "finished": {}, "errors": []}
-        ongoing_map: Dict[str, Dict] = {}
-        finished_map: Dict[str, Dict] = {}
-        hiatus_map: Dict[str, Dict] = {}
+        fetch_meta = {
+            "ongoing": {},
+            "finished": {},
+            "errors": [],
+            "status_counts": {},
+            "placement_status_counts": {},
+        }
+        combined_map: Dict[str, Dict] = {}
+        hiatus_ids = set()
+        finished_ids = set()
         total_parsed = 0
+        pause_found_in_completed = False
 
         headers = self._build_headers()
         placements: List[Tuple[str, str]] = [
@@ -323,26 +365,84 @@ class KakaoWebtoonCrawler(ContentCrawler):
             if error:
                 fetch_meta["errors"].append(f"{category}:{placement}:{error}")
 
+            placement_status_counts = fetch_meta["placement_status_counts"].setdefault(placement, {})
+
             if category == "ongoing":
                 weekday = PLACEMENT_WEEKDAY_MAP.get(placement)
                 if weekday:
-                    self._merge_weekday_entries(ongoing_map, entries, weekday)
+                    self._merge_weekday_entries(combined_map, entries, weekday)
+                for entry in entries:
+                    status = entry.get("kakao_ongoing_status")
+                    status_key = status or "UNKNOWN"
+                    fetch_meta["status_counts"][status_key] = (
+                        fetch_meta["status_counts"].get(status_key, 0) + 1
+                    )
+                    placement_status_counts[status_key] = placement_status_counts.get(status_key, 0) + 1
+                    if self._is_pause_status(status):
+                        hiatus_ids.add(entry["content_id"])
+                    elif self._is_completed_status(status):
+                        finished_ids.add(entry["content_id"])
             else:
                 for entry in entries:
-                    finished_map[entry["content_id"]] = entry
+                    content_id = entry["content_id"]
+                    status = entry.get("kakao_ongoing_status")
+                    status_key = status or "UNKNOWN"
+                    fetch_meta["status_counts"][status_key] = (
+                        fetch_meta["status_counts"].get(status_key, 0) + 1
+                    )
+                    placement_status_counts[status_key] = placement_status_counts.get(status_key, 0) + 1
+                    existing = combined_map.get(content_id)
+                    if existing:
+                        existing_weekdays = existing.get("weekdays")
+                        for key, value in entry.items():
+                            if key not in existing:
+                                existing[key] = value
+                        if existing_weekdays is not None:
+                            existing["weekdays"] = existing_weekdays
+                    else:
+                        combined_map[content_id] = dict(entry)
+                    if self._is_pause_status(status):
+                        hiatus_ids.add(content_id)
+                        pause_found_in_completed = True
+                    else:
+                        finished_ids.add(content_id)
 
             total_parsed += len(entries)
 
-        for entry in ongoing_map.values():
-            entry["weekdays"] = list(entry.get("weekdays", []))
+        for entry in combined_map.values():
+            weekdays = entry.get("weekdays")
+            if isinstance(weekdays, set):
+                entry["weekdays"] = sorted(weekdays)
 
-        all_map = {**ongoing_map, **finished_map}
+        hiatus_map = {
+            content_id: combined_map[content_id]
+            for content_id in hiatus_ids
+            if content_id in combined_map
+        }
+        finished_map = {
+            content_id: combined_map[content_id]
+            for content_id in finished_ids
+            if content_id in combined_map and content_id not in hiatus_ids
+        }
+        ongoing_map = {
+            content_id: entry
+            for content_id, entry in combined_map.items()
+            if content_id not in hiatus_ids and content_id not in finished_ids
+        }
+
+        all_map = {**ongoing_map, **hiatus_map, **finished_map}
         fetch_meta["fetched_count"] = len(all_map)
         fetch_meta["is_suspicious_empty"] = total_parsed == 0
+        if pause_found_in_completed:
+            fetch_meta.setdefault("health_notes", []).append("pause_found_in_completed_placement")
         if not finished_map:
             fetch_meta.setdefault("health_notes", []).append("finished_count_zero")
 
-        print(f"수집 완료: ongoing={len(ongoing_map)} finished={len(finished_map)} total={len(all_map)}")
+        print(
+            "수집 완료: "
+            f"ongoing={len(ongoing_map)} hiatus={len(hiatus_map)} "
+            f"finished={len(finished_map)} total={len(all_map)}"
+        )
         return ongoing_map, hiatus_map, finished_map, all_map, fetch_meta
 
     def synchronize_database(
@@ -361,10 +461,10 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
         for content_id, webtoon_data in all_content_today.items():
             status = ""
-            if content_id in finished_today:
-                status = "완결"
-            elif content_id in hiatus_today:
+            if content_id in hiatus_today:
                 status = "휴재"
+            elif content_id in finished_today:
+                status = "완결"
             elif content_id in ongoing_today:
                 status = "연재중"
             else:

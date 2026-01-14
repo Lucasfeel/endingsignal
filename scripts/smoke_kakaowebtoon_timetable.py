@@ -25,7 +25,8 @@ async def main():
             for entry in entries[:3]:
                 print(
                     f"  - {entry['title']} ({entry['content_id']}) "
-                    f"thumbnail_url={entry.get('thumbnail_url')}"
+                    f"thumbnail_url={entry.get('thumbnail_url')} "
+                    f"kakao_ongoing_status={entry.get('kakao_ongoing_status')}"
                 )
 
 
