@@ -11,5 +11,4 @@
 - `scripts/archive/v2_meta_structure.py` and `scripts/archive/backfill_content_urls.py`: one-off migration/backfill utilities not invoked by any scheduler or entrypoint.
 
 ## Notes
-- Email/reporting utilities (`services/email.py`, `report_sender.py`, SMTP/SendGrid adapters) were retained because `.github/workflows/crawler.yml` still schedules them alongside crawler runs.
-- GitHub Actions crawler workflow remains unchanged pending confirmation of operational scheduler preferences.
+- Email/reporting utilities and workflow steps were removed in favor of Admin Console summaries and a scheduled cleanup script.

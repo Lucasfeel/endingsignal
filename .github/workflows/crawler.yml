@@ -32,25 +32,14 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_PORT: ${{ secrets.DB_PORT }}
-          # 이메일 발송에 필요한 환경 변수 (알림 서비스용)
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
-          # SendGrid 사용 시 필요한 API 키 (선택 사항)
-          # SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
         run: python run_all_crawlers.py
 
-      - name: Run report sender
-        # report_sender.py는 자체적으로 load_dotenv()를 호출하므로
-        # 환경 변수를 다시 설정해주는 것이 가장 안전합니다.
+      - name: Cleanup old daily crawler reports
         env:
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_PORT: ${{ secrets.DB_PORT }}
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
-          # SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-        run: python report_sender.py
+          KEEP_DAYS: 14
+        run: python scripts/cleanup_daily_crawler_reports.py

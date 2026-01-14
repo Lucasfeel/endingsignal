@@ -17,9 +17,9 @@ This audit re-checks the current code against the supplied v2.01 specification t
 - **Kakao crawler (archived)**: Enforces cookie requirements via env vars, fetches weekday and completed feeds concurrently with retries, maps status (ongoing/hiatus/finished), normalizes authors/thumbnails/weekdays into the same `meta` shape, runs CDC comparison, sends notifications, and syncs the database.【F:crawlers/_archive/kakaowebtoon_crawler.py†L3-L187】
 - **Retry & pagination**: Both crawlers apply `tenacity` retries to API calls and iterate paginated data where required (Naver finished list, Kakao completed list), matching the resiliency and completeness notes.【F:crawlers/naver_webtoon_crawler.py†L25-L58】【F:crawlers/_archive/kakaowebtoon_crawler.py†L9-L77】
 
-### 4) Notification & Email Strategy
-- **Pluggable providers**: `EMAIL_PROVIDER` switches between SMTP and SendGrid without code changes via `get_email_service`, consistent with the spec’s strategy/factory approach.【F:services/email.py†L1-L17】【F:config.py†L18-L24】
-- **Completion-triggered delivery**: CDC results drive subscription lookups and per-user email sends through the chosen provider, matching the described workflow.【F:services/notification_service.py†L4-L37】
+### 4) Notification Strategy
+- **Email reporting removed**: Email-based reporting and provider abstractions were removed in favor of Admin Console summaries and scheduled cleanup for crawler reports.
+  This area now focuses on in-app admin observability instead of outbound email delivery.
 
 ### 5) API Surface
 - **Search**: Uses trigram similarity (`title %% %s` with `similarity` ordering) over `contents`, scoped by `content_type`/`source` as in the spec.【F:views/contents.py†L10-L39】
@@ -30,7 +30,7 @@ This audit re-checks the current code against the supplied v2.01 specification t
 ### 6) Batch Orchestration & Reporting
 - **Parallel crawler runs**: `run_all_crawlers.py` registers both crawlers and executes them concurrently with `asyncio.gather(..., return_exceptions=True)` so one failure does not block the other.【F:run_all_crawlers.py†L1-L79】
 - **Audit logging**: Each crawler write a JSONB report into `daily_crawler_reports`; the standalone Naver script mirrors this for isolated runs.【F:run_all_crawlers.py†L41-L75】【F:crawlers/naver_webtoon_crawler.py†L191-L256】
-- **Admin reporting cleanup**: The report sender truncates audit rows only after a successful email, preserving logs on failure as specified.【F:report_sender.py†L10-L62】
+- **Admin reporting cleanup**: Admin Console summaries now serve as the primary reporting surface, and a scheduled cleanup script removes old `daily_crawler_reports` rows to prevent unbounded growth.
 
 ### 7) Not Yet Implemented (by design or future work)
 - **MSA / Celery / Redis job queue**: Present code remains a modular monolith with synchronous batch orchestration; no task queue or service split is in place.
