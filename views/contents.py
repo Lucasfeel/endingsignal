@@ -5,7 +5,6 @@ from database import get_db, get_cursor
 from utils.text import normalize_search_text
 import base64
 import json
-import math
 import os
 
 contents_bp = Blueprint('contents', __name__)
