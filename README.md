@@ -19,6 +19,27 @@
   python -c "import secrets; print(secrets.token_hex(32))"
   ```
 
+## Docker deployment
+
+- Build and run (no database required):
+
+  ```bash
+  docker compose up --build web
+  ```
+
+- Run with PostgreSQL (optional):
+
+  ```bash
+  DATABASE_URL=postgresql://endingsignal:endingsignal@db:5432/endingsignal \
+  docker compose --profile with-db up --build
+  ```
+
+- Startup behavior:
+  - `scripts/start_web.py` runs `init_db.py` only when DB config exists (`DATABASE_URL` or all `DB_*` vars).
+  - Set `SKIP_DB_INIT=1` to force skip.
+  - Set `RUN_DB_INIT=1` to force run.
+  - Health check endpoint: `GET /healthz`.
+
 ## Testing
 
 ```bash

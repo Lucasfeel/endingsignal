@@ -1,6 +1,28 @@
 import database
 
 
+def test_has_database_config_with_database_url(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgres://example")
+    monkeypatch.delenv("DB_NAME", raising=False)
+    monkeypatch.delenv("DB_USER", raising=False)
+    monkeypatch.delenv("DB_PASSWORD", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)
+    monkeypatch.delenv("DB_PORT", raising=False)
+
+    assert database.has_database_config() is True
+
+
+def test_has_database_config_false_without_required_env(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_NAME", raising=False)
+    monkeypatch.delenv("DB_USER", raising=False)
+    monkeypatch.delenv("DB_PASSWORD", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)
+    monkeypatch.delenv("DB_PORT", raising=False)
+
+    assert database.has_database_config() is False
+
+
 def test_create_connection_passes_timezone_options_with_database_url(monkeypatch):
     calls = {}
     sentinel = object()

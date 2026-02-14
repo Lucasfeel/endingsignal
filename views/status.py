@@ -1,7 +1,7 @@
 # views/status.py
 
 from flask import Blueprint, jsonify, current_app
-from database import get_db, get_cursor
+from database import DatabaseUnavailableError, get_db, get_cursor
 
 status_bp = Blueprint('status', __name__)
 
@@ -21,6 +21,13 @@ def get_status():
             'status': 'ok',
             'content_count': content_count
         })
+    except DatabaseUnavailableError:
+        return jsonify({
+            'status': 'degraded',
+            'database': 'unavailable',
+            'content_count': None,
+            'message': 'database not configured'
+        }), 200
     except Exception:
         current_app.logger.exception("Status check failed")
         return jsonify({

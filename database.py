@@ -7,6 +7,19 @@ from contextlib import contextmanager
 import os
 import sys
 
+REQUIRED_DB_ENV_VARS = ('DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT')
+
+
+class DatabaseUnavailableError(ValueError):
+    """Raised when no usable database configuration is present."""
+
+
+def has_database_config():
+    database_url = (os.environ.get('DATABASE_URL') or '').strip()
+    if database_url:
+        return True
+    return all((os.environ.get(var) or '').strip() for var in REQUIRED_DB_ENV_VARS)
+
 def _create_connection():
     """
     환경 변수를 기반으로 새로운 데이터베이스 연결을 생성합니다.
@@ -19,9 +32,11 @@ def _create_connection():
         return psycopg2.connect(database_url, options=options)
 
     # 로컬 개발 환경을 위한 개별 변수 확인
-    required_vars = ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT']
-    if not all(os.environ.get(var) for var in required_vars):
-        raise ValueError("로컬 개발을 위해서는 DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT 환경 변수가 모두 필요합니다.")
+    if not has_database_config():
+        raise DatabaseUnavailableError(
+            "Database configuration is missing. Set DATABASE_URL or "
+            "DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT."
+        )
 
     return psycopg2.connect(
         dbname=os.environ.get('DB_NAME'),

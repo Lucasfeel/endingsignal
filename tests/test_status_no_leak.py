@@ -1,5 +1,6 @@
 import views.status as status_view
 from app import app as flask_app
+from database import DatabaseUnavailableError
 
 
 class FakeCursor:
@@ -28,3 +29,25 @@ def test_status_does_not_leak_exception_details(monkeypatch):
     assert payload == {"status": "error", "message": "internal error"}
     assert cursor.closed is True
     assert "secret-details" not in response.get_data(as_text=True)
+
+
+def test_status_returns_degraded_when_database_is_not_configured(monkeypatch):
+    monkeypatch.setattr(
+        status_view,
+        "get_db",
+        lambda: (_ for _ in ()).throw(DatabaseUnavailableError("missing config")),
+    )
+
+    flask_app.config["TESTING"] = True
+    client = flask_app.test_client()
+
+    response = client.get("/api/status")
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "status": "degraded",
+        "database": "unavailable",
+        "content_count": None,
+        "message": "database not configured",
+    }
