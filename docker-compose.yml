@@ -5,9 +5,9 @@ services:
       dockerfile: Dockerfile
     image: endingsignal-web:latest
     ports:
-      - "5000:5000"
+      - "${PORT:-5000}:${PORT:-5000}"
     environment:
-      PORT: "5000"
+      PORT: ${PORT:-5000}
       FLASK_ENV: production
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}

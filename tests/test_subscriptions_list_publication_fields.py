@@ -124,3 +124,24 @@ def test_list_subscriptions_no_publication(monkeypatch, client, auth_headers):
     assert publication['public_at'] is None
     assert publication['is_scheduled_publication'] is False
     assert publication['is_published'] is False
+
+
+def test_list_subscriptions_query_uses_webtoon_created_at_fallback(
+    monkeypatch, client, auth_headers
+):
+    now = datetime(2025, 1, 2, 12, 0, 0)
+    fake_cursor = FakeCursor([_base_row(None)])
+    fake_conn = FakeConnection()
+
+    monkeypatch.setattr(subscriptions, 'get_db', lambda: fake_conn)
+    monkeypatch.setattr(subscriptions, 'get_cursor', lambda conn: fake_cursor)
+    monkeypatch.setattr(subscriptions, 'now_kst_naive', lambda: now)
+
+    response = client.get('/api/me/subscriptions', headers=auth_headers)
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload['success'] is True
+    executed_query = fake_cursor.executed[0][0]
+    assert "COALESCE(" in executed_query
+    assert "WHEN c.content_type = 'webtoon' THEN c.created_at" in executed_query

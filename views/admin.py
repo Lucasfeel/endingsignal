@@ -1098,7 +1098,13 @@ def list_missing_publication_contents():
         LEFT JOIN admin_content_metadata m
           ON m.content_id = c.content_id AND m.source = c.source
         WHERE COALESCE(c.is_deleted, FALSE) = FALSE
-          AND m.public_at IS NULL
+          AND COALESCE(
+            m.public_at,
+            CASE
+              WHEN c.content_type = 'webtoon' THEN c.created_at
+              ELSE NULL
+            END
+          ) IS NULL
     """
 
     if source:
@@ -1399,6 +1405,23 @@ def lookup_admin_content():
         'created_at': content_row['created_at'].isoformat() if content_row['created_at'] else None,
         'updated_at': content_row['updated_at'].isoformat() if content_row['updated_at'] else None,
     }
+
+    if publication_row is None and content_row['content_type'] == 'webtoon':
+        publication_row = {
+            'id': None,
+            'content_id': content_row['content_id'],
+            'source': content_row['source'],
+            'public_at': content_row['created_at'],
+            'reason': 'auto_from_created_at',
+            'admin_id': None,
+            'created_at': content_row['created_at'],
+            'updated_at': content_row['updated_at'],
+            'title': content_row['title'],
+            'content_type': content_row['content_type'],
+            'status': content_row['status'],
+            'meta': _normalize_meta(_get_row_value(content_row, 'meta')),
+            'is_deleted': content_row['is_deleted'],
+        }
 
     override = _serialize_override(override_row) if override_row else None
     publication = _serialize_publication(publication_row) if publication_row else None

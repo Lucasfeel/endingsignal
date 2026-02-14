@@ -6,6 +6,10 @@
   `report_data JSONB`, and `created_at TIMESTAMP DEFAULT NOW()`. Either `SERIAL` or
   `BIGSERIAL` are acceptable for deployments; the current schema uses `SERIAL` to match the
   application setup in `database.py`.
+- Webtoon publication defaults: when `admin_content_metadata.public_at` is not explicitly set,
+  the app treats `contents.created_at` (first-seen crawl timestamp) as the effective
+  publication date. Crawlers also try to seed this default into `admin_content_metadata`
+  using the first available user id.
 
 ## Production auth config
 
@@ -27,6 +31,12 @@
   docker compose up --build web
   ```
 
+  - Default port is `5000`. To use a different port, set `PORT`:
+
+  ```bash
+  PORT=8080 docker compose up --build web
+  ```
+
 - Run with PostgreSQL (optional):
 
   ```bash
@@ -38,6 +48,7 @@
   - `scripts/start_web.py` runs `init_db.py` only when DB config exists (`DATABASE_URL` or all `DB_*` vars).
   - Set `SKIP_DB_INIT=1` to force skip.
   - Set `RUN_DB_INIT=1` to force run.
+  - Web bind target is `0.0.0.0:${PORT}` (`PORT` default: `5000`).
   - Health check endpoint: `GET /healthz`.
 
 ## Testing

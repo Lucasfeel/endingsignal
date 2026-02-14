@@ -52,7 +52,13 @@ def list_subscriptions():
             SELECT c.content_id, c.source, c.content_type, c.title, c.status, c.meta,
                    s.wants_completion, s.wants_publication,
                    o.override_status, o.override_completed_at,
-                   m.public_at AS public_at
+                   COALESCE(
+                       m.public_at,
+                       CASE
+                           WHEN c.content_type = 'webtoon' THEN c.created_at
+                           ELSE NULL
+                       END
+                   ) AS public_at
             FROM subscriptions s
             JOIN contents c
                 ON s.content_id = c.content_id AND s.source = c.source

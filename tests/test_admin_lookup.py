@@ -76,7 +76,7 @@ def test_admin_publications_includes_title(monkeypatch, client, auth_headers):
                 "updated_at": now,
                 "title": "Sample Title",
                 "content_type": "webtoon",
-                "status": "연재중",
+                "status": "\uc5f0\uc7ac\uc911",
                 "meta": {"common": {"thumbnail_url": "https://example.com/thumb.png"}},
                 "is_deleted": False,
             }
@@ -91,7 +91,7 @@ def test_admin_publications_includes_title(monkeypatch, client, auth_headers):
     item = payload["publications"][0]
     assert item["title"] == "Sample Title"
     assert item["content_type"] == "webtoon"
-    assert item["status"] == "연재중"
+    assert item["status"] == "\uc5f0\uc7ac\uc911"
     assert isinstance(item["meta"], dict)
 
 
@@ -107,13 +107,13 @@ def test_admin_deleted_includes_title(monkeypatch, client, auth_headers):
                 "source": "SRC",
                 "content_type": "novel",
                 "title": "Deleted Title",
-                "status": "완결",
+                "status": "\uc644\uacb0",
                 "is_deleted": True,
                 "meta": '{"common": {"thumbnail_url": "https://example.com/deleted.png"}}',
                 "deleted_at": now,
                 "deleted_reason": "spam",
                 "deleted_by": 2,
-                "override_status": "완결",
+                "override_status": "\uc644\uacb0",
                 "override_completed_at": now,
                 "subscription_count": 12,
             }
@@ -127,7 +127,7 @@ def test_admin_deleted_includes_title(monkeypatch, client, auth_headers):
     item = payload["deleted_contents"][0]
     assert item["title"] == "Deleted Title"
     assert isinstance(item["meta"], dict)
-    assert item["override_status"] == "완결"
+    assert item["override_status"] == "\uc644\uacb0"
     assert item["override_completed_at"] == now.isoformat()
     assert item["subscription_count"] == 12
 
@@ -139,7 +139,7 @@ def test_admin_lookup(monkeypatch, client, auth_headers):
         "source": "SRC",
         "title": "Lookup Title",
         "content_type": "webtoon",
-        "status": "연재중",
+        "status": "\uc5f0\uc7ac\uc911",
         "meta": '{"common": {"thumbnail_url": "https://example.com/lookup.png"}}',
         "is_deleted": False,
         "created_at": now,
@@ -149,7 +149,7 @@ def test_admin_lookup(monkeypatch, client, auth_headers):
         "id": 3,
         "content_id": "CID",
         "source": "SRC",
-        "override_status": "완결",
+        "override_status": "\uc644\uacb0",
         "override_completed_at": now,
         "reason": "manual",
         "admin_id": 1,
@@ -184,7 +184,7 @@ def test_admin_lookup(monkeypatch, client, auth_headers):
     assert payload["success"] is True
     assert payload["content"]["title"] == "Lookup Title"
     assert isinstance(payload["content"]["meta"], dict)
-    assert payload["override"]["override_status"] == "완결"
+    assert payload["override"]["override_status"] == "\uc644\uacb0"
     assert payload["publication"]["reason"] == "publish"
 
 
@@ -201,3 +201,38 @@ def test_admin_lookup_missing_content_returns_404(monkeypatch, client, auth_head
     payload = response.get_json()
     assert response.status_code == 404
     assert payload["error"]["code"] == "CONTENT_NOT_FOUND"
+
+
+def test_admin_lookup_webtoon_publication_falls_back_to_created_at(
+    monkeypatch, client, auth_headers
+):
+    now = datetime(2024, 6, 2, 9, 0, 0)
+    content_row = {
+        "content_id": "CID",
+        "source": "SRC",
+        "title": "Lookup Title",
+        "content_type": "webtoon",
+        "status": "\uc5f0\uc7ac\uc911",
+        "meta": {},
+        "is_deleted": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_cursor = FakeCursor(
+        content_row=content_row,
+        override_row=None,
+        publication_row=None,
+    )
+    monkeypatch.setattr(admin_view, "get_db", lambda: FakeConnection(fake_cursor))
+    monkeypatch.setattr(admin_view, "get_cursor", lambda conn: fake_cursor)
+
+    response = client.get(
+        "/api/admin/contents/lookup?content_id=CID&source=SRC",
+        headers=auth_headers,
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["publication"]["public_at"] == now.isoformat()
+    assert payload["publication"]["reason"] == "auto_from_created_at"

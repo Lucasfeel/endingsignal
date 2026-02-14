@@ -17,6 +17,60 @@ class ContentCrawler(ABC):
     def __init__(self, source_name):
         self.source_name = source_name
 
+    def seed_webtoon_publication_dates(self, cursor):
+        """
+        Seed default publication dates for webtoons from first-seen timestamp.
+
+        public_at default rule:
+        - if admin_content_metadata row does not exist
+        - and content_type is webtoon
+        - then set public_at = contents.created_at
+
+        admin_content_metadata.admin_id is NOT NULL, so this uses the first
+        available user id (preferring admin role) as the actor.
+        """
+        cursor.execute(
+            """
+            WITH preferred_user AS (
+                SELECT id
+                FROM users
+                ORDER BY
+                    CASE WHEN role = 'admin' THEN 0 ELSE 1 END,
+                    id ASC
+                LIMIT 1
+            )
+            INSERT INTO admin_content_metadata (
+                content_id,
+                source,
+                public_at,
+                reason,
+                admin_id,
+                updated_at
+            )
+            SELECT
+                c.content_id,
+                c.source,
+                c.created_at,
+                'auto_from_created_at',
+                u.id,
+                NOW()
+            FROM contents c
+            JOIN preferred_user u ON TRUE
+            LEFT JOIN admin_content_metadata m
+              ON m.content_id = c.content_id
+             AND m.source = c.source
+            WHERE c.source = %s
+              AND c.content_type = 'webtoon'
+              AND COALESCE(c.is_deleted, FALSE) = FALSE
+              AND m.content_id IS NULL
+            ON CONFLICT (content_id, source) DO NOTHING
+            RETURNING content_id
+            """,
+            (self.source_name,),
+        )
+        rows = cursor.fetchall()
+        return len(rows) if rows else 0
+
     @abstractmethod
     async def fetch_all_data(self):
         """
@@ -237,6 +291,17 @@ class ContentCrawler(ABC):
 
             # 8) DB sync (commit is enforced here, not in crawler implementations)
             added = self.synchronize_database(conn, all_content_today, ongoing_today, hiatus_today, finished_today)
+
+            # 8.5) Seed default publication dates for webtoons (best effort).
+            default_publication_seeded_count = 0
+            default_publication_seed_error = None
+            try:
+                default_publication_seeded_count = self.seed_webtoon_publication_dates(cursor)
+            except Exception as seed_error:
+                default_publication_seed_error = str(seed_error)
+            cdc_info["default_publication_seeded_count"] = default_publication_seeded_count
+            if default_publication_seed_error:
+                cdc_info["default_publication_seed_error"] = default_publication_seed_error
 
             # 9) Single commit here (forced)
             conn.commit()

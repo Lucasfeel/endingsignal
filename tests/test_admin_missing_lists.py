@@ -111,6 +111,8 @@ def test_missing_publication_returns_items(monkeypatch, client, auth_headers):
     assert payload["success"] is True
     assert payload["items"][0]["content_id"] == "CID2"
     assert fake_cursor.params == (5, 0)
+    assert "COALESCE(" in fake_cursor.executed
+    assert "WHEN c.content_type = 'webtoon' THEN c.created_at" in fake_cursor.executed
 
 
 def test_missing_completion_requires_admin(monkeypatch, client, auth_headers):
