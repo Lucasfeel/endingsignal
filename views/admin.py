@@ -81,6 +81,25 @@ def _serialize_publication(row):
     }
 
 
+def _serialize_completion_change(row):
+    return {
+        'id': row['id'],
+        'content_id': row['content_id'],
+        'source': row['source'],
+        'override_status': row['override_status'],
+        'override_completed_at': row['override_completed_at'].isoformat() if row['override_completed_at'] else None,
+        'reason': row['reason'],
+        'admin_id': row['admin_id'],
+        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+        'title': _get_row_value(row, 'title'),
+        'content_type': _get_row_value(row, 'content_type'),
+        'status': _get_row_value(row, 'status'),
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
+        'is_deleted': _get_row_value(row, 'is_deleted'),
+    }
+
+
 def _serialize_deleted_content(row):
     return {
         'content_id': row['content_id'],
@@ -534,6 +553,60 @@ def list_content_publications():
         {
             'success': True,
             'publications': [_serialize_publication(row) for row in publications],
+            'limit': limit,
+            'offset': offset,
+        }
+    )
+
+
+@admin_bp.route('/api/admin/contents/completion-changes', methods=['GET'])
+@login_required
+@admin_required
+def list_content_completion_changes():
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return _error_response(400, 'INVALID_REQUEST', 'limit and offset must be integers')
+
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT
+                o.id,
+                o.content_id,
+                o.source,
+                o.override_status,
+                o.override_completed_at,
+                o.reason,
+                o.admin_id,
+                o.created_at,
+                o.updated_at,
+                c.title,
+                c.content_type,
+                c.status,
+                c.meta,
+                COALESCE(c.is_deleted, FALSE) AS is_deleted
+            FROM admin_content_overrides o
+            LEFT JOIN contents c
+              ON c.content_id = o.content_id AND c.source = o.source
+            WHERE o.override_status = %s
+              AND o.override_completed_at IS NOT NULL
+            ORDER BY o.updated_at DESC, o.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            ('\uc644\uacb0', limit, offset),
+        )
+        rows = cursor.fetchall()
+
+    return jsonify(
+        {
+            'success': True,
+            'changes': [_serialize_completion_change(row) for row in rows],
             'limit': limit,
             'offset': offset,
         }

@@ -170,6 +170,12 @@
       offset: 0,
       lastCount: 0,
     },
+    completionChanges: {
+      items: [],
+      limit: 50,
+      offset: 0,
+      lastCount: 0,
+    },
     missingCompletion: {
       items: [],
       limit: 50,
@@ -585,6 +591,7 @@
       manage: document.getElementById('panelManage'),
       deleted: document.getElementById('panelDeleted'),
       publications: document.getElementById('panelPublications'),
+      completionChanges: document.getElementById('panelCompletionChanges'),
       missingCompletion: document.getElementById('panelMissingCompletion'),
       missingPublication: document.getElementById('panelMissingPublication'),
       audit: document.getElementById('panelAudit'),
@@ -596,6 +603,7 @@
       manage: document.getElementById('tabManage'),
       deleted: document.getElementById('tabDeleted'),
       publications: document.getElementById('tabPublications'),
+      completionChanges: document.getElementById('tabCompletionChanges'),
       missingCompletion: document.getElementById('tabMissingCompletion'),
       missingPublication: document.getElementById('tabMissingPublication'),
       audit: document.getElementById('tabAudit'),
@@ -1561,6 +1569,86 @@
     });
   };
 
+  const renderCompletionChanges = () => {
+    const container = document.getElementById('completionChangesList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!STATE.completionChanges.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '최근 변경된 완결일이 없습니다.';
+      container.appendChild(empty);
+      return;
+    }
+
+    STATE.completionChanges.items.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+      const row = document.createElement('div');
+      row.className = 'flex items-start gap-3';
+
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className =
+        'flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-black/40';
+      const thumbImg = document.createElement('img');
+      const thumbUrl = getThumbnailUrl(item);
+      thumbImg.className = 'h-full w-full object-cover';
+      if (thumbUrl) {
+        thumbImg.src = thumbUrl;
+      } else {
+        thumbImg.classList.add('hidden');
+        const fallback = document.createElement('span');
+        fallback.className = 'text-[10px] text-white/40';
+        fallback.textContent = 'No Image';
+        thumbWrap.appendChild(fallback);
+      }
+      thumbWrap.appendChild(thumbImg);
+
+      const contentBox = document.createElement('div');
+      contentBox.className = 'flex-1';
+      const title = document.createElement('div');
+      title.className = 'font-semibold text-white';
+      title.textContent = item.title || item.normalized_title || item.content_id;
+      const meta = document.createElement('div');
+      meta.className = 'mt-1 text-xs text-white/60';
+      meta.textContent = `${item.source || '-'} · ${item.content_type || '-'} · ${item.status || '-'}`;
+      const detail = document.createElement('div');
+      detail.className = 'mt-1 text-[11px] text-white/50';
+      detail.textContent = `완결일 ${formatTimestamp(item.override_completed_at)} · 사유: ${item.reason || '-'}`;
+
+      if (item.is_deleted) {
+        const badge = document.createElement('span');
+        badge.className =
+          'ml-2 inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+        badge.textContent = '삭제됨';
+        detail.appendChild(badge);
+      }
+
+      contentBox.appendChild(title);
+      contentBox.appendChild(meta);
+      contentBox.appendChild(detail);
+
+      const actions = document.createElement('div');
+      actions.className = 'flex flex-col gap-2';
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className =
+        'rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', () => openLookupInManage(item));
+      actions.appendChild(openBtn);
+
+      row.appendChild(thumbWrap);
+      row.appendChild(contentBox);
+      row.appendChild(actions);
+
+      card.appendChild(row);
+      container.appendChild(card);
+    });
+  };
+
   const renderMissingList = ({ items, containerId, emptyText, detailBuilder }) => {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -1902,6 +1990,26 @@
       updatePublicationsPagination();
     } catch (err) {
       showToast(err.message || '공개일 목록을 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const loadCompletionChanges = async () => {
+    const params = new URLSearchParams();
+    params.set('limit', STATE.completionChanges.limit);
+    params.set('offset', STATE.completionChanges.offset);
+
+    try {
+      const payload = await apiRequest(
+        'GET',
+        `/api/admin/contents/completion-changes?${params.toString()}`,
+        { token: STATE.token },
+      );
+      STATE.completionChanges.items = payload?.changes || [];
+      STATE.completionChanges.lastCount = STATE.completionChanges.items.length;
+      renderCompletionChanges();
+      updateCompletionChangesPagination();
+    } catch (err) {
+      showToast(err.message || '완결일 목록을 불러오지 못했습니다.', { type: 'error' });
     }
   };
 
@@ -2281,6 +2389,13 @@
     setButtonDisabled(nextBtn, STATE.publications.lastCount < STATE.publications.limit);
   };
 
+  const updateCompletionChangesPagination = () => {
+    const prevBtn = document.getElementById('completionChangesPrevBtn');
+    const nextBtn = document.getElementById('completionChangesNextBtn');
+    setButtonDisabled(prevBtn, STATE.completionChanges.offset === 0);
+    setButtonDisabled(nextBtn, STATE.completionChanges.lastCount < STATE.completionChanges.limit);
+  };
+
   const prefetchCaches = async () => {
     try {
       const [overridesPayload, publicationsPayload] = await Promise.all([
@@ -2308,6 +2423,7 @@
     const tabManage = document.getElementById('tabManage');
     const tabDeleted = document.getElementById('tabDeleted');
     const tabPublications = document.getElementById('tabPublications');
+    const tabCompletionChanges = document.getElementById('tabCompletionChanges');
     const tabMissingCompletion = document.getElementById('tabMissingCompletion');
     const tabMissingPublication = document.getElementById('tabMissingPublication');
     const tabAudit = document.getElementById('tabAudit');
@@ -2319,6 +2435,8 @@
     const deletedNextBtn = document.getElementById('deletedNextBtn');
     const publicationsPrevBtn = document.getElementById('publicationsPrevBtn');
     const publicationsNextBtn = document.getElementById('publicationsNextBtn');
+    const completionChangesPrevBtn = document.getElementById('completionChangesPrevBtn');
+    const completionChangesNextBtn = document.getElementById('completionChangesNextBtn');
     const missingCompletionRefreshBtn = document.getElementById('missingCompletionRefreshBtn');
     const missingCompletionPrevBtn = document.getElementById('missingCompletionPrevBtn');
     const missingCompletionNextBtn = document.getElementById('missingCompletionNextBtn');
@@ -2361,6 +2479,10 @@
     tabPublications?.addEventListener('click', () => {
       setTab('publications');
       loadPublications();
+    });
+    tabCompletionChanges?.addEventListener('click', () => {
+      setTab('completionChanges');
+      loadCompletionChanges();
     });
     tabMissingCompletion?.addEventListener('click', () => {
       setTab('missingCompletion');
@@ -2434,6 +2556,23 @@
         if (STATE.publications.lastCount < STATE.publications.limit) return;
         STATE.publications.offset += STATE.publications.limit;
         await loadPublications();
+      }),
+    );
+    completionChangesPrevBtn?.addEventListener('click', () =>
+      withLoading(completionChangesPrevBtn, '불러오는 중...', async () => {
+        if (STATE.completionChanges.offset === 0) return;
+        STATE.completionChanges.offset = Math.max(
+          0,
+          STATE.completionChanges.offset - STATE.completionChanges.limit,
+        );
+        await loadCompletionChanges();
+      }),
+    );
+    completionChangesNextBtn?.addEventListener('click', () =>
+      withLoading(completionChangesNextBtn, '불러오는 중...', async () => {
+        if (STATE.completionChanges.lastCount < STATE.completionChanges.limit) return;
+        STATE.completionChanges.offset += STATE.completionChanges.limit;
+        await loadCompletionChanges();
       }),
     );
 

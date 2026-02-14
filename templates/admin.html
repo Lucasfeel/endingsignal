@@ -73,6 +73,13 @@
               최근 공개일 변경
             </button>
             <button
+              id="tabCompletionChanges"
+              class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
+              type="button"
+            >
+              최근 완결일 변경
+            </button>
+            <button
               id="tabMissingCompletion"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
@@ -332,6 +339,17 @@
             <div class="mt-4 flex items-center justify-between text-xs text-white/60">
               <button id="publicationsPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
               <button id="publicationsNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelCompletionChanges" class="hidden grid gap-6 lg:grid-cols-[1fr]">
+          <div class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h2 class="text-lg font-semibold">최근 완결일 변경</h2>
+            <div id="completionChangesList" class="mt-4 space-y-2 text-sm text-white/80"></div>
+            <div class="mt-4 flex items-center justify-between text-xs text-white/60">
+              <button id="completionChangesPrevBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">이전</button>
+              <button id="completionChangesNextBtn" class="rounded-full border border-white/20 px-3 py-1 hover:border-white/40" type="button">다음</button>
             </div>
           </div>
         </section>
