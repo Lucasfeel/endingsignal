@@ -511,7 +511,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
         return entries, meta, error
 
     async def fetch_all_data(self):
-        print("카카오 웹툰 타임테이블 데이터를 수집합니다...")
+        print("카카오 웹툰 타임테이블 데이터를 수집합니다...", flush=True)
 
         timeout = aiohttp.ClientTimeout(
             total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
@@ -524,6 +524,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "ongoing": {},
             "finished": {},
             "errors": [],
+            "health_warnings": [],
             "status_counts": {},
             "placement_status_counts": {},
             "completed_candidate_total": 0,
@@ -554,7 +555,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
         for (category, placement), result in zip(placements, results):
             if isinstance(result, Exception):
-                fetch_meta["errors"].append(f"{category}:{placement}:{result}")
+                fetch_meta["errors"].append(
+                    f"SECTION_PARSE_ERROR:{category}:{placement}:{result}"
+                )
                 fetch_meta[category][placement] = {
                     "http_status": None,
                     "count": 0,
@@ -565,7 +568,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
             entries, placement_meta, error = result
             fetch_meta[category][placement] = placement_meta
             if error:
-                fetch_meta["errors"].append(f"{category}:{placement}:{error}")
+                fetch_meta["errors"].append(
+                    f"SECTION_PARSE_ERROR:{category}:{placement}:{error}"
+                )
 
             placement_status_counts = fetch_meta["placement_status_counts"].setdefault(placement, {})
 
@@ -724,15 +729,18 @@ class KakaoWebtoonCrawler(ContentCrawler):
         all_map = {**ongoing_map, **hiatus_map, **finished_map}
         fetch_meta["fetched_count"] = len(all_map)
         fetch_meta["is_suspicious_empty"] = total_parsed == 0
+        if fetch_meta["is_suspicious_empty"]:
+            fetch_meta.setdefault("health_warnings", []).append("SUSPICIOUS_EMPTY_RESULT")
+            fetch_meta["errors"].append("SUSPICIOUS_EMPTY_RESULT")
         if pause_found_in_completed:
             fetch_meta.setdefault("health_notes", []).append("pause_found_in_completed_placement")
         if not finished_map:
             fetch_meta.setdefault("health_notes", []).append("finished_count_zero")
 
         print(
-            "수집 완료: "
-            f"ongoing={len(ongoing_map)} hiatus={len(hiatus_map)} "
-            f"finished={len(finished_map)} total={len(all_map)}"
+            f"수집 완료: ongoing={len(ongoing_map)} hiatus={len(hiatus_map)} "
+            f"finished={len(finished_map)} total={len(all_map)}",
+            flush=True,
         )
         return ongoing_map, hiatus_map, finished_map, all_map, fetch_meta
 
@@ -836,3 +844,5 @@ class KakaoWebtoonCrawler(ContentCrawler):
         cursor.close()
         print("DB 동기화 완료.")
         return len(inserts)
+
+
