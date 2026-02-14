@@ -42,7 +42,3 @@ def index():
 @app.route("/healthz", methods=["GET"])
 def healthz():
     return {"status": "ok"}, 200
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
