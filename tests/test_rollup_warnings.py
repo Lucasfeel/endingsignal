@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import sys
 
@@ -105,3 +106,83 @@ def test_kakao_fetch_failed_true_for_health_warning():
     )
 
     assert failed is True
+
+
+def test_main_warn_uses_warning_prefix_and_exit_zero(monkeypatch, capsys):
+    class FakeNaver:
+        pass
+
+    class FakeKakao:
+        pass
+
+    async def fake_run_one_crawler(crawler_class):
+        name = crawler_class.__name__.lower()
+        if "kakao" in name:
+            return {
+                "status": "warn",
+                "crawler_name": "Kakaowebtoon",
+                "fetched_count": 100,
+                "summary": {"reason": "degraded", "message": "fetch ratio low"},
+                "cdc_info": {"fetch_meta": {"errors": [], "health_warnings": []}},
+            }
+        return {
+            "status": "ok",
+            "crawler_name": "Naver Webtoon",
+            "fetched_count": 50,
+            "summary": {"reason": "ok", "message": "crawler run completed"},
+            "cdc_info": {"fetch_meta": {"errors": []}},
+        }
+
+    monkeypatch.setattr(run_all_crawlers, "ALL_CRAWLERS", [FakeNaver, FakeKakao])
+    monkeypatch.setattr(run_all_crawlers, "run_one_crawler", fake_run_one_crawler)
+    monkeypatch.setattr(
+        run_all_crawlers, "run_scheduled_completion_cdc", lambda: {"status": "success"}
+    )
+    monkeypatch.setattr(
+        run_all_crawlers, "run_scheduled_publication_cdc", lambda: {"status": "success"}
+    )
+    monkeypatch.setenv("ROLLUP_TARGET_TOTAL_UNIQUE", "200")
+
+    exit_code = asyncio.run(run_all_crawlers.main())
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "WARNING: TOTAL_UNIQUE_BELOW_TARGET" in captured.out
+    assert "ERROR: TOTAL_UNIQUE_BELOW_TARGET" not in captured.out
+
+
+def test_main_error_uses_error_prefix_and_exit_one(monkeypatch, capsys):
+    class FakeKakao:
+        pass
+
+    async def fake_run_one_crawler(_crawler_class):
+        return {
+            "status": "error",
+            "crawler_name": "Kakaowebtoon",
+            "fetched_count": 0,
+            "summary": {"reason": "exception", "message": "fatal"},
+            "cdc_info": {
+                "fetch_meta": {
+                    "errors": [
+                        "SECTION_PARSE_ERROR:ongoing:timetable_mon:http_500",
+                    ],
+                    "health_warnings": [],
+                }
+            },
+        }
+
+    monkeypatch.setattr(run_all_crawlers, "ALL_CRAWLERS", [FakeKakao])
+    monkeypatch.setattr(run_all_crawlers, "run_one_crawler", fake_run_one_crawler)
+    monkeypatch.setattr(
+        run_all_crawlers, "run_scheduled_completion_cdc", lambda: {"status": "success"}
+    )
+    monkeypatch.setattr(
+        run_all_crawlers, "run_scheduled_publication_cdc", lambda: {"status": "success"}
+    )
+    monkeypatch.delenv("ROLLUP_TARGET_TOTAL_UNIQUE", raising=False)
+
+    exit_code = asyncio.run(run_all_crawlers.main())
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "ERROR: KAKAO_FETCH_FAILED" in captured.out
