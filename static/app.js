@@ -41,11 +41,11 @@ function showFatalBanner(message) {
 }
 
 const ICONS = {
-  webtoon: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 4H3C1.9 4 1 4.9 1 6v13c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 19V6h8v13H3zm18 0h-8V6h8v13z"/></svg>`,
-  novel: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.127 22.562l-7.127 1.438 1.438-7.128 5.689 5.69zm1.414-1.414l11.228-11.225-5.69-5.692-11.227 11.227 5.689 5.69zm9.768-21.148l-2.816 2.817 5.691 5.691 2.816-2.819-5.691-5.689z"/></svg>`,
-  ott: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>`,
-  series: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>`,
-  my: `<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`,
+  webtoon: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="7.5" height="14" rx="1.8"/><rect x="13" y="5" width="7.5" height="14" rx="1.8"/><path d="M11 8.5h2"/></svg>`,
+  novel: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H11v14H6.5A2.5 2.5 0 0 0 4 20.5V6.5z"/><path d="M20 6.5A2.5 2.5 0 0 0 17.5 4H13v14h4.5a2.5 2.5 0 0 1 2.5 2.5V6.5z"/></svg>`,
+  ott: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="2.4"/><path d="M10 9.1v4.8l4.2-2.4L10 9.1z"/><path d="M8 21h8"/></svg>`,
+  series: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>`,
+  my: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5a6 6 0 1 0-12 0c0 6-2.1 7.3-2.1 7.3h16.2S18 14.5 18 8.5z"/><path d="M9.5 18.5a2.5 2.5 0 0 0 5 0"/></svg>`,
 };
 
 // UI_CLASSES: Tailwind class tokens for reusable UI primitives.
@@ -60,46 +60,46 @@ const ICONS = {
 const UI_CLASSES = {
   // Buttons
   btnPrimary:
-    'h-10 px-4 rounded-xl bg-white/16 text-white text-sm font-semibold hover:bg-white/22 active:bg-white/28 disabled:opacity-50 disabled:cursor-not-allowed',
+    'es-btn es-btn-primary h-10 px-4 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
-    'h-10 px-4 rounded-xl bg-white/10 text-white text-sm hover:bg-white/14 active:bg-white/18 disabled:opacity-50 disabled:cursor-not-allowed',
+    'es-btn es-btn-secondary h-10 px-4 rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed',
   btnSolid:
-    'h-10 px-4 rounded-xl bg-[#3F3F46] text-white text-sm font-semibold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-50 disabled:cursor-not-allowed',
+    'es-btn es-btn-solid h-10 px-4 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50 disabled:cursor-not-allowed',
   btnDisabled: 'opacity-80 cursor-not-allowed',
 
   // Icon buttons
-  iconBtn: 'h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/8 active:bg-white/10',
-  iconBtnSm: 'h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/8 active:bg-white/10',
+  iconBtn: 'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl',
+  iconBtnSm: 'es-icon-btn h-8 w-8 flex items-center justify-center rounded-lg',
   headerSearchIcon:
-    'h-10 w-10 flex items-center justify-center rounded-lg bg-[#0b0b0b] text-white hover:bg-white/5 active:bg-white/8 transition-colors',
+    'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl text-white transition-colors',
   headerProfileIcon:
-    'h-10 w-10 flex items-center justify-center rounded-lg text-white hover:bg-white/5 active:bg-white/8 transition-colors',
+    'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl text-white transition-colors',
 
   // Chips & empty states
-  chip: 'h-9 px-3 inline-flex items-center rounded-full bg-white/5 text-sm text-white hover:bg-white/8 active:bg-white/10',
+  chip: 'es-chip h-9 px-3 inline-flex items-center rounded-full text-sm',
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
   emptyTitle: 'text-lg font-semibold text-white',
-  emptyMsg: 'mt-2 text-sm text-[#D6D6D6] max-w-md',
+  emptyMsg: 'mt-2 text-sm text-[#9bb0cf] max-w-md',
 
   // Typography helpers
   sectionTitle: 'text-base font-semibold text-white',
-  sectionSubtle: 'text-sm text-[#D6D6D6]',
+  sectionSubtle: 'text-sm text-[#9bb0cf] hover:text-white transition-colors',
 
   // Card overlays/badges
   starBadge:
-    'absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full bg-black/60 text-white text-xs font-semibold pointer-events-none select-none',
+    'es-star-badge absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
   badgeBase:
     'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center',
   affordOverlay:
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100',
   affordHint:
     'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
-  pillHint: 'text-[11px] text-white bg-black/40 rounded-full px-2 py-1',
+  pillHint: 'es-pill-hint text-[11px] rounded-full px-2 py-1',
 
   // Cards
   cardRoot:
-    'relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:shadow-sm',
-  cardThumb: 'rounded-lg overflow-hidden bg-[#1E1E1E] relative mb-2',
+    'es-card-root relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none',
+  cardThumb: 'es-card-thumb rounded-2xl overflow-hidden relative mb-2',
   cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
   thumbStack: 'thumbStack kakaoStack',
@@ -107,54 +107,52 @@ const UI_CLASSES = {
   thumbChar: 'thumbChar',
   thumbTitle: 'thumbTitle',
   cardTextWrap: 'px-0.5',
-  cardTitle: 'font-bold text-[13px] text-white leading-[1.4] truncate',
-  cardMeta: 'text-[11px] text-[#A8A8A8] mt-0.5 truncate',
+  cardTitle: 'es-card-title font-semibold text-[13px] leading-[1.4] truncate',
+  cardMeta: 'es-card-meta text-[11px] mt-0.5 truncate',
 
   // Inputs
   inputBase:
-    'w-full h-10 rounded-xl bg-white/5 px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
+    'es-input-base w-full h-10 rounded-xl px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
   inputSm:
-    'w-full px-3 py-2 rounded-lg bg-[#2a2a2a] border-0 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/7',
+    'es-input-sm w-full px-3 py-2 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20',
   searchTrigger:
-    'transition-all duration-200 bg-[#1E1E1E] border border-white/18 rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-white/30',
-  inputLabel: 'block text-sm font-medium text-[#D6D6D6]',
+    'es-input-base transition-all duration-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/25',
+  inputLabel: 'block text-sm font-medium text-[#b7c6df]',
 
   // Modal
   modalWrap: 'flex items-center justify-center',
   modalCard:
-    'relative z-10 bg-[#1e1e1e] p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
-  modalTitle: 'text-xl font-bold mb-1 text-white',
-  modalBodyText: 'text-[#A8A8A8] text-sm',
+    'es-modal-card relative z-10 p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
+  modalTitle: 'text-xl font-semibold mb-1 text-white tracking-[-0.02em]',
+  modalBodyText: 'text-[#9bb0cf] text-sm',
 
   // Layout grids
   grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
 
   // Pages & overlays
-  pageOverlayRoot: 'bg-[#121212] text-white',
-  pageOverlayContainer: 'mx-auto h-full max-w-[480px] px-4',
-  pageCard: 'rounded-2xl bg-[#1E1E1E] p-4 backdrop-blur-sm shadow-sm shadow-black/40',
+  pageOverlayRoot: 'es-page-overlay-root text-white',
+  pageOverlayContainer: 'mx-auto h-full max-w-[520px] px-4',
+  pageCard: 'es-page-card rounded-2xl p-4 backdrop-blur-sm shadow-sm',
 
   // Menus
-  menuWrap: 'rounded-xl bg-black/90 border border-white/18 shadow-2xl overflow-hidden py-2',
+  menuWrap: 'es-menu-wrap rounded-xl shadow-2xl overflow-hidden py-2',
   menuItem:
-    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
+    'es-menu-item w-full text-left px-4 py-3 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
   menuItemDanger:
-    'w-full text-left px-4 py-3 text-sm text-white hover:bg-white/10 active:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
+    'es-menu-item es-menu-item-danger w-full text-left px-4 py-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
 
   // Pagination controls
   loadMoreBtn:
-    'w-full h-[44px] bg-[#1E1E1E] border border-[#3F3F46] rounded-xl text-[13px] text-[#D6D6D6] font-semibold hover:border-white/30 transition-colors',
+    'es-load-more w-full h-[44px] rounded-xl text-[13px] font-semibold transition-colors',
 
   // Toasts
   toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
-  toastSuccess:
-    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
-  toastError:
-    'inline-flex px-4 py-2 rounded-xl bg-black/70 border border-white/10 shadow-xl backdrop-blur-md text-sm text-white',
+  toastSuccess: 'es-toast inline-flex px-4 py-2 rounded-xl text-sm',
+  toastError: 'es-toast es-toast-error inline-flex px-4 py-2 rounded-xl text-sm',
 };
 
 const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><rect width="300" height="400" fill="#1E1E1E"/><path d="M30 320h240v30H30z" fill="#2d2d2d"/><rect x="60" y="60" width="180" height="200" rx="12" fill="#2f2f2f"/><text x="150" y="175" text-anchor="middle" fill="#6b7280" font-family="sans-serif" font-size="20">No Image</text></svg>'
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#101a2d"/><stop offset="100%" stop-color="#20344f"/></linearGradient></defs><rect width="300" height="400" fill="url(#g)"/><rect x="32" y="48" width="236" height="304" rx="20" fill="rgba(255,255,255,0.06)" stroke="rgba(180,206,255,0.25)" stroke-width="2"/><path d="M90 270l42-54 38 42 32-28 44 58H90z" fill="rgba(216,233,255,0.22)"/><circle cx="124" cy="144" r="24" fill="rgba(216,233,255,0.2)"/><text x="150" y="330" text-anchor="middle" fill="#c8daf5" font-family="system-ui, sans-serif" font-size="20" font-weight="600">No Poster</text></svg>'
 )}`;
 
 /* =========================
@@ -190,23 +188,58 @@ const UI_STATE_DEFAULTS = {
 
 const SOURCE_OPTIONS = {
   webtoon: [
-    { id: 'naver_webtoon', label: 'N' },
-    { id: 'kakaowebtoon', label: 'K' },
+    { id: 'naver_webtoon', label: 'Naver' },
+    { id: 'kakaowebtoon', label: 'Kakao' },
   ],
   novel: [
-    { id: 'naver_series', label: 'N' },
-    { id: 'kakao_page', label: 'K' },
-    { id: 'ridi', label: 'R' },
-    { id: 'munpia', label: 'M' },
+    { id: 'naver_series', label: 'Naver' },
+    { id: 'kakao_page', label: 'KakaoPage' },
+    { id: 'ridi', label: 'RIDI' },
+    { id: 'munpia', label: 'Munpia' },
   ],
   ott: [
-    { id: 'netflix', label: 'N' },
-    { id: 'disney', label: 'D' },
-    { id: 'tving', label: 'T' },
-    { id: 'watcha', label: 'W' },
-    { id: 'wavve', label: 'Wa' },
+    { id: 'netflix', label: 'Netflix' },
+    { id: 'disney', label: 'Disney+' },
+    { id: 'tving', label: 'TVING' },
+    { id: 'watcha', label: 'WATCHA' },
+    { id: 'wavve', label: 'wavve' },
   ],
 };
+
+const SOURCE_ICON_SVGS = {
+  naver_webtoon:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#00c73c"/><path d="M9 20V8h2.3l4.4 7.1V8H18v12h-2.2l-4.5-7.2V20H9z" fill="#fff"/></svg>',
+  kakaowebtoon:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#ffd400"/><path d="M8.7 20V8h2.8v4.7L15.9 8H19l-4.3 5.4L19.1 20h-3.2l-3.1-4.6-1.3 1.6V20H8.7z" fill="#111"/></svg>',
+  naver_series:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#0ea85a"/><path d="M8.4 20V8h2.2l5 7V8h2.2v12h-2.2L10.6 13v7H8.4z" fill="#fff"/></svg>',
+  kakao_page:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#f7e700"/><path d="M8.8 20V8h2.5v5.1L16 8h3.1l-4.8 5.4 5.1 6.6H16L12.4 15l-1.1 1.3V20H8.8z" fill="#111"/></svg>',
+  ridi: '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#1d4ed8"/><path d="M9 20V8h5c2.6 0 4 1.4 4 3.6 0 1.8-.9 2.9-2.5 3.3l2.8 5.1h-2.7l-2.5-4.7h-1.7V20H9zm2.4-6.6h2.4c1.1 0 1.7-.6 1.7-1.6 0-1-.6-1.6-1.8-1.6h-2.3v3.2z" fill="#fff"/></svg>',
+  munpia:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#6b7280"/><path d="M8 20V8h2.3l3.7 6.1L17.6 8H20v12h-2.2v-8l-3.5 5.7h-.6L10.2 12v8H8z" fill="#fff"/></svg>',
+  netflix:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#111"/><path d="M9 20V8h2.6l4.2 7.2V8H18v12h-2.4l-4.4-7.5V20H9z" fill="#e50914"/></svg>',
+  disney:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#113b7a"/><path d="M8.2 14.5c1.9-3.4 8.4-3.3 10.5.2m-9.8 2.8h6.2c1.9 0 3-.9 3-2.5s-1.1-2.5-3-2.5h-1.3" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  tving:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#e11d48"/><path d="M8.4 10h11.2v2.2h-4.4V20h-2.4v-7.8H8.4V10z" fill="#fff"/></svg>',
+  watcha:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#fb7185"/><path d="M8.3 8h2.6l2.5 8.1L15.9 8h2.5l2.4 12h-2.3l-1.2-7.3-2.2 7.3h-1.7l-2.2-7.3L10 20H7.7L8.3 8z" fill="#fff"/></svg>',
+  wavve:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#0f172a"/><path d="M7.8 9h2.4l1.5 6 1.7-6h2.1l1.7 6 1.5-6h2.4l-3 11h-1.9l-1.8-6-1.8 6h-1.9L7.8 9z" fill="#93c5fd"/></svg>',
+};
+
+function getSourceIconMarkup(sourceId, fallbackLabel) {
+  const known = SOURCE_ICON_SVGS[sourceId];
+  if (known) return known;
+  const safeInitial = String(fallbackLabel || sourceId || '?')
+    .toUpperCase()
+    .replace(/[^A-Z0-9+]/g, '')
+    .slice(0, 2);
+  const text = safeInitial || '?';
+  return `<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#1e293b"/><text x="14" y="18" text-anchor="middle" fill="#dbeafe" font-family="system-ui,sans-serif" font-size="10" font-weight="700">${text}</text></svg>`;
+}
 
 const ALL_SOURCE_IDS = Object.values(SOURCE_OPTIONS).flatMap((group) =>
   group.map((item) => item.id)
@@ -2176,11 +2209,191 @@ const sortPublicationItems = (items) => {
   return list;
 };
 
+const ENHANCED_THEME_STYLE_ID = 'es-enhanced-theme';
+
+function ensureEnhancedThemeAssets() {
+  const head = document.head || document.getElementsByTagName('head')[0];
+
+  if (head && !document.querySelector('link[data-es-font="sora"]')) {
+    const preconnectGoogle = document.createElement('link');
+    preconnectGoogle.rel = 'preconnect';
+    preconnectGoogle.href = 'https://fonts.googleapis.com';
+    preconnectGoogle.setAttribute('data-es-font', 'sora');
+    head.appendChild(preconnectGoogle);
+
+    const preconnectGStatic = document.createElement('link');
+    preconnectGStatic.rel = 'preconnect';
+    preconnectGStatic.href = 'https://fonts.gstatic.com';
+    preconnectGStatic.crossOrigin = 'anonymous';
+    preconnectGStatic.setAttribute('data-es-font', 'sora');
+    head.appendChild(preconnectGStatic);
+
+    const fontLink = document.createElement('link');
+    fontLink.rel = 'stylesheet';
+    fontLink.href = 'https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap';
+    fontLink.setAttribute('data-es-font', 'sora');
+    head.appendChild(fontLink);
+  }
+
+  if (head && !document.getElementById(ENHANCED_THEME_STYLE_ID)) {
+    const style = document.createElement('style');
+    style.id = ENHANCED_THEME_STYLE_ID;
+    style.textContent = `
+:root { --es-text-main: #edf4ff; --es-text-muted: #9db3d5; }
+body {
+  font-family: "Sora", "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  letter-spacing: -0.01em;
+  background:
+    radial-gradient(900px 500px at 5% -10%, rgba(84, 143, 255, 0.22), transparent 58%),
+    radial-gradient(780px 420px at 100% 8%, rgba(58, 211, 170, 0.17), transparent 56%),
+    linear-gradient(164deg, #060d19 0%, #10233d 55%, #09152a 100%) !important;
+  color: var(--es-text-main);
+}
+#app-root {
+  max-width: 520px;
+  background: linear-gradient(180deg, rgba(8, 18, 33, 0.78) 0%, rgba(8, 18, 33, 0.95) 100%);
+  border-left: 1px solid rgba(181, 211, 255, 0.14);
+  border-right: 1px solid rgba(181, 211, 255, 0.14);
+  box-shadow: 0 0 0 1px rgba(181, 211, 255, 0.05), 0 26px 80px rgba(2, 8, 20, 0.55);
+}
+.app-aurora {
+  pointer-events: none;
+  position: absolute;
+  inset: 0 0 auto;
+  height: 220px;
+  z-index: 0;
+  overflow: hidden;
+}
+.app-aurora-blob {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(16px);
+  opacity: 0.7;
+  animation: es-drift 18s ease-in-out infinite alternate;
+}
+.app-aurora-blob.one { width: 200px; height: 120px; left: -34px; top: 14px; background: rgba(74, 128, 247, 0.52); }
+.app-aurora-blob.two { width: 170px; height: 110px; right: -30px; top: 36px; background: rgba(53, 197, 165, 0.45); animation-delay: 2.4s; }
+.app-aurora-blob.three { width: 150px; height: 95px; left: 36%; top: 74px; background: rgba(251, 191, 36, 0.24); animation-delay: 4.3s; }
+@keyframes es-drift { 0% { transform: translateY(0) scale(1); } 100% { transform: translateY(-10px) scale(1.08); } }
+#mainHeader {
+  z-index: 60;
+  height: 64px !important;
+  padding-inline: 14px !important;
+  background: rgba(9, 20, 37, 0.82) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(181, 211, 255, 0.16) !important;
+}
+#homeButton { display: flex; align-items: center; gap: 10px; min-width: 0; }
+#homeButton .brand-mark { width: auto; height: 28px; display: block; filter: drop-shadow(0 8px 14px rgba(96, 204, 255, 0.2)); }
+#homeButton .brand-wordmark { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+#homeButton .brand-wordmark strong { font-size: 14px; font-weight: 700; color: #edf4ff; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
+#homeButton .brand-wordmark span { font-size: 10px; color: #9db3d5; white-space: nowrap; line-height: 1.1; }
+#searchButton, #profileButton { border: 1px solid rgba(181, 211, 255, 0.2); background: rgba(166, 212, 255, 0.08); color: #edf4ff; }
+#searchButton:hover, #profileButton:hover { background: rgba(166, 212, 255, 0.18); border-color: rgba(181, 211, 255, 0.34); }
+#filtersWrapper { background: rgba(8, 18, 33, 0.78) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid rgba(181, 211, 255, 0.12); }
+#l1FilterContainer { min-height: 66px; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
+.l1-logo { min-width: max-content; height: 44px; border-radius: 14px; padding: 0 11px 0 8px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid transparent; background: rgba(176, 210, 255, 0.08); color: #d7e7ff; transition: all 0.2s ease; }
+.l1-logo .l1-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; overflow: hidden; box-shadow: 0 6px 12px rgba(10, 18, 34, 0.42); }
+.l1-logo .l1-icon svg { width: 100%; height: 100%; display: block; }
+.l1-logo .l1-label { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
+.l1-logo.active { border-color: rgba(109, 228, 193, 0.56); background: rgba(54, 211, 153, 0.17); box-shadow: 0 10px 24px rgba(30, 177, 136, 0.24); color: #edfffb; }
+.l1-logo.is-dim { opacity: 0.38; }
+#l2FilterContainer { min-height: 44px; border-top: 1px solid rgba(181, 211, 255, 0.08); border-bottom: 1px solid rgba(181, 211, 255, 0.16) !important; }
+.l2-tab { font-size: 12px; font-weight: 600; color: #9db3d5; padding: 10px 0; margin-right: 16px; border-bottom: 2px solid transparent; }
+.l2-tab.active { color: #ecfffb; border-bottom-color: rgba(107, 232, 249, 0.9); text-shadow: 0 0 10px rgba(107, 232, 249, 0.2); }
+#contentGridContainer { position: relative; z-index: 1; gap: 14px !important; padding-top: 18px !important; }
+#bottomNav {
+  z-index: 80;
+  max-width: 520px !important;
+  width: calc(100% - 22px) !important;
+  left: 50%;
+  right: auto !important;
+  transform: translateX(-50%);
+  bottom: 10px !important;
+  border: 1px solid rgba(181, 211, 255, 0.2) !important;
+  border-radius: 18px !important;
+  background: rgba(7, 16, 30, 0.84) !important;
+  box-shadow: 0 18px 40px rgba(3, 9, 20, 0.52);
+  height: 72px !important;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) 6px !important;
+  gap: 2px;
+}
+#bottomNav .bottom-nav-item { border-radius: 12px; transition: all 0.2s ease; color: #95accf; }
+#bottomNav .bottom-nav-item.text-white { background: rgba(103, 232, 249, 0.16); color: #ecfffb !important; box-shadow: 0 6px 16px rgba(32, 171, 189, 0.22); }
+.es-btn { transition: all 0.2s ease; }
+.es-btn-primary { background: linear-gradient(120deg, rgba(54, 211, 153, 0.94), rgba(103, 232, 249, 0.9)); color: #07241c; border: 1px solid rgba(203, 255, 239, 0.38); }
+.es-btn-secondary { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(166, 212, 255, 0.08); color: #dfebff; }
+.es-btn-solid { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(30, 72, 126, 0.72); color: #ecf5ff; }
+.es-icon-btn { border: 1px solid rgba(181, 211, 255, 0.2); background: rgba(166, 212, 255, 0.08); color: #e8f2ff; }
+.es-chip { border: 1px solid rgba(181, 211, 255, 0.24); background: rgba(166, 212, 255, 0.08); color: #d7e7ff; }
+.es-card-thumb { border: 1px solid rgba(181, 211, 255, 0.24); background: linear-gradient(175deg, rgba(22, 43, 74, 0.75), rgba(11, 21, 35, 0.95)); }
+.es-card-title { color: #ecf3ff; }
+.es-card-meta { color: #9fb4d6; }
+.es-star-badge { background: rgba(7, 18, 34, 0.72); border: 1px solid rgba(181, 211, 255, 0.28); }
+.es-pill-hint { background: rgba(7, 18, 34, 0.62); color: #d9ecff; border: 1px solid rgba(181, 211, 255, 0.24); }
+.es-input-base, .es-input-sm { border: 1px solid rgba(181, 211, 255, 0.26); background: rgba(166, 212, 255, 0.07); color: #edf4ff; }
+.es-modal-card { border: 1px solid rgba(181, 211, 255, 0.2); background: linear-gradient(180deg, rgba(18, 36, 62, 0.95), rgba(10, 21, 38, 0.95)); }
+.es-page-overlay-root { background: linear-gradient(180deg, rgba(9, 18, 34, 0.9), rgba(8, 16, 30, 0.96)); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.es-page-card { border: 1px solid rgba(181, 211, 255, 0.2); background: linear-gradient(165deg, rgba(18, 36, 62, 0.7), rgba(10, 21, 38, 0.84)); }
+.es-menu-wrap { border: 1px solid rgba(181, 211, 255, 0.22); background: rgba(8, 18, 33, 0.95); }
+.es-menu-item:hover { background: rgba(166, 212, 255, 0.13); }
+.es-menu-item-danger { color: #fca5a5; }
+.es-load-more { border: 1px solid rgba(181, 211, 255, 0.24); background: rgba(166, 212, 255, 0.08); color: #d6e7ff; }
+.es-toast { border: 1px solid rgba(181, 211, 255, 0.28); background: rgba(8, 18, 33, 0.88); color: #eaf3ff; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.es-toast-error { border-color: rgba(252, 165, 165, 0.42); color: #ffd4d4; }
+@media (max-width: 520px) {
+  #app-root { border-left: 0; border-right: 0; box-shadow: none; max-width: 100%; }
+  #homeButton .brand-wordmark span { display: none; }
+  #bottomNav { width: calc(100% - 14px) !important; bottom: 6px !important; }
+}
+    `;
+    head.appendChild(style);
+  }
+
+  const appRoot = document.getElementById('app-root');
+  if (appRoot && !appRoot.querySelector('.app-aurora')) {
+    const aurora = document.createElement('div');
+    aurora.className = 'app-aurora';
+    aurora.setAttribute('aria-hidden', 'true');
+    aurora.innerHTML = `
+      <span class="app-aurora-blob one"></span>
+      <span class="app-aurora-blob two"></span>
+      <span class="app-aurora-blob three"></span>
+    `;
+    appRoot.prepend(aurora);
+  }
+
+  const homeButton = document.getElementById('homeButton');
+  if (homeButton) {
+    const logoImg = homeButton.querySelector('img');
+    if (logoImg) {
+      logoImg.className = 'brand-mark';
+      logoImg.alt = 'Ending Signal';
+    }
+    if (!homeButton.querySelector('.brand-wordmark')) {
+      const wordmark = document.createElement('div');
+      wordmark.className = 'brand-wordmark';
+      wordmark.innerHTML =
+        '<strong>Ending Signal</strong><span>Track completion and release alerts</span>';
+      homeButton.appendChild(wordmark);
+    }
+  }
+
+  if (UI.searchButton) UI.searchButton.setAttribute('aria-label', 'Search');
+  if (UI.profileButton) UI.profileButton.setAttribute('aria-label', 'Profile');
+  if (UI.profileMenu) UI.profileMenu.setAttribute('aria-label', 'Profile menu');
+  if (UI.searchBackButton) UI.searchBackButton.setAttribute('aria-label', 'Back');
+  if (UI.searchClearButton) UI.searchClearButton.setAttribute('aria-label', 'Clear search');
+  if (UI.myPageBackBtn) UI.myPageBackBtn.setAttribute('aria-label', 'Back');
+}
+
 /* =========================
    App lifecycle
    ========================= */
 
 async function initApp() {
+  ensureEnhancedThemeAssets();
   applyDataUiClasses();
   ensureKakaoThumbStyles();
   setupAuthModalListeners();
@@ -2237,31 +2450,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function setupScrollEffect() {
   if (!UI.filtersWrapper) return;
+  const usingEnhancedTheme = Boolean(document.getElementById(ENHANCED_THEME_STYLE_ID));
 
-  const resolveBaseBackground = () => {
-    const rootEl =
-      document.getElementById('app') ||
-      document.getElementById('root') ||
-      document.querySelector('main') ||
-      document.body;
-    const candidates = [rootEl, document.body, document.documentElement];
-    for (const el of candidates) {
-      if (!el) continue;
-      const color = getComputedStyle(el).backgroundColor;
-      if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') {
-        return color;
+  if (!usingEnhancedTheme) {
+    const resolveBaseBackground = () => {
+      const rootEl =
+        document.getElementById('app') ||
+        document.getElementById('root') ||
+        document.querySelector('main') ||
+        document.body;
+      const candidates = [rootEl, document.body, document.documentElement];
+      for (const el of candidates) {
+        if (!el) continue;
+        const color = getComputedStyle(el).backgroundColor;
+        if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') {
+          return color;
+        }
       }
-    }
-    return '#000';
-  };
+      return '#000';
+    };
 
-  const baseBgColor = resolveBaseBackground();
-  UI.filtersWrapper.style.backgroundColor = baseBgColor;
-  UI.filtersWrapper.style.backdropFilter = 'none';
-  UI.filtersWrapper.style.webkitBackdropFilter = 'none';
+    const baseBgColor = resolveBaseBackground();
+    UI.filtersWrapper.style.backgroundColor = baseBgColor;
+    UI.filtersWrapper.style.backdropFilter = 'none';
+    UI.filtersWrapper.style.webkitBackdropFilter = 'none';
+  }
 
   const handleScroll = () => {
     const scrolled = window.scrollY > 10;
+    if (usingEnhancedTheme) {
+      UI.filtersWrapper.style.borderBottomColor = scrolled
+        ? 'rgba(181, 211, 255, 0.2)'
+        : 'rgba(181, 211, 255, 0.12)';
+      return;
+    }
     if (scrolled) UI.filtersWrapper.classList.add('border-b', 'border-white/5');
     else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
   };
@@ -3755,11 +3977,12 @@ function renderBottomNav() {
   tabs.forEach((tab) => {
     const btn = document.createElement('button');
     const isActive = STATE.activeTab === tab.id;
-    btn.className = `flex flex-col items-center justify-center w-full spring-bounce ${
+    btn.className = `bottom-nav-item flex flex-col items-center justify-center w-full spring-bounce ${
       isActive ? 'text-white' : 'text-[#8A8A8A]'
     }`;
+    btn.setAttribute('data-tab-id', tab.id);
 
-    const iconClass = isActive ? 'scale-110 neon-drop-shadow' : 'scale-100';
+    const iconClass = isActive ? 'scale-105 neon-drop-shadow' : 'scale-100 opacity-90';
 
     btn.innerHTML = `
       <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
@@ -3855,7 +4078,14 @@ function renderL1Filters(tabId) {
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
     } ${brightnessClass}`;
-    el.textContent = item.label;
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    el.setAttribute('aria-label', item.label);
+    el.innerHTML = `
+      <span class="l1-icon" aria-hidden="true">${getSourceIconMarkup(item.id, item.label)}</span>
+      <span class="l1-label">${item.label}</span>
+    `;
 
     el.onclick = () => {
       const nextSelected = new Set(getSelectedSourcesForTab(tabId));
@@ -3865,6 +4095,12 @@ function renderL1Filters(tabId) {
       renderL1Filters(tabId);
       fetchAndRenderContent(tabId);
       UIState.save();
+    };
+    el.onkeydown = (evt) => {
+      if (evt.key === 'Enter' || evt.key === ' ') {
+        evt.preventDefault();
+        el.click();
+      }
     };
 
     UI.l1Filter.appendChild(el);
