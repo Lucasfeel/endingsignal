@@ -2369,13 +2369,13 @@ body {
     const logoImg = homeButton.querySelector('img');
     if (logoImg) {
       logoImg.className = 'brand-mark';
-      logoImg.alt = 'Ending Signal';
+      logoImg.alt = '콘텐츠 완결 알리미';
     }
     if (!homeButton.querySelector('.brand-wordmark')) {
       const wordmark = document.createElement('div');
       wordmark.className = 'brand-wordmark';
       wordmark.innerHTML =
-        '<strong>Ending Signal</strong><span>Track completion and release alerts</span>';
+        '<strong>콘텐츠 완결 알리미</strong><span>완결/공개 알림을 한곳에서</span>';
       homeButton.appendChild(wordmark);
     }
   }
