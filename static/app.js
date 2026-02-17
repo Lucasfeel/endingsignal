@@ -98,17 +98,17 @@ const UI_CLASSES = {
 
   // Cards
   cardRoot:
-    'es-card-root relative group cursor-pointer fade-in transition-transform duration-150 hover:-translate-y-0.5 focus-visible:outline-none',
-  cardThumb: 'es-card-thumb rounded-2xl overflow-hidden relative mb-2',
-  cardImage: 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300',
+    'es-card-root relative cursor-pointer fade-in focus-visible:outline-none',
+  cardThumb: 'es-card-thumb overflow-hidden relative',
+  cardImage: 'w-full h-full object-cover',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
   thumbStack: 'thumbStack kakaoStack',
   thumbBg: 'thumbBg',
   thumbChar: 'thumbChar',
   thumbTitle: 'thumbTitle',
-  cardTextWrap: 'px-0.5',
-  cardTitle: 'es-card-title font-semibold text-[13px] leading-[1.4] truncate',
-  cardMeta: 'es-card-meta text-[11px] mt-0.5 truncate',
+  cardTextWrap: 'es-card-text',
+  cardTitle: 'es-card-title font-semibold text-[13px] leading-[1.35]',
+  cardMeta: 'es-card-meta text-[11px] mt-1',
 
   // Inputs
   inputBase:
@@ -2252,9 +2252,8 @@ body {
 #app-root {
   max-width: 520px;
   background: linear-gradient(180deg, rgba(8, 18, 33, 0.78) 0%, rgba(8, 18, 33, 0.95) 100%);
-  border-left: 1px solid rgba(181, 211, 255, 0.14);
-  border-right: 1px solid rgba(181, 211, 255, 0.14);
-  box-shadow: 0 0 0 1px rgba(181, 211, 255, 0.05), 0 26px 80px rgba(2, 8, 20, 0.55);
+  border: 0;
+  box-shadow: none;
 }
 .app-aurora {
   pointer-events: none;
@@ -2282,7 +2281,7 @@ body {
   background: rgba(9, 20, 37, 0.82) !important;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(181, 211, 255, 0.16) !important;
+  border-bottom: 0 !important;
 }
 #homeButton { display: flex; align-items: center; gap: 10px; min-width: 0; }
 #homeButton .brand-mark { width: auto; height: 28px; display: block; filter: drop-shadow(0 8px 14px rgba(96, 204, 255, 0.2)); }
@@ -2291,7 +2290,7 @@ body {
 #homeButton .brand-wordmark span { font-size: 10px; color: #9db3d5; white-space: nowrap; line-height: 1.1; }
 #searchButton, #profileButton { border: 1px solid rgba(181, 211, 255, 0.2); background: rgba(166, 212, 255, 0.08); color: #edf4ff; }
 #searchButton:hover, #profileButton:hover { background: rgba(166, 212, 255, 0.18); border-color: rgba(181, 211, 255, 0.34); }
-#filtersWrapper { background: rgba(8, 18, 33, 0.78) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid rgba(181, 211, 255, 0.12); }
+#filtersWrapper { background: rgba(8, 18, 33, 0.78) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 0; }
 #l1FilterContainer { min-height: 66px; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
 .l1-logo { min-width: max-content; height: 44px; border-radius: 14px; padding: 0 11px 0 8px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid transparent; background: rgba(176, 210, 255, 0.08); color: #d7e7ff; transition: all 0.2s ease; }
 .l1-logo .l1-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; overflow: hidden; box-shadow: 0 6px 12px rgba(10, 18, 34, 0.42); }
@@ -2299,7 +2298,7 @@ body {
 .l1-logo .l1-label { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
 .l1-logo.active { border-color: rgba(109, 228, 193, 0.56); background: rgba(54, 211, 153, 0.17); box-shadow: 0 10px 24px rgba(30, 177, 136, 0.24); color: #edfffb; }
 .l1-logo.is-dim { opacity: 0.38; }
-#l2FilterContainer { min-height: 44px; border-top: 1px solid rgba(181, 211, 255, 0.08); border-bottom: 1px solid rgba(181, 211, 255, 0.16) !important; }
+#l2FilterContainer { min-height: 44px; border-top: 0; border-bottom: 0 !important; }
 .l2-tab { font-size: 12px; font-weight: 600; color: #9db3d5; padding: 10px 0; margin-right: 16px; border-bottom: 2px solid transparent; }
 .l2-tab.active { color: #ecfffb; border-bottom-color: rgba(107, 232, 249, 0.9); text-shadow: 0 0 10px rgba(107, 232, 249, 0.2); }
 #contentGridContainer { position: relative; z-index: 1; gap: 14px !important; padding-top: 18px !important; }
@@ -2311,7 +2310,7 @@ body {
   right: auto !important;
   transform: translateX(-50%);
   bottom: 10px !important;
-  border: 1px solid rgba(181, 211, 255, 0.2) !important;
+  border: 0 !important;
   border-radius: 18px !important;
   background: rgba(7, 16, 30, 0.84) !important;
   box-shadow: 0 18px 40px rgba(3, 9, 20, 0.52);
@@ -2327,9 +2326,28 @@ body {
 .es-btn-solid { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(30, 72, 126, 0.72); color: #ecf5ff; }
 .es-icon-btn { border: 1px solid rgba(181, 211, 255, 0.2); background: rgba(166, 212, 255, 0.08); color: #e8f2ff; }
 .es-chip { border: 1px solid rgba(181, 211, 255, 0.24); background: rgba(166, 212, 255, 0.08); color: #d7e7ff; }
-.es-card-thumb { border: 1px solid rgba(181, 211, 255, 0.24); background: linear-gradient(175deg, rgba(22, 43, 74, 0.75), rgba(11, 21, 35, 0.95)); }
-.es-card-title { color: #ecf3ff; }
-.es-card-meta { color: #9fb4d6; }
+.es-card-root {
+  border-radius: 16px;
+  overflow: hidden;
+  background: linear-gradient(175deg, rgba(15, 31, 53, 0.82), rgba(10, 21, 37, 0.95));
+  box-shadow: 0 12px 30px rgba(2, 9, 20, 0.35);
+}
+.es-card-thumb { border: 0; background: transparent; }
+.es-card-text { padding: 10px 10px 12px; }
+.es-card-title {
+  color: #ecf3ff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.7em;
+}
+.es-card-meta {
+  color: #9fb4d6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .es-star-badge { background: rgba(7, 18, 34, 0.72); border: 1px solid rgba(181, 211, 255, 0.28); }
 .es-pill-hint { background: rgba(7, 18, 34, 0.62); color: #d9ecff; border: 1px solid rgba(181, 211, 255, 0.24); }
 .es-input-base, .es-input-sm { border: 1px solid rgba(181, 211, 255, 0.26); background: rgba(166, 212, 255, 0.07); color: #edf4ff; }
@@ -4731,17 +4749,6 @@ function createCard(content, tabId, aspectClass) {
   setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
   cardContainer.setAttribute('data-card-thumb', 'true');
 
-  const affordOverlay = document.createElement('div');
-  affordOverlay.setAttribute('data-afford-overlay', 'true');
-  affordOverlay.setAttribute('aria-hidden', 'true');
-  setClasses(affordOverlay, UI_CLASSES.affordOverlay);
-
-  const affordHint = document.createElement('div');
-  affordHint.setAttribute('data-afford-hint', 'true');
-  affordHint.setAttribute('aria-hidden', 'true');
-  affordHint.textContent = 'Open';
-  setClasses(affordHint, cx(UI_CLASSES.pillHint, UI_CLASSES.affordHint));
-
   const thumbSizeMap = {
     'aspect-[3/4]': { width: 300, height: 400 },
     'aspect-[1/1.4]': { width: 280, height: 392 },
@@ -4917,9 +4924,6 @@ function createCard(content, tabId, aspectClass) {
     cardContainer.appendChild(gradient);
   }
 
-  cardContainer.appendChild(affordOverlay);
-  cardContainer.appendChild(affordHint);
-
   el.appendChild(cardContainer);
 
   const textContainer = document.createElement('div');
@@ -4934,7 +4938,9 @@ function createCard(content, tabId, aspectClass) {
   authorEl.textContent = authors;
 
   textContainer.appendChild(titleEl);
-  textContainer.appendChild(authorEl);
+  if (authors) {
+    textContainer.appendChild(authorEl);
+  }
 
   if (tabId === 'my') {
     const myViewMode = STATE.filters?.my?.viewMode || 'completion';
@@ -4947,30 +4953,6 @@ function createCard(content, tabId, aspectClass) {
     }
   }
   el.appendChild(textContainer);
-
-  const showPress = () => {
-    affordOverlay.classList.add('opacity-100');
-    affordHint.classList.add('opacity-100');
-  };
-
-  const hidePress = () => {
-    affordOverlay.classList.remove('opacity-100');
-    affordHint.classList.remove('opacity-100');
-    if (el.__pressT) {
-      clearTimeout(el.__pressT);
-      el.__pressT = null;
-    }
-  };
-
-  el.onpointerdown = () => {
-    showPress();
-    if (el.__pressT) clearTimeout(el.__pressT);
-    el.__pressT = setTimeout(hidePress, 180);
-  };
-
-  el.onpointerup = hidePress;
-  el.onpointercancel = hidePress;
-  el.onpointerleave = hidePress;
 
   el.addEventListener('keydown', (evt) => {
     if (evt.key === 'Enter' || evt.key === ' ') {
