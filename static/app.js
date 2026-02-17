@@ -127,7 +127,7 @@ const UI_CLASSES = {
   modalBodyText: 'text-[#9bb0cf] text-sm',
 
   // Layout grids
-  grid2to3: 'grid grid-cols-2 sm:grid-cols-3 gap-3',
+  grid2to3: 'grid grid-cols-1 gap-3',
 
   // Pages & overlays
   pageOverlayRoot: 'es-page-overlay-root text-white',
@@ -2301,7 +2301,7 @@ body {
 #l2FilterContainer { min-height: 44px; border-top: 0; border-bottom: 0 !important; }
 .l2-tab { font-size: 12px; font-weight: 600; color: #9db3d5; padding: 10px 0; margin-right: 16px; border-bottom: 2px solid transparent; }
 .l2-tab.active { color: #ecfffb; border-bottom-color: rgba(107, 232, 249, 0.9); text-shadow: 0 0 10px rgba(107, 232, 249, 0.2); }
-#contentGridContainer { position: relative; z-index: 1; gap: 14px !important; padding-top: 18px !important; }
+#contentGridContainer { position: relative; z-index: 1; gap: 10px !important; padding-top: 16px !important; }
 #bottomNav {
   z-index: 80;
   max-width: 520px !important;
@@ -2332,15 +2332,14 @@ body {
   background: linear-gradient(175deg, rgba(15, 31, 53, 0.82), rgba(10, 21, 37, 0.95));
   box-shadow: 0 12px 30px rgba(2, 9, 20, 0.35);
 }
-.es-card-thumb { border: 0; background: transparent; }
-.es-card-text { padding: 10px 10px 12px; }
+.es-card-thumb { border: 0; background: transparent; position: relative; }
+.es-card-text { padding: 16px 40px 14px 12px; display: flex; flex-direction: column; gap: 4px; }
 .es-card-title {
   color: #ecf3ff;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 2.7em;
 }
 .es-card-meta {
   color: #9fb4d6;
@@ -2908,7 +2907,7 @@ const renderPopularGrid = () => {
 
   if (!items.length) {
     const placeholder = document.createElement('div');
-    placeholder.className = 'text-sm text-white/50 col-span-3 text-center py-8';
+    placeholder.className = 'text-sm text-white/50 col-span-full text-center py-8';
     placeholder.textContent = '추천 작품을 불러오지 못했습니다.';
     grid.appendChild(placeholder);
     return;
@@ -3087,10 +3086,10 @@ function renderSearchLoading(type) {
   if (!container) return;
   container.classList.remove('hidden');
   container.innerHTML = '';
-  const aspectClass = getAspectByType(type);
+  void type;
   for (let i = 0; i < 6; i += 1) {
     const item = document.createElement('div');
-    item.className = `${aspectClass} rounded-lg skeleton`;
+    item.className = 'h-[92px] rounded-2xl skeleton';
     container.appendChild(item);
   }
 }
@@ -4363,9 +4362,9 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
     if (isStale() || skeletonShown) return;
     skeletonShown = true;
     UI.contentGrid.innerHTML = '';
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 8; i++) {
       const skel = document.createElement('div');
-      skel.className = `${aspectClass} rounded-lg skeleton`;
+      skel.className = 'h-[92px] rounded-2xl skeleton';
       UI.contentGrid.appendChild(skel);
     }
   };
@@ -4380,7 +4379,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       if (!token) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#3F3F46] text-white text-xs font-bold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10">로그인하기</button></div>';
+            '<div class="col-span-full text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#3F3F46] text-white text-xs font-bold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10">로그인하기</button></div>';
 
           const loginBtn = document.getElementById('myTabLoginButton');
           if (loginBtn) {
@@ -4397,7 +4396,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       } catch (e) {
         if (!isStale()) {
           UI.contentGrid.innerHTML =
-            '<div class="col-span-3 text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">다시 시도</button></div>';
+            '<div class="col-span-full text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">다시 시도</button></div>';
 
           const retryBtn = document.getElementById('mySubRetryButton');
           if (retryBtn) {
@@ -4591,7 +4590,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
     if (emptyStateConfig) renderEmptyState(UI.contentGrid, emptyStateConfig);
     else
       UI.contentGrid.innerHTML =
-        '<div class="col-span-3 text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
+        '<div class="col-span-full text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
     return { itemCount: 0, aspectClass };
   }
 
@@ -4714,6 +4713,7 @@ const buildPicture = ({
 };
 
 function createCard(content, tabId, aspectClass) {
+  void aspectClass;
   const el = document.createElement('div');
   setClasses(el, UI_CLASSES.cardRoot);
   const subscriptionKey = buildSubscriptionKey(content);
@@ -4738,143 +4738,17 @@ function createCard(content, tabId, aspectClass) {
   el.setAttribute('aria-label', `${content?.title || '콘텐츠'} — Open`);
 
   const meta = normalizeMeta(content?.meta);
-  const thumb = meta?.common?.thumbnail_url || FALLBACK_THUMB;
-  const authors = Array.isArray(meta?.common?.authors)
-    ? meta.common.authors.join(', ')
-    : '';
-  const isKakaoWebtoon = String(content?.source || '').toLowerCase() === 'kakaowebtoon';
-  const kakaoAssets = meta?.common?.kakao_assets || null;
+  const rawAuthors = meta?.common?.authors;
+  const authors = Array.isArray(rawAuthors)
+    ? rawAuthors
+        .map((author) => safeString(author, ''))
+        .filter(Boolean)
+        .join(', ')
+    : safeString(rawAuthors, '');
 
   const cardContainer = document.createElement('div');
-  setClasses(cardContainer, cx(aspectClass, UI_CLASSES.cardThumb));
+  setClasses(cardContainer, UI_CLASSES.cardThumb);
   cardContainer.setAttribute('data-card-thumb', 'true');
-
-  const thumbSizeMap = {
-    'aspect-[3/4]': { width: 300, height: 400 },
-    'aspect-[1/1.4]': { width: 280, height: 392 },
-    'aspect-[2/3]': { width: 320, height: 480 },
-    default: { width: 300, height: 400 },
-  };
-  const { width, height } = thumbSizeMap[aspectClass] || thumbSizeMap.default;
-
-  const hasKakaoComposite =
-    isKakaoWebtoon &&
-    kakaoAssets?.bg?.webp &&
-    (kakaoAssets?.character_a ||
-      kakaoAssets?.character_b ||
-      kakaoAssets?.title_a ||
-      kakaoAssets?.title_b);
-
-  if (hasKakaoComposite) {
-    const stack = document.createElement('div');
-    setClasses(stack, 'absolute inset-0');
-
-    const bgPicture = buildPicture({
-      webp: kakaoAssets?.bg?.webp,
-      fallbackUrl: kakaoAssets?.bg?.jpg,
-      fallbackType: 'image/jpeg',
-      imgClass: 'w-full h-full object-cover origin-top',
-      imgStyle: {
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        objectPosition: 'center top',
-        transformOrigin: 'top',
-        transform: 'scale(1.35)',
-      },
-      wrapperClass: 'absolute inset-0 w-full h-full overflow-hidden',
-      noReferrer: true,
-      altText: content?.title || '',
-    });
-    bgPicture.style.zIndex = '0';
-    stack.appendChild(bgPicture);
-
-    const characterSource = kakaoAssets?.character_b || kakaoAssets?.character_a;
-    if (characterSource?.webp || characterSource?.png) {
-      const charPicture = buildPicture({
-        webp: characterSource?.webp,
-        fallbackUrl: characterSource?.png,
-        fallbackType: 'image/png',
-        imgClass: 'w-full h-full object-cover object-top',
-        wrapperClass: 'absolute inset-0 w-full h-full',
-        noReferrer: true,
-        altText: `${content?.title || ''} character`,
-      });
-      charPicture.style.zIndex = '1';
-      stack.appendChild(charPicture);
-    }
-
-    const bgRgb = hexToRgb(kakaoAssets?.bg_color || '');
-    if (bgRgb) {
-      const gradientEl = document.createElement('div');
-      setClasses(gradientEl, 'absolute left-0 bottom-0 w-full h-1/2');
-      gradientEl.style.backgroundImage = `linear-gradient(rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0) 0%, rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0.5) 33.04%, rgba(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}, 0.9) 66.09%, rgb(${bgRgb.r}, ${bgRgb.g}, ${bgRgb.b}) 100%)`;
-      gradientEl.style.pointerEvents = 'none';
-      gradientEl.style.zIndex = '2';
-      stack.appendChild(gradientEl);
-    } else {
-      const gradientEl = document.createElement('div');
-      setClasses(gradientEl, UI_CLASSES.cardGradient);
-      gradientEl.style.zIndex = '2';
-      stack.appendChild(gradientEl);
-    }
-
-    const titleSource = pickKakaoTitleSource(kakaoAssets);
-    if (titleSource?.webp || titleSource?.png) {
-      const titleWrap = document.createElement('div');
-      setClasses(titleWrap, 'absolute w-full');
-      titleWrap.style.position = 'absolute';
-      titleWrap.style.left = '0';
-      titleWrap.style.right = '0';
-      titleWrap.style.bottom = '10px';
-      titleWrap.style.display = 'flex';
-      titleWrap.style.justifyContent = 'center';
-      titleWrap.style.alignItems = 'flex-end';
-      titleWrap.style.padding = '0 8px';
-      titleWrap.style.boxSizing = 'border-box';
-      titleWrap.style.pointerEvents = 'none';
-      titleWrap.style.zIndex = '4';
-
-      const titlePicture = buildPicture({
-        webp: titleSource?.webp,
-        fallbackUrl: titleSource?.png,
-        fallbackType: 'image/png',
-        imgClass: 'object-contain kakaoTitleImg',
-        imgStyle: { width: '100%', maxWidth: '167px', height: 'auto', display: 'block' },
-        wrapperClass: 'flex items-center justify-center',
-        noReferrer: true,
-        altText: `${content?.title || ''} title`,
-      });
-      titleWrap.appendChild(titlePicture);
-      stack.appendChild(titleWrap);
-    }
-
-    cardContainer.appendChild(stack);
-  } else {
-    const imgEl = document.createElement('img');
-    if (isKakaoWebtoon) applyNoReferrer(imgEl);
-    imgEl.loading = 'lazy';
-    imgEl.decoding = 'async';
-    imgEl.fetchPriority = 'low';
-    imgEl.src = thumb;
-    imgEl.onerror = () => {
-      if (imgEl.dataset.fallbackApplied === '1') return;
-      if (DEBUG_RUNTIME) {
-        console.warn('[thumb:error]', {
-          src: imgEl.currentSrc || imgEl.src,
-          content_id: content?.content_id ?? content?.contentId ?? content?.id,
-          source: content?.source,
-          title: content?.title,
-        });
-      }
-      imgEl.dataset.fallbackApplied = '1';
-      imgEl.src = FALLBACK_THUMB;
-    };
-    imgEl.width = width;
-    imgEl.height = height;
-    setClasses(imgEl, UI_CLASSES.cardImage);
-    cardContainer.appendChild(imgEl);
-  }
 
   // Badge logic
   if (tabId === 'my') {
@@ -4918,14 +4792,6 @@ function createCard(content, tabId, aspectClass) {
     cardContainer.appendChild(badgeEl);
   }
 
-  if (!hasKakaoComposite) {
-    const gradient = document.createElement('div');
-    setClasses(gradient, UI_CLASSES.cardGradient);
-    cardContainer.appendChild(gradient);
-  }
-
-  el.appendChild(cardContainer);
-
   const textContainer = document.createElement('div');
   setClasses(textContainer, UI_CLASSES.cardTextWrap);
 
@@ -4935,12 +4801,10 @@ function createCard(content, tabId, aspectClass) {
 
   const authorEl = document.createElement('p');
   setClasses(authorEl, UI_CLASSES.cardMeta);
-  authorEl.textContent = authors;
+  authorEl.textContent = authors || '작가 정보 없음';
 
   textContainer.appendChild(titleEl);
-  if (authors) {
-    textContainer.appendChild(authorEl);
-  }
+  textContainer.appendChild(authorEl);
 
   if (tabId === 'my') {
     const myViewMode = STATE.filters?.my?.viewMode || 'completion';
@@ -4952,7 +4816,8 @@ function createCard(content, tabId, aspectClass) {
       textContainer.appendChild(publicationEl);
     }
   }
-  el.appendChild(textContainer);
+  cardContainer.appendChild(textContainer);
+  el.appendChild(cardContainer);
 
   el.addEventListener('keydown', (evt) => {
     if (evt.key === 'Enter' || evt.key === ' ') {
