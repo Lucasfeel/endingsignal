@@ -15,15 +15,13 @@
     toast.className = 'flex justify-center transition-opacity duration-300';
 
     const inner = document.createElement('div');
-    const baseClasses =
-      'pointer-events-auto rounded-xl border px-4 py-2 text-sm shadow-lg backdrop-blur';
     const typeClasses =
       type === 'error'
-        ? 'border-red-400/40 bg-red-500/20 text-red-100'
+        ? 'es-toast es-toast-error inline-flex rounded-xl px-4 py-2 text-sm'
         : type === 'success'
-          ? 'border-emerald-300/40 bg-emerald-500/20 text-emerald-50'
-          : 'border-white/20 bg-white/10 text-white';
-    inner.className = `${baseClasses} ${typeClasses}`;
+          ? 'es-toast es-toast-success inline-flex rounded-xl px-4 py-2 text-sm'
+          : 'es-toast inline-flex rounded-xl px-4 py-2 text-sm';
+    inner.className = typeClasses;
     inner.textContent = message;
 
     toast.appendChild(inner);
@@ -401,15 +399,15 @@
   const getStatusBadgeClasses = (statusValue) => {
     switch (statusValue) {
       case 'success':
-        return 'inline-flex rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-100';
+        return 'es-status-badge es-status-success';
       case 'warning':
-        return 'inline-flex rounded-full border border-amber-300/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100';
+        return 'es-status-badge es-status-warning';
       case 'failure':
-        return 'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+        return 'es-status-badge es-status-failure';
       case 'empty':
-        return 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/60';
+        return 'es-status-badge es-status-muted';
       default:
-        return 'inline-flex rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] text-white/70';
+        return 'es-status-badge es-status-muted';
     }
   };
 
@@ -624,11 +622,11 @@
     Object.entries(tabs).forEach(([key, button]) => {
       if (!button) return;
       if (key === tabName) {
-        button.classList.add('bg-white/10', 'text-white');
-        button.classList.remove('text-white/70');
+        button.classList.add('is-active');
+        button.setAttribute('aria-selected', 'true');
       } else {
-        button.classList.remove('bg-white/10', 'text-white');
-        button.classList.add('text-white/70');
+        button.classList.remove('is-active');
+        button.setAttribute('aria-selected', 'false');
       }
     });
   };

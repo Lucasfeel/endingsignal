@@ -62,36 +62,35 @@ const UI_CLASSES = {
   btnPrimary:
     'es-btn es-btn-primary h-10 px-4 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed',
   btnSecondary:
-    'es-btn es-btn-secondary h-10 px-4 rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed',
+    'es-btn es-btn-secondary h-10 px-4 rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed',
   btnSolid:
-    'es-btn es-btn-solid h-10 px-4 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50 disabled:cursor-not-allowed',
-  btnDisabled: 'opacity-80 cursor-not-allowed',
+    'es-btn es-btn-solid h-10 px-4 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed',
+  btnDisabled: 'opacity-60 cursor-not-allowed',
 
   // Icon buttons
   iconBtn: 'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl',
   iconBtnSm: 'es-icon-btn h-8 w-8 flex items-center justify-center rounded-lg',
   headerSearchIcon:
-    'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl text-white transition-colors',
+    'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl transition-colors',
   headerProfileIcon:
-    'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl text-white transition-colors',
+    'es-icon-btn h-10 w-10 flex items-center justify-center rounded-xl transition-colors',
 
   // Chips & empty states
   chip: 'es-chip h-9 px-3 inline-flex items-center rounded-full text-sm',
   emptyWrap: 'py-12 px-4 flex flex-col items-center justify-center text-center',
-  emptyTitle: 'text-lg font-semibold text-white',
-  emptyMsg: 'mt-2 text-sm text-[#9bb0cf] max-w-md',
+  emptyTitle: 'text-lg font-semibold es-text',
+  emptyMsg: 'mt-2 text-sm es-muted max-w-md',
 
   // Typography helpers
-  sectionTitle: 'text-base font-semibold text-white',
-  sectionSubtle: 'text-sm text-[#9bb0cf] hover:text-white transition-colors',
+  sectionTitle: 'text-base font-semibold es-text',
+  sectionSubtle: 'text-sm es-muted transition-colors',
 
   // Card overlays/badges
   starBadge:
     'es-star-badge absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
-  badgeBase:
-    'absolute top-0 left-0 backdrop-blur-md px-2 py-1 rounded-br-lg z-10 flex items-center',
+  badgeBase: 'es-badge-base absolute top-0 left-0 px-2 py-1 rounded-br-lg z-10 flex items-center',
   affordOverlay:
-    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-black/45 via-black/10 to-transparent group-hover:opacity-100',
+    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-white/35 via-white/5 to-transparent group-hover:opacity-100',
   affordHint:
     'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
   pillHint: 'es-pill-hint text-[11px] rounded-full px-2 py-1',
@@ -101,7 +100,7 @@ const UI_CLASSES = {
     'es-card-root relative cursor-pointer fade-in focus-visible:outline-none',
   cardThumb: 'es-card-thumb overflow-hidden relative',
   cardImage: 'w-full h-full object-cover',
-  cardGradient: 'absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60',
+  cardGradient: 'absolute inset-0 bg-gradient-to-t from-white/60 via-transparent to-transparent opacity-60',
   thumbStack: 'thumbStack kakaoStack',
   thumbBg: 'thumbBg',
   thumbChar: 'thumbChar',
@@ -112,34 +111,34 @@ const UI_CLASSES = {
 
   // Inputs
   inputBase:
-    'es-input-base w-full h-10 rounded-xl px-4 pr-10 text-white outline-none text-base placeholder:text-white/40',
+    'es-input-base w-full h-10 rounded-xl px-4 pr-10 outline-none text-base',
   inputSm:
-    'es-input-sm w-full px-3 py-2 rounded-xl text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20',
+    'es-input-sm w-full px-3 py-2 rounded-xl text-sm focus:outline-none',
   searchTrigger:
-    'es-input-base transition-all duration-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/25',
-  inputLabel: 'block text-sm font-medium text-[#b7c6df]',
+    'es-input-base transition-all duration-200 rounded-xl px-3 py-2 text-sm focus:outline-none',
+  inputLabel: 'block text-sm font-medium es-muted',
 
   // Modal
   modalWrap: 'flex items-center justify-center',
   modalCard:
     'es-modal-card relative z-10 p-6 rounded-2xl w-[90%] max-w-sm mx-auto shadow-2xl transform transition-all',
-  modalTitle: 'text-xl font-semibold mb-1 text-white tracking-[-0.02em]',
-  modalBodyText: 'text-[#9bb0cf] text-sm',
+  modalTitle: 'text-xl font-semibold mb-1 es-text tracking-[-0.02em]',
+  modalBodyText: 'es-muted text-sm',
 
   // Layout grids
   grid2to3: 'grid grid-cols-3 gap-2',
 
   // Pages & overlays
-  pageOverlayRoot: 'es-page-overlay-root text-white',
+  pageOverlayRoot: 'es-page-overlay-root',
   pageOverlayContainer: 'mx-auto h-full max-w-[520px] px-4',
-  pageCard: 'es-page-card rounded-2xl p-4 backdrop-blur-sm shadow-sm',
+  pageCard: 'es-page-card rounded-2xl p-4 shadow-sm',
 
   // Menus
-  menuWrap: 'es-menu-wrap rounded-xl shadow-2xl overflow-hidden py-2',
+  menuWrap: 'es-menu-wrap rounded-xl shadow-md overflow-hidden py-2',
   menuItem:
-    'es-menu-item w-full text-left px-4 py-3 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
+    'es-menu-item w-full text-left px-4 py-3 text-sm focus:outline-none',
   menuItemDanger:
-    'es-menu-item es-menu-item-danger w-full text-left px-4 py-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
+    'es-menu-item es-menu-item-danger w-full text-left px-4 py-3 text-sm focus:outline-none',
 
   // Pagination controls
   loadMoreBtn:
@@ -147,12 +146,13 @@ const UI_CLASSES = {
 
   // Toasts
   toastWrap: 'pointer-events-none w-full text-center transition-all duration-300 opacity-0 -translate-y-2',
-  toastSuccess: 'es-toast inline-flex px-4 py-2 rounded-xl text-sm',
+  toastInfo: 'es-toast inline-flex px-4 py-2 rounded-xl text-sm',
+  toastSuccess: 'es-toast es-toast-success inline-flex px-4 py-2 rounded-xl text-sm',
   toastError: 'es-toast es-toast-error inline-flex px-4 py-2 rounded-xl text-sm',
 };
 
 const FALLBACK_THUMB = `data:image/svg+xml;utf8,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#101a2d"/><stop offset="100%" stop-color="#20344f"/></linearGradient></defs><rect width="300" height="400" fill="url(#g)"/><rect x="32" y="48" width="236" height="304" rx="20" fill="rgba(255,255,255,0.06)" stroke="rgba(180,206,255,0.25)" stroke-width="2"/><path d="M90 270l42-54 38 42 32-28 44 58H90z" fill="rgba(216,233,255,0.22)"/><circle cx="124" cy="144" r="24" fill="rgba(216,233,255,0.2)"/><text x="150" y="330" text-anchor="middle" fill="#c8daf5" font-family="system-ui, sans-serif" font-size="20" font-weight="600">No Poster</text></svg>'
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f2f4f6"/><stop offset="100%" stop-color="#e5e8eb"/></linearGradient></defs><rect width="300" height="400" fill="url(#g)"/><rect x="32" y="48" width="236" height="304" rx="20" fill="rgba(255,255,255,0.9)" stroke="rgba(209,214,219,0.95)" stroke-width="2"/><path d="M90 270l42-54 38 42 32-28 44 58H90z" fill="rgba(139,149,161,0.35)"/><circle cx="124" cy="144" r="24" fill="rgba(139,149,161,0.24)"/><text x="150" y="330" text-anchor="middle" fill="#6b7684" font-family="system-ui, sans-serif" font-size="20" font-weight="600">No Poster</text></svg>'
 )}`;
 
 /* =========================
@@ -786,7 +786,7 @@ const DATA_UI_CLASS_MAP = {
   'modal-card': UI_CLASSES.modalCard,
   'modal-title': UI_CLASSES.modalTitle,
   'modal-body': UI_CLASSES.modalBodyText,
-  'modal-primary': cx(UI_CLASSES.btnPrimary, 'spring-bounce neon-glow'),
+  'modal-primary': cx(UI_CLASSES.btnPrimary, 'spring-bounce'),
   'modal-secondary': cx(UI_CLASSES.btnSecondary, 'spring-bounce'),
   'input-sm': UI_CLASSES.inputSm,
   'input-label': UI_CLASSES.inputLabel,
@@ -796,7 +796,7 @@ const DATA_UI_CLASS_MAP = {
   'menu-item': UI_CLASSES.menuItem,
   'menu-item-danger': UI_CLASSES.menuItemDanger,
   'load-more': UI_CLASSES.loadMoreBtn,
-  'page-container': 'mx-auto h-full max-w-[480px] px-4',
+  'page-container': 'mx-auto h-full max-w-[520px] px-4',
   'section-title': UI_CLASSES.sectionTitle,
   'section-subtle': UI_CLASSES.sectionSubtle,
   'page-overlay-root': UI_CLASSES.pageOverlayRoot,
@@ -1295,7 +1295,7 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
       ? UI_CLASSES.toastSuccess
       : type === 'error'
       ? UI_CLASSES.toastError
-      : UI_CLASSES.toastSuccess;
+      : UI_CLASSES.toastInfo;
   setClasses(inner, toastTone);
   inner.textContent = `${prefix}${truncatedMessage}`;
 
@@ -2034,9 +2034,9 @@ function syncSubscribeModalUI(content) {
     }
   }
   if (UI.subscribeStateDot) {
-    UI.subscribeStateDot.classList.remove('bg-white', 'bg-white/50', 'bg-white/60', 'bg-[#02E70F]');
-    if (showSubscribedState) UI.subscribeStateDot.classList.add('bg-[#02E70F]');
-    else if (showLoadingState) UI.subscribeStateDot.classList.add('bg-white/60');
+    UI.subscribeStateDot.classList.remove('is-loading', 'is-active');
+    if (showSubscribedState) UI.subscribeStateDot.classList.add('is-active');
+    else if (showLoadingState) UI.subscribeStateDot.classList.add('is-loading');
   }
 
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
@@ -2052,8 +2052,7 @@ function syncSubscribeModalUI(content) {
       btn.textContent = label;
     }
     btn.dataset.subscribed = isSubscribed === null ? '' : isSubscribed ? '1' : '0';
-    btn.classList.toggle('neon-glow', isSubscribed === true);
-    btn.classList.toggle('bg-white/16', isSubscribed === true);
+    btn.classList.toggle('is-active', isSubscribed === true);
   };
 
   if (UI.subscribePublicationButton) {
@@ -2209,200 +2208,22 @@ const sortPublicationItems = (items) => {
   return list;
 };
 
-const ENHANCED_THEME_STYLE_ID = 'es-enhanced-theme';
-
 function ensureEnhancedThemeAssets() {
-  const head = document.head || document.getElementsByTagName('head')[0];
-
-  if (head && !document.querySelector('link[data-es-font="sora"]')) {
-    const preconnectGoogle = document.createElement('link');
-    preconnectGoogle.rel = 'preconnect';
-    preconnectGoogle.href = 'https://fonts.googleapis.com';
-    preconnectGoogle.setAttribute('data-es-font', 'sora');
-    head.appendChild(preconnectGoogle);
-
-    const preconnectGStatic = document.createElement('link');
-    preconnectGStatic.rel = 'preconnect';
-    preconnectGStatic.href = 'https://fonts.gstatic.com';
-    preconnectGStatic.crossOrigin = 'anonymous';
-    preconnectGStatic.setAttribute('data-es-font', 'sora');
-    head.appendChild(preconnectGStatic);
-
-    const fontLink = document.createElement('link');
-    fontLink.rel = 'stylesheet';
-    fontLink.href = 'https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap';
-    fontLink.setAttribute('data-es-font', 'sora');
-    head.appendChild(fontLink);
-  }
-
-  if (head && !document.getElementById(ENHANCED_THEME_STYLE_ID)) {
-    const style = document.createElement('style');
-    style.id = ENHANCED_THEME_STYLE_ID;
-    style.textContent = `
-:root { --es-text-main: #edf4ff; --es-text-muted: #9db3d5; }
-body {
-  font-family: "Sora", "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
-  letter-spacing: -0.01em;
-  background:
-    radial-gradient(900px 500px at 5% -10%, rgba(84, 143, 255, 0.22), transparent 58%),
-    radial-gradient(780px 420px at 100% 8%, rgba(58, 211, 170, 0.17), transparent 56%),
-    linear-gradient(164deg, #060d19 0%, #10233d 55%, #09152a 100%) !important;
-  color: var(--es-text-main);
-}
-#app-root {
-  max-width: 520px;
-  background: linear-gradient(180deg, rgba(8, 18, 33, 0.78) 0%, rgba(8, 18, 33, 0.95) 100%);
-  border: 0;
-  box-shadow: none;
-}
-.app-aurora {
-  pointer-events: none;
-  position: absolute;
-  inset: 0 0 auto;
-  height: 220px;
-  z-index: 0;
-  overflow: hidden;
-}
-.app-aurora-blob {
-  position: absolute;
-  border-radius: 999px;
-  filter: blur(16px);
-  opacity: 0.7;
-  animation: es-drift 18s ease-in-out infinite alternate;
-}
-.app-aurora-blob.one { width: 200px; height: 120px; left: -34px; top: 14px; background: rgba(74, 128, 247, 0.52); }
-.app-aurora-blob.two { width: 170px; height: 110px; right: -30px; top: 36px; background: rgba(53, 197, 165, 0.45); animation-delay: 2.4s; }
-.app-aurora-blob.three { width: 150px; height: 95px; left: 36%; top: 74px; background: rgba(251, 191, 36, 0.24); animation-delay: 4.3s; }
-@keyframes es-drift { 0% { transform: translateY(0) scale(1); } 100% { transform: translateY(-10px) scale(1.08); } }
-#mainHeader {
-  z-index: 60;
-  height: 64px !important;
-  padding-inline: 14px !important;
-  background: rgba(9, 20, 37, 0.82) !important;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-bottom: 0 !important;
-}
-#homeButton { display: flex; align-items: center; gap: 10px; min-width: 0; }
-#homeButton .brand-mark { width: auto; height: 28px; display: block; filter: drop-shadow(0 8px 14px rgba(96, 204, 255, 0.2)); }
-#homeButton .brand-wordmark { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-#homeButton .brand-wordmark strong { font-size: 14px; font-weight: 700; color: #edf4ff; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
-#homeButton .brand-wordmark span { font-size: 10px; color: #9db3d5; white-space: nowrap; line-height: 1.1; }
-#searchButton, #profileButton { border: 0; background: transparent; color: #edf4ff; box-shadow: none; }
-#searchButton:hover, #profileButton:hover { background: transparent; color: #ffffff; }
-#filtersWrapper { background: rgba(8, 18, 33, 0.78) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 0; }
-#l1FilterContainer { min-height: 66px; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
-.l1-logo { width: 40px; min-width: 40px; height: 40px; border-radius: 999px; padding: 0; display: inline-flex; align-items: center; justify-content: center; gap: 0; border: 1px solid transparent; background: rgba(176, 210, 255, 0.08); color: #d7e7ff; transition: all 0.2s ease; }
-.l1-logo .l1-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; overflow: hidden; box-shadow: none; }
-.l1-logo .l1-icon svg { width: 100%; height: 100%; display: block; }
-.l1-logo.active { border-color: rgba(109, 228, 193, 0.56); background: rgba(54, 211, 153, 0.17); box-shadow: 0 10px 24px rgba(30, 177, 136, 0.24); color: #edfffb; }
-.l1-logo.is-dim { opacity: 0.38; }
-#l2FilterContainer { min-height: 44px; border-top: 0; border-bottom: 0 !important; }
-.l2-tab { font-size: 12px; font-weight: 600; color: #9db3d5; padding: 10px 0; margin-right: 16px; border-bottom: 2px solid transparent; }
-.l2-tab.active { color: #ecfffb; border-bottom-color: rgba(107, 232, 249, 0.9); text-shadow: 0 0 10px rgba(107, 232, 249, 0.2); }
-#contentGridContainer { position: relative; z-index: 1; gap: 8px !important; padding-top: 14px !important; }
-#bottomNav {
-  z-index: 80;
-  max-width: 520px !important;
-  width: calc(100% - 22px) !important;
-  left: 50%;
-  right: auto !important;
-  transform: translateX(-50%);
-  bottom: 10px !important;
-  border: 0 !important;
-  border-radius: 18px !important;
-  background: rgba(7, 16, 30, 0.84) !important;
-  box-shadow: 0 18px 40px rgba(3, 9, 20, 0.52);
-  height: 72px !important;
-  padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) 6px !important;
-  gap: 2px;
-}
-#bottomNav .bottom-nav-item { border-radius: 12px; transition: all 0.2s ease; color: #95accf; }
-#bottomNav .bottom-nav-item.text-white { background: rgba(103, 232, 249, 0.16); color: #ecfffb !important; box-shadow: 0 6px 16px rgba(32, 171, 189, 0.22); }
-.es-btn { transition: all 0.2s ease; }
-.es-btn-primary { background: linear-gradient(120deg, rgba(54, 211, 153, 0.94), rgba(103, 232, 249, 0.9)); color: #07241c; border: 1px solid rgba(203, 255, 239, 0.38); }
-.es-btn-secondary { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(166, 212, 255, 0.08); color: #dfebff; }
-.es-btn-solid { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(30, 72, 126, 0.72); color: #ecf5ff; }
-.es-icon-btn { border: 0; background: transparent; color: #e8f2ff; box-shadow: none; }
-.es-chip { border: 1px solid rgba(181, 211, 255, 0.24); background: rgba(166, 212, 255, 0.08); color: #d7e7ff; }
-.es-card-root {
-  border-radius: 16px;
-  overflow: hidden;
-  background: linear-gradient(175deg, rgba(15, 31, 53, 0.82), rgba(10, 21, 37, 0.95));
-  box-shadow: 0 12px 30px rgba(2, 9, 20, 0.35);
-}
-.es-card-thumb { border: 0; background: transparent; position: relative; }
-.es-card-text { padding: 28px 8px 10px; display: flex; flex-direction: column; gap: 3px; min-height: 96px; }
-.es-card-title {
-  color: #ecf3ff;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.es-card-meta {
-  color: #9fb4d6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.es-star-badge { background: rgba(7, 18, 34, 0.72); border: 1px solid rgba(181, 211, 255, 0.28); }
-.es-pill-hint { background: rgba(7, 18, 34, 0.62); color: #d9ecff; border: 1px solid rgba(181, 211, 255, 0.24); }
-.es-input-base, .es-input-sm { border: 1px solid rgba(181, 211, 255, 0.26); background: rgba(166, 212, 255, 0.07); color: #edf4ff; }
-.es-modal-card { border: 1px solid rgba(181, 211, 255, 0.2); background: linear-gradient(180deg, rgba(18, 36, 62, 0.95), rgba(10, 21, 38, 0.95)); }
-.es-page-overlay-root { background: linear-gradient(180deg, rgba(9, 18, 34, 0.9), rgba(8, 16, 30, 0.96)); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.es-page-card { border: 1px solid rgba(181, 211, 255, 0.2); background: linear-gradient(165deg, rgba(18, 36, 62, 0.7), rgba(10, 21, 38, 0.84)); }
-.es-menu-wrap { border: 1px solid rgba(181, 211, 255, 0.22); background: rgba(8, 18, 33, 0.95); }
-.es-menu-item:hover { background: rgba(166, 212, 255, 0.13); }
-.es-menu-item-danger { color: #fca5a5; }
-.es-load-more { border: 1px solid rgba(181, 211, 255, 0.24); background: rgba(166, 212, 255, 0.08); color: #d6e7ff; }
-.es-toast { border: 1px solid rgba(181, 211, 255, 0.28); background: rgba(8, 18, 33, 0.88); color: #eaf3ff; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.es-toast-error { border-color: rgba(252, 165, 165, 0.42); color: #ffd4d4; }
-@media (max-width: 520px) {
-  #app-root { border-left: 0; border-right: 0; box-shadow: none; max-width: 100%; }
-  #homeButton .brand-wordmark span { display: none; }
-  #bottomNav { width: calc(100% - 14px) !important; bottom: 6px !important; }
-}
-    `;
-    head.appendChild(style);
-  }
-
-  const appRoot = document.getElementById('app-root');
-  if (appRoot && !appRoot.querySelector('.app-aurora')) {
-    const aurora = document.createElement('div');
-    aurora.className = 'app-aurora';
-    aurora.setAttribute('aria-hidden', 'true');
-    aurora.innerHTML = `
-      <span class="app-aurora-blob one"></span>
-      <span class="app-aurora-blob two"></span>
-      <span class="app-aurora-blob three"></span>
-    `;
-    appRoot.prepend(aurora);
-  }
-
   const homeButton = document.getElementById('homeButton');
   if (homeButton) {
     const logoImg = homeButton.querySelector('img');
     if (logoImg) {
-      logoImg.className = 'brand-mark';
       logoImg.alt = '콘텐츠 완결 알리미';
-    }
-    if (!homeButton.querySelector('.brand-wordmark')) {
-      const wordmark = document.createElement('div');
-      wordmark.className = 'brand-wordmark';
-      wordmark.innerHTML = '<strong>콘텐츠 완결 알리미</strong>';
-      homeButton.appendChild(wordmark);
     }
   }
 
-  if (UI.searchButton) UI.searchButton.setAttribute('aria-label', 'Search');
-  if (UI.profileButton) UI.profileButton.setAttribute('aria-label', 'Profile');
-  if (UI.profileMenu) UI.profileMenu.setAttribute('aria-label', 'Profile menu');
-  if (UI.searchBackButton) UI.searchBackButton.setAttribute('aria-label', 'Back');
-  if (UI.searchClearButton) UI.searchClearButton.setAttribute('aria-label', 'Clear search');
-  if (UI.myPageBackBtn) UI.myPageBackBtn.setAttribute('aria-label', 'Back');
+  if (UI.searchButton) UI.searchButton.setAttribute('aria-label', '검색');
+  if (UI.profileButton) UI.profileButton.setAttribute('aria-label', '프로필');
+  if (UI.profileMenu) UI.profileMenu.setAttribute('aria-label', '프로필 메뉴');
+  if (UI.searchBackButton) UI.searchBackButton.setAttribute('aria-label', '뒤로');
+  if (UI.searchClearButton) UI.searchClearButton.setAttribute('aria-label', '검색어 지우기');
+  if (UI.myPageBackBtn) UI.myPageBackBtn.setAttribute('aria-label', '뒤로');
 }
-
 /* =========================
    App lifecycle
    ========================= */
@@ -2465,42 +2286,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function setupScrollEffect() {
   if (!UI.filtersWrapper) return;
-  const usingEnhancedTheme = Boolean(document.getElementById(ENHANCED_THEME_STYLE_ID));
-
-  if (!usingEnhancedTheme) {
-    const resolveBaseBackground = () => {
-      const rootEl =
-        document.getElementById('app') ||
-        document.getElementById('root') ||
-        document.querySelector('main') ||
-        document.body;
-      const candidates = [rootEl, document.body, document.documentElement];
-      for (const el of candidates) {
-        if (!el) continue;
-        const color = getComputedStyle(el).backgroundColor;
-        if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') {
-          return color;
-        }
-      }
-      return '#000';
-    };
-
-    const baseBgColor = resolveBaseBackground();
-    UI.filtersWrapper.style.backgroundColor = baseBgColor;
-    UI.filtersWrapper.style.backdropFilter = 'none';
-    UI.filtersWrapper.style.webkitBackdropFilter = 'none';
-  }
 
   const handleScroll = () => {
     const scrolled = window.scrollY > 10;
-    if (usingEnhancedTheme) {
-      UI.filtersWrapper.style.borderBottomColor = scrolled
-        ? 'rgba(181, 211, 255, 0.2)'
-        : 'rgba(181, 211, 255, 0.12)';
-      return;
-    }
-    if (scrolled) UI.filtersWrapper.classList.add('border-b', 'border-white/5');
-    else UI.filtersWrapper.classList.remove('border-b', 'border-white/5');
+    UI.filtersWrapper.classList.toggle('is-scrolled', scrolled);
   };
 
   handleScroll();
@@ -2536,7 +2325,7 @@ function ensureKakaoThumbStyles() {
   right: 0;
   bottom: 0;
   height: 45%;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
   pointer-events: none;
   z-index: 1;
 }
@@ -2773,8 +2562,8 @@ const renderRecentSearches = () => {
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
-    deleteBtn.setAttribute('aria-label', 'Remove recent search');
-    deleteBtn.className = 'h-6 w-6 rounded-full bg-white/10 flex items-center justify-center text-white/70';
+    deleteBtn.setAttribute('aria-label', '최근 검색어 삭제');
+    deleteBtn.className = 'es-icon-btn es-icon-btn-xs';
     deleteBtn.textContent = '×';
     deleteBtn.onclick = (evt) => {
       evt.stopPropagation();
@@ -2905,7 +2694,7 @@ const renderPopularGrid = () => {
 
   if (!items.length) {
     const placeholder = document.createElement('div');
-    placeholder.className = 'text-sm text-white/50 col-span-full text-center py-8';
+    placeholder.className = 'text-sm es-muted col-span-full text-center py-8';
     placeholder.textContent = '추천 작품을 불러오지 못했습니다.';
     grid.appendChild(placeholder);
     return;
@@ -3641,7 +3430,7 @@ function setupMyPagePasswordChange() {
 
 const PROFILE_OUTLINE_ICON = `
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true">
+    stroke-linecap="round" stroke-linejoin="round" class="es-icon-stroke" aria-hidden="true">
     <circle cx="12" cy="8" r="4"></circle>
     <path d="M4 20c1.8-4 5.2-6 8-6s6.2 2 8 6"></path>
   </svg>
@@ -3982,28 +3771,30 @@ function renderBottomNav() {
 
   UI.bottomNav.innerHTML = '';
   const tabs = [
-    { id: 'webtoon', label: 'Webtoon', icon: ICONS.webtoon },
-    { id: 'novel', label: 'Web Novel', icon: ICONS.novel },
+    { id: 'webtoon', label: '웹툰', icon: ICONS.webtoon },
+    { id: 'novel', label: '웹소설', icon: ICONS.novel },
     { id: 'ott', label: 'OTT', icon: ICONS.ott },
-    { id: 'series', label: 'Series', icon: ICONS.series },
-    { id: 'my', label: 'My Sub', icon: ICONS.my },
+    { id: 'series', label: '시리즈', icon: ICONS.series },
+    { id: 'my', label: '내 구독', icon: ICONS.my },
   ];
 
   tabs.forEach((tab) => {
     const btn = document.createElement('button');
     const isActive = STATE.activeTab === tab.id;
-    btn.className = `bottom-nav-item flex flex-col items-center justify-center w-full spring-bounce ${
-      isActive ? 'text-white' : 'text-[#8A8A8A]'
-    }`;
+    btn.type = 'button';
+    btn.className = 'bottom-nav-item flex flex-col items-center justify-center w-full spring-bounce';
+    if (isActive) btn.classList.add('is-active');
     btn.setAttribute('data-tab-id', tab.id);
+    btn.setAttribute('aria-label', tab.label);
+    btn.setAttribute('aria-current', isActive ? 'page' : 'false');
 
-    const iconClass = isActive ? 'scale-105 neon-drop-shadow' : 'scale-100 opacity-90';
+    const iconClass = isActive ? 'scale-105' : 'scale-100 opacity-90';
 
     btn.innerHTML = `
       <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
         ${tab.icon}
       </div>
-      <span class="text-[10px] ${isActive ? 'font-bold' : 'font-medium'}">${tab.label}</span>
+      <span class="text-[10px] ${isActive ? 'font-semibold' : 'font-medium'}">${tab.label}</span>
     `;
     btn.onclick = () => updateTab(tab.id);
     UI.bottomNav.appendChild(btn);
@@ -4197,8 +3988,8 @@ function syncMySubToggleUI() {
   );
   btns.forEach((btn) => {
     const active = btn.dataset.mode === mode;
-    btn.classList.toggle('text-white', active);
-    btn.classList.toggle('text-gray-400', !active);
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
 }
 
@@ -4375,13 +4166,17 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       const token = getAccessToken();
       if (!token) {
         if (!isStale()) {
-          UI.contentGrid.innerHTML =
-            '<div class="col-span-full text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>로그인이 필요합니다.</p><button id="myTabLoginButton" class="px-4 py-2 rounded-lg bg-[#3F3F46] text-white text-xs font-bold hover:bg-[#4A4A55] active:bg-[#2F2F36] focus:outline-none focus:ring-2 focus:ring-white/10">로그인하기</button></div>';
-
-          const loginBtn = document.getElementById('myTabLoginButton');
-          if (loginBtn) {
-            loginBtn.onclick = () => openAuthModal({ reason: 'my-tab' });
-          }
+          renderEmptyState(UI.contentGrid, {
+            title: '로그인이 필요해요',
+            message: '내 구독은 로그인 후 확인할 수 있어요.',
+            actions: [
+              {
+                label: '로그인하기',
+                variant: 'primary',
+                onClick: () => openAuthModal({ reason: 'my-tab' }),
+              },
+            ],
+          });
         }
         return { itemCount: 0, aspectClass };
       }
@@ -4392,20 +4187,24 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         if (isStale()) return { stale: true };
       } catch (e) {
         if (!isStale()) {
-          UI.contentGrid.innerHTML =
-            '<div class="col-span-full text-center text-gray-400 py-10 text-sm flex flex-col items-center gap-3"><p>구독 정보를 불러오지 못했습니다.</p><button id="mySubRetryButton" class="px-4 py-2 rounded-lg bg-white/12 border border-white/22 text-white text-xs font-bold hover:bg-white/16 hover:border-white/26">다시 시도</button></div>';
-
-          const retryBtn = document.getElementById('mySubRetryButton');
-          if (retryBtn) {
-            retryBtn.onclick = async () => {
-              try {
-                await loadSubscriptions({ force: true });
-                fetchAndRenderContent('my');
-              } catch (err) {
-                showToast(err?.message || '오류가 발생했습니다.', { type: 'error' });
-              }
-            };
-          }
+          renderEmptyState(UI.contentGrid, {
+            title: '구독 정보를 불러오지 못했어요',
+            message: '잠시 후 다시 시도해 주세요.',
+            actions: [
+              {
+                label: '다시 시도',
+                variant: 'primary',
+                onClick: async () => {
+                  try {
+                    await loadSubscriptions({ force: true });
+                    fetchAndRenderContent('my');
+                  } catch (err) {
+                    showToast(err?.message || '오류가 발생했습니다.', { type: 'error' });
+                  }
+                },
+              },
+            ],
+          });
         }
         return { stale: true };
       }
@@ -4585,9 +4384,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
 
   if (!data.length) {
     if (emptyStateConfig) renderEmptyState(UI.contentGrid, emptyStateConfig);
-    else
-      UI.contentGrid.innerHTML =
-        '<div class="col-span-full text-center text-gray-500 py-10 text-xs">콘텐츠가 없습니다.</div>';
+    else renderEmptyState(UI.contentGrid, { title: '콘텐츠가 없습니다.' });
     return { itemCount: 0, aspectClass };
   }
 
@@ -4761,7 +4558,7 @@ function createCard(content, tabId, aspectClass) {
 
     if (myViewMode !== 'publication') {
       if (isScheduled) {
-        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-yellow-500/80'));
+        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-warning'));
         const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
         badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
           formatted
@@ -4770,12 +4567,12 @@ function createCard(content, tabId, aspectClass) {
         }`;
         cardContainer.appendChild(badgeEl);
       } else if (isCompleted) {
-        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-green-500/80'));
+        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-success'));
         badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
         cardContainer.appendChild(badgeEl);
       } else if (isHiatus) {
-        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 bg-gray-600/80'));
-        badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">휴재</span>`;
+        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-neutral'));
+        badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">휴재</span>`;
         cardContainer.appendChild(badgeEl);
       }
     }
@@ -4783,9 +4580,9 @@ function createCard(content, tabId, aspectClass) {
     const badgeEl = document.createElement('div');
     setClasses(
       badgeEl,
-      cx(UI_CLASSES.badgeBase, 'bg-black/60 gap-0.5 rounded-br-lg'),
+      cx(UI_CLASSES.badgeBase, 'es-badge-neutral gap-0.5 rounded-br-lg'),
     );
-    badgeEl.innerHTML = `<span class="text-[10px] font-black text-white leading-none">EN</span><span class="text-[10px] text-yellow-400 leading-none">🔔</span>`;
+    badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">EN</span><span class="text-[10px] leading-none">🔔</span>`;
     cardContainer.appendChild(badgeEl);
   }
 
@@ -4808,7 +4605,7 @@ function createCard(content, tabId, aspectClass) {
     if (myViewMode === 'publication') {
       const publicationText = buildPublicationStatusText(content);
       const publicationEl = document.createElement('div');
-      setClasses(publicationEl, 'mt-1 text-xs text-white/60');
+      setClasses(publicationEl, 'mt-1 text-xs es-muted');
       publicationEl.textContent = publicationText;
       textContainer.appendChild(publicationEl);
     }
@@ -4965,7 +4762,7 @@ function openSubscribeModal(content, opts = {}) {
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.className =
-        'inline-block text-blue-400 underline underline-offset-2 hover:text-blue-300 visited:text-blue-400 focus-visible:underline focus-visible:outline-none cursor-pointer pointer-events-auto';
+        'inline-block text-[#1b64da] underline underline-offset-2 hover:text-[#1957c2] visited:text-[#1b64da] focus-visible:underline focus-visible:outline-none cursor-pointer pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
       titleEl.textContent = displayText;
@@ -5161,3 +4958,5 @@ window.closeSubscribeModal = closeSubscribeModal;
 // 1) localStorage.setItem('es_access_token', '<token>')
 // 2) Reload and open the "My Sub" tab
 // 3) Open a card to trigger the subscribe modal and use the modal button to watch POST/DELETE /api/me/subscriptions
+
+

@@ -6,133 +6,13 @@
     <title>콘텐츠 완결 알리미</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
-    <style>
-        :root {
-            --bg-app: #0B0B0B;
-            --bg-card: #141414;
-            --bg-overlay: rgba(20, 20, 20, 0.9);
-            --brand-primary: #FFFFFF;
-            --brand-secondary: #FFFFFF;
-            --text-white: #FFFFFF;
-            --text-gray-100: #D6D6D6;
-            --text-gray-400: #A8A8A8;
-            --text-gray-600: #D6D6D6;
-            --brand-glow: 0 0 12px rgba(255, 255, 255, 0.14);
-        }
-
-        body {
-            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
-            background-color: var(--bg-app);
-            color: var(--text-white);
-            margin: 0;
-            overscroll-behavior-y: contain;
-        }
-
-        #app-root {
-            width: 100%;
-            max-width: 480px;
-            min-height: 100vh;
-            margin: 0 auto;
-            background-color: var(--bg-app);
-            position: relative;
-            overflow-x: hidden;
-            box-shadow: none;
-        }
-
-        /* 스크롤바 숨기기 (Global) */
-        ::-webkit-scrollbar { display: none; }
-        * { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Safe Area for Bottom Nav */
-        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-
-        /* Animation Utilities */
-        .spring-bounce:active { transform: none; transition: none; }
-        .fade-in { animation: fadeIn 0.2s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-        /* Neon Glow Utilities */
-        .neon-glow {
-            box-shadow: var(--brand-glow);
-        }
-        .neon-text-glow {
-            text-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
-        }
-        .neon-drop-shadow {
-            filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.16));
-        }
-
-        /* Glassmorphism - Updated to match unified BG #121212 */
-        .glass-bg {
-            background-color: rgba(11, 11, 11, 0.95); /* #0B0B0B with slight transparency */
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-        }
-
-        /* L1 Logo Filter Styles */
-        .l1-logo {
-            width: 42px; height: 42px; border-radius: 50%;
-            transition: all 0.2s;
-            background-color: #333; /* Placeholder for logo img */
-            display: flex; align-items: center; justify-content: center;
-            font-size: 10px; font-weight: bold; color: #fff;
-            border: none !important;
-        }
-        .l1-logo.active {
-            opacity: 1;
-            box-shadow: none;
-            background-color: rgba(255, 255, 255, 0.06);
-        }
-        .l1-logo.inactive { opacity: 1; filter: none; }
-        .l1-logo.is-bright { opacity: 1; filter: none; }
-        .l1-logo.is-dim { opacity: 0.28; }
-
-        /* L2 Text Tab Styles */
-        .l2-tab {
-            font-size: 13px; font-weight: 500;
-            color: #FFFFFF;
-            padding: 8px 0;
-            margin-right: 20px;
-            white-space: nowrap;
-            border-bottom: 2px solid transparent;
-            transition: all 0.2s;
-        }
-        .l2-tab.active {
-            color: var(--text-white);
-            border-bottom-color: #FFFFFF;
-            text-shadow: 0 0 5px rgba(255,255,255,0.2);
-        }
-
-        /* Skeleton Loading */
-        .skeleton {
-            background-color: var(--bg-card);
-            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-
-        /* Button spinner */
-        .btn-spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(255, 255, 255, 0.35);
-            border-top-color: rgba(255, 255, 255, 0.9);
-            border-radius: 9999px;
-            display: inline-block;
-            vertical-align: middle;
-            animation: spin 0.8s linear infinite;
-            margin-right: 8px;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='es_theme_toss.css') }}" />
 </head>
-<body class="antialiased">
+<body class="es-main-page antialiased">
 
     <div id="app-root">
         <!-- 3.1 Sticky Header -->
-        <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 glass-bg border-b border-white/10 flex items-center justify-between transition-all duration-300 relative">
+        <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 flex items-center justify-between transition-all duration-200 relative">
             <div id="homeButton" class="flex items-center cursor-pointer spring-bounce">
                 <img
                     src="/static/brand_logo.svg"
@@ -143,7 +23,7 @@
             <div class="flex items-center gap-4">
                 <div id="headerSearchWrap" class="relative flex items-center">
                     <button id="searchButton" data-ui="header-search-icon" aria-label="검색">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="11" cy="11" r="7"></circle>
                             <line x1="16.65" y1="16.65" x2="21" y2="21"></line>
                         </svg>
@@ -162,24 +42,24 @@
             </div>
         </header>
 
-        <div id="toastContainer" class="fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[480px] pointer-events-none"></div>
+        <div id="toastContainer" class="fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[520px] pointer-events-none"></div>
 
         <main class="min-h-screen pb-24 relative">
              <!-- Top Filters Container -->
-            <div id="filtersWrapper" class="sticky top-[56px] z-40 bg-[#0B0B0B]">
+            <div id="filtersWrapper" class="sticky top-[56px] z-40">
                 <!-- Tab 5 Specific: Segmented Toggle -->
                 <div id="mySubToggleContainer" class="hidden px-4 py-3 h-[68px] items-center">
-                    <div class="w-full bg-[#2A2A2A] h-[44px] rounded-lg p-1 flex relative">
-                        <div id="toggleIndicator" class="absolute top-1 bottom-1 w-1/3 bg-[#3F3F46] rounded-md transition-transform duration-300 translate-x-0"></div>
-                        <button id="mySubTogglePublication" data-mode="publication" class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-gray-400" onclick="updateMySubTab('publication')">공개 구독</button>
-                        <button id="mySubToggleCompletion" data-mode="completion" class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-white" onclick="updateMySubTab('completion')">완결구독</button>
-                        <button id="mySubToggleCompleted" data-mode="completed" class="flex-1 z-10 text-[13px] font-bold text-center leading-[36px] text-gray-400" onclick="updateMySubTab('completed')">완결됨</button>
+                    <div class="es-toggle-shell w-full h-[44px] rounded-lg p-1 flex relative">
+                        <div id="toggleIndicator" class="absolute top-1 bottom-1 w-1/3 rounded-md transition-transform duration-300 translate-x-0"></div>
+                        <button id="mySubTogglePublication" data-mode="publication" class="flex-1 z-10 text-[13px] font-semibold text-center leading-[36px]" onclick="updateMySubTab('publication')">공개 구독</button>
+                        <button id="mySubToggleCompletion" data-mode="completion" class="is-active flex-1 z-10 text-[13px] font-semibold text-center leading-[36px]" onclick="updateMySubTab('completion')">완결구독</button>
+                        <button id="mySubToggleCompleted" data-mode="completed" class="flex-1 z-10 text-[13px] font-semibold text-center leading-[36px]" onclick="updateMySubTab('completed')">완결됨</button>
                     </div>
                 </div>
 
                  <!-- Tab 4 Specific: Sort Options -->
-                <div id="seriesSortOptions" class="hidden flex justify-end px-4 py-2 text-[11px] text-[#A3A3A3] gap-2">
-                    <span class="text-white font-bold cursor-pointer">최신순</span>
+                <div id="seriesSortOptions" class="hidden flex justify-end px-4 py-2 text-[11px] gap-2">
+                    <span class="is-active cursor-pointer">최신순</span>
                     <span>|</span>
                     <span class="cursor-pointer">가나다순</span>
                 </div>
@@ -188,7 +68,7 @@
                 <div id="l1FilterContainer" class="h-[60px] flex items-center px-4 overflow-x-auto hide-scrollbar gap-3 hidden"></div>
 
                 <!-- L2 Filter (Detail Categories) -->
-                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b border-white/10 hidden"></div>
+                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b hidden"></div>
             </div>
 
             <!-- Content Grid -->
@@ -197,15 +77,15 @@
             </div>
 
             <div id="contentGridFooter" class="px-4 pb-4 space-y-2">
-                <div id="contentCountIndicator" class="text-center text-[11px] text-gray-400"></div>
+                <div id="contentCountIndicator" class="text-center text-[11px]"></div>
                 <button id="contentLoadMoreBtn" data-ui="load-more" class="hidden">더 불러오기</button>
                 <div id="contentGridSentinel" class="h-6 w-full"></div>
             </div>
 
              <!-- Tab 4 Footer Button -->
             <div id="seriesFooterButton" class="hidden px-4 pb-6 w-full">
-                <button class="w-full h-[52px] bg-transparent border border-dashed border-[#525252] rounded-xl flex justify-center items-center cursor-pointer hover:bg-[#1E1E1E] hover:text-white hover:border-transparent transition-all group">
-                     <span class="text-[13px] text-[#A3A3A3] group-hover:text-white">(+) 당신의 시리즈를 추가해주세요</span>
+                <button class="w-full h-[52px] border border-dashed rounded-xl flex justify-center items-center cursor-pointer transition-all group">
+                     <span class="text-[13px]">(+) 당신의 시리즈를 추가해주세요</span>
                 </button>
             </div>
 
@@ -213,22 +93,22 @@
         </main>
 
         <!-- 3.2 Bottom Navigation -->
-        <nav id="bottomNav" class="fixed bottom-0 max-w-[480px] w-full mx-auto glass-bg border-t border-white/10 z-50 pb-safe h-[64px] grid grid-cols-5">
+        <nav id="bottomNav" class="fixed bottom-0 max-w-[520px] w-full mx-auto z-50 pb-safe h-[64px] grid grid-cols-5">
             <!-- Icons injected via JS -->
         </nav>
 
         <!-- Modals -->
         <div id="subscribeModal" data-ui="modal-wrap" class="fixed inset-0 z-[100] hidden" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" tabindex="-1">
-            <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-modal-overlay="true"></div>
+            <div class="absolute inset-0 es-modal-overlay" data-modal-overlay="true"></div>
             <div id="modalContent" data-ui="modal-card" class="relative">
                 <h2 id="subscribeModalTitle" data-ui="modal-title">완결 알림 받기</h2>
                 <p id="modalWebtoonTitle" data-ui="modal-body" class="mb-4"></p>
                 <div id="modalWebtoonLinkContainer" class="mb-6 text-sm"></div>
-                <div id="subscribeStateLine" class="flex items-center gap-2 text-white/85 text-sm mb-2">
-                    <span id="subscribeStateDot" class="h-2 w-2 rounded-full bg-white/50"></span>
+                <div id="subscribeStateLine" class="flex items-center gap-2 text-sm mb-2">
+                    <span id="subscribeStateDot" class="h-2 w-2 rounded-full"></span>
                     <span id="subscribeStateText"></span>
                 </div>
-                <p id="subscribeInlineError" class="text-white/90 text-xs mt-2"></p>
+                <p id="subscribeInlineError" class="text-xs mt-2"></p>
                 <div class="flex justify-end gap-2 w-full">
                     <button id="subscribePublicationButton" data-ui="modal-secondary" class="flex-1" onclick="toggleSubscriptionFromModal('publication')" type="button">공개 구독</button>
                     <button id="subscribeCompletionButton" data-ui="modal-primary" class="flex-1" onclick="toggleSubscriptionFromModal('completion')" type="button">완결 구독</button>
@@ -259,9 +139,9 @@
                                 <div id="searchPageLoading" data-ui="grid-2to3" class="hidden mt-2 items-start content-start"></div>
                                 <div id="searchPageResults" data-ui="grid-2to3" class="mt-2 pb-4 items-start content-start overflow-visible"></div>
 
-                                <div id="searchPageEmpty" class="hidden flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-10 text-center">
+                                <div id="searchPageEmpty" class="hidden flex flex-col items-center gap-3 rounded-xl border px-4 py-10 text-center">
                                     <div id="searchEmptyTitle" data-ui="search-empty-title">검색 결과가 없어요</div>
-                                    <div id="searchEmptySubtitle" data-ui="search-empty-msg" class="max-w-[320px] text-center text-sm text-white/70">
+                                    <div id="searchEmptySubtitle" data-ui="search-empty-msg" class="max-w-[320px] text-center text-sm">
                                         다른 키워드로 검색해보세요.
                                     </div>
                                     <div id="searchEmptyActions" class="mt-4 flex flex-wrap items-center justify-center gap-3"></div>
@@ -306,18 +186,18 @@
                                     <div class="space-y-2 text-sm">
                                         <div class="flex items-center justify-between">
                                             <span data-ui="section-subtle">이메일</span>
-                                            <span id="myPageEmailValue" class="text-white/90 font-medium">-</span>
+                                            <span id="myPageEmailValue" class="font-medium">-</span>
                                         </div>
                                         <div id="myPageCreatedAtRow" class="flex items-center justify-between hidden">
                                             <span data-ui="section-subtle">가입일</span>
-                                            <span id="myPageCreatedAtValue" class="text-white/80 font-medium"></span>
+                                            <span id="myPageCreatedAtValue" class="font-medium"></span>
                                         </div>
                                     </div>
                                 </div>
 
                                 <div data-ui="page-card" class="space-y-3">
                                     <h3 data-ui="section-title">구독</h3>
-                                    <p class="text-xs text-white/60">구독한 작품을 한 번에 확인하세요.</p>
+                                    <p class="text-xs es-muted">구독한 작품을 한 번에 확인하세요.</p>
                                     <button id="myPageGoMySubBtn" data-ui="btn-solid" type="button" class="w-full h-11">내 구독으로 이동</button>
                                 </div>
 
@@ -330,19 +210,19 @@
                                     <div class="space-y-2">
                                         <label data-ui="input-label" for="myPagePwNew">새 비밀번호</label>
                                         <input id="myPagePwNew" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호" />
-                                        <p class="text-xs text-white/60">비밀번호는 8자 이상 입력해주세요.</p>
+                                        <p class="text-xs es-muted">비밀번호는 8자 이상 입력해주세요.</p>
                                     </div>
                                     <div class="space-y-2">
                                         <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
                                         <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
                                     </div>
-                                    <p id="myPagePwError" class="text-xs text-white/90 min-h-[16px]"></p>
+                                    <p id="myPagePwError" class="text-xs min-h-[16px]"></p>
                                     <button id="myPagePwSubmit" data-ui="btn-solid" type="button" class="w-full h-11">변경하기</button>
                                 </div>
 
                                 <div data-ui="page-card" class="space-y-3">
                                     <h3 data-ui="section-title">로그아웃</h3>
-                                    <p class="text-xs text-white/60">계정에서 안전하게 로그아웃합니다.</p>
+                                    <p class="text-xs es-muted">계정에서 안전하게 로그아웃합니다.</p>
                                     <button id="myPageLogoutBtn" data-ui="btn-solid" type="button" class="w-full h-11">로그아웃</button>
                                 </div>
                             </div>
@@ -352,8 +232,8 @@
             </div>
         </div>
         <div id="authModal" data-ui="modal-wrap" class="fixed inset-0 z-[120] hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" tabindex="-1">
-            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-modal-overlay="true"></div>
-            <div class="relative z-10 border border-white/10" data-ui="modal-card">
+            <div class="absolute inset-0 es-modal-overlay" data-modal-overlay="true"></div>
+            <div class="relative z-10" data-ui="modal-card">
                 <h2 id="authTitle" data-ui="modal-title">로그인</h2>
                 <p data-ui="modal-body" class="mb-4">이메일과 비밀번호를 입력해주세요.</p>
                 <div class="space-y-3">
@@ -363,15 +243,15 @@
                         <label data-ui="input-label">비밀번호 확인</label>
                         <input id="authPasswordConfirm" data-ui="input-sm" type="password" class="px-4 py-3 rounded-xl" placeholder="비밀번호를 다시 입력" />
                     </div>
-                    <p id="authError" class="text-white/90 text-xs min-h-[16px]"></p>
+                    <p id="authError" class="text-xs min-h-[16px]"></p>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
                     <button id="authCloseBtn" data-ui="modal-secondary">닫기</button>
                     <button id="authSubmitBtn" data-ui="modal-primary">로그인</button>
                 </div>
-                <div class="mt-4 text-center text-xs text-gray-400">
+                <div class="mt-4 text-center text-xs es-muted">
                     <span id="authModeHintText">계정이 없으신가요?</span>
-                    <button id="authToggleModeBtn" type="button" class="ml-1 text-white font-bold hover:text-white hover:underline">회원가입</button>
+                    <button id="authToggleModeBtn" type="button" class="ml-1 font-bold hover:underline">회원가입</button>
                 </div>
             </div>
         </div>
@@ -380,3 +260,6 @@
     <script src="/static/app.js" defer></script>
 </body>
 </html>
+
+
+

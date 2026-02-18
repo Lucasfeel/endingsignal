@@ -11,29 +11,12 @@
     crossorigin
     href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
   />
-  <style>
-    :root {
-      --bg-app: #0b0b0b;
-      --bg-card: #141414;
-      --text-white: #ffffff;
-      --text-gray: #a8a8a8;
-    }
-
-    body {
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue',
-        'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Apple Color Emoji',
-        'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
-      background-color: var(--bg-app);
-      color: var(--text-white);
-      margin: 0;
-      min-height: 100vh;
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='es_theme_toss.css') }}" />
 </head>
-<body class="antialiased">
+<body class="es-admin-page antialiased">
   <div id="toastContainer" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 space-y-2 w-[calc(100%-32px)] max-w-[520px]"></div>
 
-  <div class="min-h-screen px-6 py-10">
+  <div class="es-admin-shell min-h-screen px-6 py-10">
     <div class="mx-auto flex w-full max-w-[960px] flex-col gap-8">
       <header class="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-6">
         <div class="flex items-center justify-between gap-4">
@@ -52,70 +35,70 @@
         <section class="rounded-2xl border border-white/10 bg-[var(--bg-card)] p-4">
           <div class="flex flex-wrap gap-2">
             <button
-              id="tabManage"
+              id="tabManage" data-admin-tab="1"
               class="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm text-white transition hover:border-white/40"
               type="button"
             >
               콘텐츠 관리
             </button>
             <button
-              id="tabDeleted"
+              id="tabDeleted" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               삭제된 콘텐츠
             </button>
             <button
-              id="tabPublications"
+              id="tabPublications" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               최근 공개일 변경
             </button>
             <button
-              id="tabCompletionChanges"
+              id="tabCompletionChanges" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               최근 완결일 변경
             </button>
             <button
-              id="tabMissingCompletion"
+              id="tabMissingCompletion" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               완결일 미설정
             </button>
             <button
-              id="tabMissingPublication"
+              id="tabMissingPublication" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               공개일 미설정
             </button>
             <button
-              id="tabAudit"
+              id="tabAudit" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               운영 로그
             </button>
             <button
-              id="tabCdcEvents"
+              id="tabCdcEvents" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               CDC 이벤트
             </button>
             <button
-              id="tabCrawlerReports"
+              id="tabCrawlerReports" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
               작업 로그
             </button>
             <button
-              id="tabDailyNotificationReport"
+              id="tabDailyNotificationReport" data-admin-tab="1"
               class="rounded-full border border-white/20 px-4 py-2 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
               type="button"
             >
@@ -773,3 +756,4 @@
   <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 </body>
 </html>
+
