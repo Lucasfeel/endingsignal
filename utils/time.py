@@ -36,8 +36,12 @@ def parse_iso_naive_kst(value: str | None) -> datetime | None:
     if value is None:
         return None
 
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
 

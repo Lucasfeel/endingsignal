@@ -140,7 +140,7 @@ def list_deleted_contents(conn, *, limit, offset, q=None):
             GROUP BY content_id, source
         ) s
           ON s.content_id = c.content_id AND s.source = c.source
-        WHERE COALESCE(c.is_deleted, FALSE) = TRUE
+        WHERE COALESCE(is_deleted, FALSE) = TRUE
     """
     if q:
         query += " AND (c.title ILIKE %s OR c.normalized_title ILIKE %s)"
