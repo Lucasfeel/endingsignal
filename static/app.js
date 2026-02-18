@@ -2288,8 +2288,8 @@ body {
 #homeButton .brand-wordmark { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 #homeButton .brand-wordmark strong { font-size: 14px; font-weight: 700; color: #edf4ff; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
 #homeButton .brand-wordmark span { font-size: 10px; color: #9db3d5; white-space: nowrap; line-height: 1.1; }
-#searchButton, #profileButton { border: 1px solid rgba(181, 211, 255, 0.2); background: rgba(166, 212, 255, 0.08); color: #edf4ff; }
-#searchButton:hover, #profileButton:hover { background: rgba(166, 212, 255, 0.18); border-color: rgba(181, 211, 255, 0.34); }
+#searchButton, #profileButton { border: 0; background: transparent; color: #edf4ff; box-shadow: none; }
+#searchButton:hover, #profileButton:hover { background: transparent; color: #ffffff; }
 #filtersWrapper { background: rgba(8, 18, 33, 0.78) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 0; }
 #l1FilterContainer { min-height: 66px; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
 .l1-logo { width: 40px; min-width: 40px; height: 40px; border-radius: 999px; padding: 0; display: inline-flex; align-items: center; justify-content: center; gap: 0; border: 1px solid transparent; background: rgba(176, 210, 255, 0.08); color: #d7e7ff; transition: all 0.2s ease; }
@@ -2323,7 +2323,7 @@ body {
 .es-btn-primary { background: linear-gradient(120deg, rgba(54, 211, 153, 0.94), rgba(103, 232, 249, 0.9)); color: #07241c; border: 1px solid rgba(203, 255, 239, 0.38); }
 .es-btn-secondary { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(166, 212, 255, 0.08); color: #dfebff; }
 .es-btn-solid { border: 1px solid rgba(181, 211, 255, 0.25); background: rgba(30, 72, 126, 0.72); color: #ecf5ff; }
-.es-icon-btn { border: 1px solid rgba(181, 211, 255, 0.2); background: rgba(166, 212, 255, 0.08); color: #e8f2ff; }
+.es-icon-btn { border: 0; background: transparent; color: #e8f2ff; box-shadow: none; }
 .es-chip { border: 1px solid rgba(181, 211, 255, 0.24); background: rgba(166, 212, 255, 0.08); color: #d7e7ff; }
 .es-card-root {
   border-radius: 16px;
