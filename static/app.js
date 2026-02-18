@@ -127,7 +127,7 @@ const UI_CLASSES = {
   modalBodyText: 'text-[#9bb0cf] text-sm',
 
   // Layout grids
-  grid2to3: 'grid grid-cols-1 gap-3',
+  grid2to3: 'grid grid-cols-3 gap-2',
 
   // Pages & overlays
   pageOverlayRoot: 'es-page-overlay-root text-white',
@@ -240,6 +240,14 @@ function getSourceIconMarkup(sourceId, fallbackLabel) {
   const text = safeInitial || '?';
   return `<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#1e293b"/><text x="14" y="18" text-anchor="middle" fill="#dbeafe" font-family="system-ui,sans-serif" font-size="10" font-weight="700">${text}</text></svg>`;
 }
+
+const CARD_LOGO_SOURCE_IDS = new Set(['naver_webtoon', 'kakaowebtoon']);
+
+const getCardSourceLogoMarkup = (sourceId) => {
+  const normalized = String(sourceId || '').trim();
+  if (!CARD_LOGO_SOURCE_IDS.has(normalized)) return '';
+  return SOURCE_ICON_SVGS[normalized] || '';
+};
 
 const ALL_SOURCE_IDS = Object.values(SOURCE_OPTIONS).flatMap((group) =>
   group.map((item) => item.id)
@@ -2301,7 +2309,7 @@ body {
 #l2FilterContainer { min-height: 44px; border-top: 0; border-bottom: 0 !important; }
 .l2-tab { font-size: 12px; font-weight: 600; color: #9db3d5; padding: 10px 0; margin-right: 16px; border-bottom: 2px solid transparent; }
 .l2-tab.active { color: #ecfffb; border-bottom-color: rgba(107, 232, 249, 0.9); text-shadow: 0 0 10px rgba(107, 232, 249, 0.2); }
-#contentGridContainer { position: relative; z-index: 1; gap: 10px !important; padding-top: 16px !important; }
+#contentGridContainer { position: relative; z-index: 1; gap: 8px !important; padding-top: 14px !important; }
 #bottomNav {
   z-index: 80;
   max-width: 520px !important;
@@ -2333,7 +2341,7 @@ body {
   box-shadow: 0 12px 30px rgba(2, 9, 20, 0.35);
 }
 .es-card-thumb { border: 0; background: transparent; position: relative; }
-.es-card-text { padding: 16px 40px 14px 12px; display: flex; flex-direction: column; gap: 4px; }
+.es-card-text { padding: 28px 8px 10px; display: flex; flex-direction: column; gap: 3px; min-height: 96px; }
 .es-card-title {
   color: #ecf3ff;
   display: -webkit-box;
@@ -2347,6 +2355,19 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.es-source-logo-layer {
+  position: absolute;
+  top: 8px;
+  right: 36px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.es-source-logo-layer svg { width: 100%; height: 100%; display: block; }
 .es-star-badge { background: rgba(7, 18, 34, 0.72); border: 1px solid rgba(181, 211, 255, 0.28); }
 .es-pill-hint { background: rgba(7, 18, 34, 0.62); color: #d9ecff; border: 1px solid rgba(181, 211, 255, 0.24); }
 .es-input-base, .es-input-sm { border: 1px solid rgba(181, 211, 255, 0.26); background: rgba(166, 212, 255, 0.07); color: #edf4ff; }
@@ -2391,8 +2412,7 @@ body {
     if (!homeButton.querySelector('.brand-wordmark')) {
       const wordmark = document.createElement('div');
       wordmark.className = 'brand-wordmark';
-      wordmark.innerHTML =
-        '<strong>콘텐츠 완결 알리미</strong><span>완결/공개 알림을 한곳에서</span>';
+      wordmark.innerHTML = '<strong>콘텐츠 완결 알리미</strong>';
       homeButton.appendChild(wordmark);
     }
   }
@@ -4738,6 +4758,7 @@ function createCard(content, tabId, aspectClass) {
   el.setAttribute('aria-label', `${content?.title || '콘텐츠'} — Open`);
 
   const meta = normalizeMeta(content?.meta);
+  const sourceLogoMarkup = getCardSourceLogoMarkup(source);
   const rawAuthors = meta?.common?.authors;
   const authors = Array.isArray(rawAuthors)
     ? rawAuthors
@@ -4749,6 +4770,14 @@ function createCard(content, tabId, aspectClass) {
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, UI_CLASSES.cardThumb);
   cardContainer.setAttribute('data-card-thumb', 'true');
+
+  if (sourceLogoMarkup) {
+    const sourceLogoLayer = document.createElement('div');
+    sourceLogoLayer.className = 'es-source-logo-layer';
+    sourceLogoLayer.setAttribute('aria-hidden', 'true');
+    sourceLogoLayer.innerHTML = sourceLogoMarkup;
+    cardContainer.appendChild(sourceLogoLayer);
+  }
 
   // Badge logic
   if (tabId === 'my') {
