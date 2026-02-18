@@ -241,14 +241,6 @@ function getSourceIconMarkup(sourceId, fallbackLabel) {
   return `<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#1e293b"/><text x="14" y="18" text-anchor="middle" fill="#dbeafe" font-family="system-ui,sans-serif" font-size="10" font-weight="700">${text}</text></svg>`;
 }
 
-const CARD_LOGO_SOURCE_IDS = new Set(['naver_webtoon', 'kakaowebtoon']);
-
-const getCardSourceLogoMarkup = (sourceId) => {
-  const normalized = String(sourceId || '').trim();
-  if (!CARD_LOGO_SOURCE_IDS.has(normalized)) return '';
-  return SOURCE_ICON_SVGS[normalized] || '';
-};
-
 const ALL_SOURCE_IDS = Object.values(SOURCE_OPTIONS).flatMap((group) =>
   group.map((item) => item.id)
 );
@@ -2300,10 +2292,9 @@ body {
 #searchButton:hover, #profileButton:hover { background: rgba(166, 212, 255, 0.18); border-color: rgba(181, 211, 255, 0.34); }
 #filtersWrapper { background: rgba(8, 18, 33, 0.78) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 0; }
 #l1FilterContainer { min-height: 66px; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
-.l1-logo { min-width: max-content; height: 44px; border-radius: 14px; padding: 0 11px 0 8px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid transparent; background: rgba(176, 210, 255, 0.08); color: #d7e7ff; transition: all 0.2s ease; }
-.l1-logo .l1-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; overflow: hidden; box-shadow: 0 6px 12px rgba(10, 18, 34, 0.42); }
+.l1-logo { width: 40px; min-width: 40px; height: 40px; border-radius: 999px; padding: 0; display: inline-flex; align-items: center; justify-content: center; gap: 0; border: 1px solid transparent; background: rgba(176, 210, 255, 0.08); color: #d7e7ff; transition: all 0.2s ease; }
+.l1-logo .l1-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; overflow: hidden; box-shadow: none; }
 .l1-logo .l1-icon svg { width: 100%; height: 100%; display: block; }
-.l1-logo .l1-label { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
 .l1-logo.active { border-color: rgba(109, 228, 193, 0.56); background: rgba(54, 211, 153, 0.17); box-shadow: 0 10px 24px rgba(30, 177, 136, 0.24); color: #edfffb; }
 .l1-logo.is-dim { opacity: 0.38; }
 #l2FilterContainer { min-height: 44px; border-top: 0; border-bottom: 0 !important; }
@@ -2355,19 +2346,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.es-source-logo-layer {
-  position: absolute;
-  top: 8px;
-  right: 36px;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 6;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-.es-source-logo-layer svg { width: 100%; height: 100%; display: block; }
 .es-star-badge { background: rgba(7, 18, 34, 0.72); border: 1px solid rgba(181, 211, 255, 0.28); }
 .es-pill-hint { background: rgba(7, 18, 34, 0.62); color: #d9ecff; border: 1px solid rgba(181, 211, 255, 0.24); }
 .es-input-base, .es-input-sm { border: 1px solid rgba(181, 211, 255, 0.26); background: rgba(166, 212, 255, 0.07); color: #edf4ff; }
@@ -4121,7 +4099,6 @@ function renderL1Filters(tabId) {
     el.setAttribute('aria-label', item.label);
     el.innerHTML = `
       <span class="l1-icon" aria-hidden="true">${getSourceIconMarkup(item.id, item.label)}</span>
-      <span class="l1-label">${item.label}</span>
     `;
 
     el.onclick = () => {
@@ -4758,7 +4735,6 @@ function createCard(content, tabId, aspectClass) {
   el.setAttribute('aria-label', `${content?.title || '콘텐츠'} — Open`);
 
   const meta = normalizeMeta(content?.meta);
-  const sourceLogoMarkup = getCardSourceLogoMarkup(source);
   const rawAuthors = meta?.common?.authors;
   const authors = Array.isArray(rawAuthors)
     ? rawAuthors
@@ -4770,14 +4746,6 @@ function createCard(content, tabId, aspectClass) {
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, UI_CLASSES.cardThumb);
   cardContainer.setAttribute('data-card-thumb', 'true');
-
-  if (sourceLogoMarkup) {
-    const sourceLogoLayer = document.createElement('div');
-    sourceLogoLayer.className = 'es-source-logo-layer';
-    sourceLogoLayer.setAttribute('aria-hidden', 'true');
-    sourceLogoLayer.innerHTML = sourceLogoMarkup;
-    cardContainer.appendChild(sourceLogoLayer);
-  }
 
   // Badge logic
   if (tabId === 'my') {
