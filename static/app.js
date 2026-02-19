@@ -41,11 +41,11 @@ function showFatalBanner(message) {
 }
 
 const ICONS = {
-  home: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M6.5 9.8V20h11V9.8"/><path d="M9.5 20v-5.2h5V20"/></svg>`,
+  home: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10.9 2.8a1.6 1.6 0 0 1 2.2 0l8.1 7.3a1 1 0 0 1-.7 1.7h-.8v7.1a2 2 0 0 1-2 2h-3.7a1 1 0 0 1-1-1v-4.6h-2v4.6a1 1 0 0 1-1 1H6.3a2 2 0 0 1-2-2v-7.1h-.8a1 1 0 0 1-.7-1.7z"/></svg>`,
   webtoon: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;"></span>`,
   novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;"></span>`,
-  me: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c1.7-3.5 4.5-5.5 7-5.5s5.3 2 7 5.5"/></svg>`,
+  me: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a4.6 4.6 0 1 1 0 9.2 4.6 4.6 0 0 1 0-9.2m0 10.9c4.8 0 8.8 2.7 9.7 6.5a.9.9 0 0 1-.9 1.2H3.2a.9.9 0 0 1-.9-1.2c.9-3.8 4.9-6.5 9.7-6.5"/></svg>`,
 };
 
 // UI_CLASSES: Tailwind class tokens for reusable UI primitives.
