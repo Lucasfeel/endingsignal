@@ -14,6 +14,8 @@
 const DEBUG_API = false;
 const DEBUG_TOOLS = false;
 const DEBUG_RUNTIME = typeof window !== 'undefined' && Boolean(window.ES_DEBUG);
+const THEME_STORAGE_KEY = 'es_theme';
+const DARK_MODE_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 
 function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
@@ -727,6 +729,7 @@ const UI = {
   profileButtonText: document.getElementById('profileButtonText'),
   profileMenu: document.getElementById('profileMenu'),
   profileMenuMy: document.getElementById('profileMenuMy'),
+  profileMenuThemeToggle: document.getElementById('profileMenuThemeToggle'),
   profileMenuAdmin: document.getElementById('profileMenuAdmin'),
   profileMenuLogout: document.getElementById('profileMenuLogout'),
   headerSearchWrap: document.getElementById('headerSearchWrap'),
@@ -2231,14 +2234,85 @@ function ensureEnhancedThemeAssets() {
   if (UI.myPageBackBtn) UI.myPageBackBtn.setAttribute('aria-label', '뒤로');
   if (UI.myPageEntryButton) UI.myPageEntryButton.setAttribute('aria-label', '마이페이지');
 }
+const getThemePreference = () => {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return saved === 'dark' || saved === 'light' ? saved : null;
+  } catch (e) {
+    console.warn('Failed to read theme preference', e);
+    return null;
+  }
+};
+
+const applyThemePreference = (pref) => {
+  const root = document.documentElement;
+  if (!root) return;
+  if (pref === 'dark' || pref === 'light') {
+    root.dataset.theme = pref;
+    return;
+  }
+  delete root.dataset.theme;
+};
+
+const isDarkEffective = () => {
+  const explicit = document.documentElement?.dataset?.theme;
+  if (explicit === 'dark') return true;
+  if (explicit === 'light') return false;
+  if (!window.matchMedia) return false;
+  return window.matchMedia(DARK_MODE_MEDIA_QUERY).matches;
+};
+
+const updateThemeToggleLabel = () => {
+  const toggle = UI.profileMenuThemeToggle;
+  if (!toggle) return;
+  const dark = isDarkEffective();
+  toggle.textContent = dark ? '다크 모드: 켜짐' : '다크 모드: 꺼짐';
+  toggle.setAttribute('aria-checked', dark ? 'true' : 'false');
+};
+
+const toggleTheme = () => {
+  const nextPreference = isDarkEffective() ? 'light' : 'dark';
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, nextPreference);
+  } catch (e) {
+    console.warn('Failed to save theme preference', e);
+  }
+  applyThemePreference(nextPreference);
+  updateThemeToggleLabel();
+};
+
+function setupThemePreferenceListeners() {
+  if (window.matchMedia) {
+    const media = window.matchMedia(DARK_MODE_MEDIA_QUERY);
+    const handleSystemThemeChange = () => {
+      if (getThemePreference()) return;
+      updateThemeToggleLabel();
+    };
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', handleSystemThemeChange);
+    } else if (typeof media.addListener === 'function') {
+      media.addListener(handleSystemThemeChange);
+    }
+  }
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== THEME_STORAGE_KEY) return;
+    applyThemePreference(getThemePreference());
+    updateThemeToggleLabel();
+  });
+}
+
 /* =========================
    App lifecycle
    ========================= */
 
 async function initApp() {
+  applyThemePreference(getThemePreference());
   ensureEnhancedThemeAssets();
   applyDataUiClasses();
+  updateThemeToggleLabel();
   ensureKakaoThumbStyles();
+  setupThemePreferenceListeners();
   setupAuthModalListeners();
   setupProfileButton();
   updateProfileButtonState();
@@ -2336,7 +2410,7 @@ function ensureKakaoThumbStyles() {
   right: 0;
   bottom: 0;
   height: 45%;
-  background: linear-gradient(to top, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  background: linear-gradient(to top, var(--es-kakao-thumb-grad-from), var(--es-kakao-thumb-grad-to));
   pointer-events: none;
   z-index: 1;
 }
@@ -3558,7 +3632,8 @@ function openProfileMenu() {
   if (!UI.profileMenu || !UI.profileButton) return;
   UI.profileMenu.classList.remove('hidden');
   UI.profileButton.setAttribute('aria-expanded', 'true');
-  const firstItem = UI.profileMenu.querySelector('[role="menuitem"]');
+  updateThemeToggleLabel();
+  const firstItem = UI.profileMenu.querySelector('[role="menuitem"], [role="menuitemcheckbox"]');
   if (firstItem) firstItem.focus();
 }
 
@@ -3674,6 +3749,13 @@ function setupProfileButton() {
     UI.profileMenuAdmin.onclick = () => {
       closeProfileMenu();
       window.location.href = '/admin';
+    };
+  }
+
+  if (UI.profileMenuThemeToggle) {
+    UI.profileMenuThemeToggle.onclick = (evt) => {
+      evt.preventDefault();
+      toggleTheme();
     };
   }
 

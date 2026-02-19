@@ -4,6 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Console | 콘텐츠 완결 알리미</title>
+  <meta name="color-scheme" content="light dark" />
+  <script>
+    (function () {
+      try {
+        var savedTheme = localStorage.getItem('es_theme');
+        if (savedTheme === 'dark' || savedTheme === 'light') {
+          document.documentElement.dataset.theme = savedTheme;
+        }
+      } catch (_err) {}
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link
     rel="stylesheet"
