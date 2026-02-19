@@ -42,7 +42,7 @@ function showFatalBanner(message) {
 
 const ICONS = {
   webtoon: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="7.5" height="14" rx="1.8"/><rect x="13" y="5" width="7.5" height="14" rx="1.8"/><path d="M11 8.5h2"/></svg>`,
-  novel: `<span aria-hidden="true" style="display:inline-block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
+  novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="2.4"/><path d="M10 9.1v4.8l4.2-2.4L10 9.1z"/><path d="M8 21h8"/></svg>`,
   series: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>`,
   my: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5a6 6 0 1 0-12 0c0 6-2.1 7.3-2.1 7.3h16.2S18 14.5 18 8.5z"/><path d="M9.5 18.5a2.5 2.5 0 0 0 5 0"/></svg>`,
@@ -87,7 +87,7 @@ const UI_CLASSES = {
 
   // Card overlays/badges
   starBadge:
-    'es-star-badge ml-auto z-10 inline-flex items-center justify-center h-[24px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
+    'es-star-badge absolute top-2 right-2 z-10 flex items-center justify-center h-[24px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
   badgeBase: 'es-badge-base z-10 inline-flex px-2 py-1 rounded-lg items-center',
   affordOverlay:
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-white/35 via-white/5 to-transparent group-hover:opacity-100',
@@ -729,6 +729,7 @@ const UI = {
   profileMenuLogout: document.getElementById('profileMenuLogout'),
   headerSearchWrap: document.getElementById('headerSearchWrap'),
   searchButton: document.getElementById('searchButton'),
+  aitSearchTrigger: document.getElementById('aitSearchTrigger'),
   searchInput: document.getElementById('searchInput'),
   searchPage: document.getElementById('searchPage'),
   searchPageInput: document.getElementById('searchPageInput'),
@@ -761,6 +762,7 @@ const UI = {
   myPagePwError: document.getElementById('myPagePwError'),
   myPageGoMySubBtn: document.getElementById('myPageGoMySubBtn'),
   myPageLogoutBtn: document.getElementById('myPageLogoutBtn'),
+  myPageEntryButton: document.getElementById('myPageEntryButton'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
 };
 
@@ -1109,8 +1111,6 @@ function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
 
   const thumb = cardEl.querySelector('[data-card-thumb="true"]');
   if (!thumb) return;
-  const badgeRow = thumb.querySelector('[data-card-badge-row="true"]');
-  const badgeHost = badgeRow || thumb;
 
   const contentId = cardEl.getAttribute('data-content-id');
   const source = cardEl.getAttribute('data-source');
@@ -1122,10 +1122,10 @@ function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
   };
   const shouldShow =
     typeof subscribedOverride === 'boolean' ? subscribedOverride : isAnySubscribedForCard(content);
-  const existing = badgeHost.querySelector('[data-star-badge="true"]');
+  const existing = thumb.querySelector('[data-star-badge="true"]');
 
   if (shouldShow && !existing) {
-    badgeHost.appendChild(createStarBadgeEl());
+    thumb.appendChild(createStarBadgeEl());
   } else if (!shouldShow && existing) {
     existing.remove();
   }
@@ -2221,11 +2221,13 @@ function ensureEnhancedThemeAssets() {
   }
 
   if (UI.searchButton) UI.searchButton.setAttribute('aria-label', '검색');
+  if (UI.aitSearchTrigger) UI.aitSearchTrigger.setAttribute('aria-label', '검색');
   if (UI.profileButton) UI.profileButton.setAttribute('aria-label', '프로필');
   if (UI.profileMenu) UI.profileMenu.setAttribute('aria-label', '프로필 메뉴');
   if (UI.searchBackButton) UI.searchBackButton.setAttribute('aria-label', '뒤로');
   if (UI.searchClearButton) UI.searchClearButton.setAttribute('aria-label', '검색어 지우기');
   if (UI.myPageBackBtn) UI.myPageBackBtn.setAttribute('aria-label', '뒤로');
+  if (UI.myPageEntryButton) UI.myPageEntryButton.setAttribute('aria-label', '마이페이지');
 }
 /* =========================
    App lifecycle
@@ -3090,6 +3092,7 @@ function setupSearchHandlers() {
   renderRecentSearches();
 
   if (UI.searchButton) UI.searchButton.onclick = () => openSearchPage({ focus: true });
+  if (UI.aitSearchTrigger) UI.aitSearchTrigger.onclick = () => openSearchPage({ focus: true });
 
   if (UI.searchInput) {
     UI.searchInput.addEventListener('focus', () => openSearchPage({ focus: true }));
@@ -3380,6 +3383,7 @@ function closeMyPage({ fromPopstate = false, overlayId = null } = {}) {
   if (UI.myPage) UI.myPage.classList.add('hidden');
   unlockBodyScroll();
   if (UI.profileButton) UI.profileButton.focus();
+  else if (UI.myPageEntryButton) UI.myPageEntryButton.focus();
   popOverlayState('myPage', overlayId);
 }
 
@@ -3389,6 +3393,12 @@ function setupMyPageHandlers() {
   if (UI.profileMenuMyPage) {
     UI.profileMenuMyPage.onclick = () => {
       closeProfileMenu();
+      openMyPage();
+    };
+  }
+
+  if (UI.myPageEntryButton) {
+    UI.myPageEntryButton.onclick = () => {
       openMyPage();
     };
   }
@@ -3794,10 +3804,10 @@ function renderBottomNav() {
     const iconClass = isActive ? 'scale-105' : 'scale-100 opacity-90';
 
     btn.innerHTML = `
-      <div class="mb-1 transform transition-transform duration-200 ${iconClass}">
+      <div class="h-6 w-6 mb-0.5 flex items-center justify-center transform transition-transform duration-200 ${iconClass}">
         ${tab.icon}
       </div>
-      <span class="text-[10px] ${isActive ? 'font-semibold' : 'font-medium'}">${tab.label}</span>
+      <span class="text-[10px] leading-[1.15] ${isActive ? 'font-semibold' : 'font-medium'}">${tab.label}</span>
     `;
     btn.onclick = () => updateTab(tab.id);
     UI.bottomNav.appendChild(btn);
@@ -4583,14 +4593,6 @@ function createCard(content, tabId, aspectClass) {
         badgeRow.appendChild(badgeEl);
       }
     }
-  } else if (content.status === '완결') {
-    const badgeEl = document.createElement('div');
-    setClasses(
-      badgeEl,
-      cx(UI_CLASSES.badgeBase, 'es-badge-neutral gap-0.5 rounded-br-lg'),
-    );
-    badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">EN</span><span class="text-[10px] leading-none">🔔</span>`;
-    badgeRow.appendChild(badgeEl);
   }
 
   const textContainer = document.createElement('div');

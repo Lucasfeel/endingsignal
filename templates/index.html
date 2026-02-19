@@ -8,10 +8,14 @@
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
     <link rel="stylesheet" href="{{ url_for('static', filename='es_theme_toss.css') }}" />
 </head>
-<body class="es-main-page antialiased">
+{% set in_toss_arg = request.args.get('in_toss', '')|string|lower %}
+{% set host_arg = request.args.get('host', '')|string|lower %}
+{% set is_ait = in_toss_arg in ['1', 'true'] or host_arg == 'toss' %}
+<body class="es-main-page antialiased{% if is_ait %} is-ait{% endif %}">
 
     <div id="app-root">
         <!-- 3.1 Sticky Header -->
+        {% if not is_ait %}
         <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 flex items-center justify-between transition-all duration-200 relative">
             <div id="homeButton" class="flex items-center cursor-pointer spring-bounce">
                 <img
@@ -41,14 +45,37 @@
                 </div>
             </div>
         </header>
+        {% endif %}
 
         <div id="toastContainer" class="fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[520px] pointer-events-none"></div>
 
         <main class="min-h-screen pb-24 relative">
              <!-- Top Filters Container -->
-            <div id="filtersWrapper" class="sticky top-[56px] z-40">
+            <div id="filtersWrapper" class="sticky {% if is_ait %}top-0{% else %}top-[56px]{% endif %} z-40">
+                {% if is_ait %}
+                <div class="px-4 pt-3 pb-2">
+                    <button id="aitSearchTrigger" type="button" data-ui="search-trigger" class="w-full h-11 flex items-center gap-2 rounded-xl px-3 text-left spring-bounce" aria-label="검색">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <line x1="16.65" y1="16.65" x2="21" y2="21"></line>
+                        </svg>
+                        <span class="text-sm">작품을 검색해 보세요</span>
+                    </button>
+                </div>
+                {% endif %}
                 <!-- Tab 5 Specific: Segmented Toggle -->
-                <div id="mySubToggleContainer" class="hidden px-4 py-3 h-[68px] items-center">
+                <div id="mySubToggleContainer" class="hidden px-4 py-3{% if not is_ait %} h-[68px] items-center{% else %} space-y-2{% endif %}">
+                    {% if is_ait %}
+                    <div class="flex items-center justify-between px-1">
+                        <h2 class="text-base font-semibold">내 구독</h2>
+                        <button id="myPageEntryButton" type="button" class="es-icon-btn h-9 w-9 inline-flex items-center justify-center rounded-xl spring-bounce" aria-label="마이페이지">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.04.37.24.72.56 1 .28.24.64.37 1.01.37H21a2 2 0 0 1 0 4h-.09c-.37 0-.73.13-1.01.37-.32.28-.52.63-.56 1z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    {% endif %}
                     <div class="es-toggle-shell w-full h-[44px] rounded-lg p-1 flex relative">
                         <div id="toggleIndicator" class="absolute top-1 bottom-1 w-1/3 rounded-md transition-transform duration-300 translate-x-0"></div>
                         <button id="mySubTogglePublication" data-mode="publication" class="flex-1 z-10 text-[13px] font-semibold text-center leading-[36px]" onclick="updateMySubTab('publication')">공개 구독</button>
@@ -119,11 +146,12 @@
             <div class="relative z-10 h-full">
                 <div id="searchPageContainer" data-ui="page-overlay-container" class="h-full">
                     <div class="flex h-full flex-col min-h-0">
-                        <div class="flex items-center gap-2 pt-4 pb-3">
+                        <div class="es-overlay-header flex items-center {% if is_ait %}gap-0{% else %}gap-2{% endif %} pb-3">
+                            {% if not is_ait %}
                             <button id="searchBackButton" data-ui="search-back" aria-label="뒤로">
                                 ←
                             </button>
-
+                            {% endif %}
                             <div class="flex-1 relative">
                                 <input id="searchPageInput" data-ui="search-input" type="text" inputmode="search" autocomplete="off" placeholder="작품을 검색해 보세요" />
                                 <button id="searchClearButton" data-ui="search-clear" class="absolute right-2 top-1/2 -translate-y-1/2" aria-label="검색어 지우기">×</button>
@@ -172,10 +200,12 @@
             <div class="relative z-10 h-full">
                 <div id="myPageContainer" data-ui="page-overlay-container" class="h-full">
                     <div class="flex h-full flex-col min-h-0">
-                        <div class="flex items-center gap-2 pt-4 pb-3">
+                        <div class="es-overlay-header flex items-center {% if is_ait %}gap-0{% else %}gap-2{% endif %} pb-3">
+                            {% if not is_ait %}
                             <button id="myPageBackBtn" data-ui="search-back" aria-label="뒤로">
                                 ←
                             </button>
+                            {% endif %}
                             <h2 class="text-base font-semibold">마이페이지</h2>
                         </div>
 

@@ -290,8 +290,11 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
   padding: 8px 8px 0;
+}
+
+.es-card-badge-row:empty {
+  display: none;
 }
 
 .es-card-text {
@@ -630,6 +633,14 @@ body.es-main-page {
   padding-bottom: calc(env(safe-area-inset-bottom));
 }
 
+body.is-ait #bottomNav {
+  width: calc(100% - 32px);
+  border: 1px solid var(--es-divider);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
 #bottomNav .bottom-nav-item {
   color: var(--grey-500);
   transition: color 0.16s ease;
@@ -646,6 +657,10 @@ body.es-main-page {
 #searchPage,
 #myPage {
   background: var(--es-bg);
+}
+
+.es-overlay-header {
+  padding-top: calc(1rem + env(safe-area-inset-top));
 }
 
 #searchPageEmpty {
