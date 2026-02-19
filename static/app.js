@@ -87,8 +87,8 @@ const UI_CLASSES = {
 
   // Card overlays/badges
   starBadge:
-    'es-star-badge absolute top-2 right-2 z-10 flex items-center justify-center h-[26px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
-  badgeBase: 'es-badge-base absolute top-0 left-0 px-2 py-1 rounded-br-lg z-10 flex items-center',
+    'es-star-badge ml-auto z-10 inline-flex items-center justify-center h-[24px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
+  badgeBase: 'es-badge-base z-10 inline-flex px-2 py-1 rounded-lg items-center',
   affordOverlay:
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-white/35 via-white/5 to-transparent group-hover:opacity-100',
   affordHint:
@@ -99,6 +99,7 @@ const UI_CLASSES = {
   cardRoot:
     'es-card-root relative cursor-pointer fade-in focus-visible:outline-none',
   cardThumb: 'es-card-thumb overflow-hidden relative',
+  cardBadgeRow: 'es-card-badge-row',
   cardImage: 'w-full h-full object-cover',
   cardGradient: 'absolute inset-0 bg-gradient-to-t from-white/60 via-transparent to-transparent opacity-60',
   thumbStack: 'thumbStack kakaoStack',
@@ -126,7 +127,7 @@ const UI_CLASSES = {
   modalBodyText: 'es-muted text-sm',
 
   // Layout grids
-  grid2to3: 'grid grid-cols-3 gap-2',
+  grid2to3: 'grid grid-cols-3 gap-2 items-start content-start',
 
   // Pages & overlays
   pageOverlayRoot: 'es-page-overlay-root',
@@ -1108,6 +1109,8 @@ function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
 
   const thumb = cardEl.querySelector('[data-card-thumb="true"]');
   if (!thumb) return;
+  const badgeRow = thumb.querySelector('[data-card-badge-row="true"]');
+  const badgeHost = badgeRow || thumb;
 
   const contentId = cardEl.getAttribute('data-content-id');
   const source = cardEl.getAttribute('data-source');
@@ -1119,10 +1122,10 @@ function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
   };
   const shouldShow =
     typeof subscribedOverride === 'boolean' ? subscribedOverride : isAnySubscribedForCard(content);
-  const existing = thumb.querySelector('[data-star-badge="true"]');
+  const existing = badgeHost.querySelector('[data-star-badge="true"]');
 
   if (shouldShow && !existing) {
-    thumb.appendChild(createStarBadgeEl());
+    badgeHost.appendChild(createStarBadgeEl());
   } else if (!shouldShow && existing) {
     existing.remove();
   }
@@ -4543,6 +4546,10 @@ function createCard(content, tabId, aspectClass) {
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, UI_CLASSES.cardThumb);
   cardContainer.setAttribute('data-card-thumb', 'true');
+  const badgeRow = document.createElement('div');
+  setClasses(badgeRow, UI_CLASSES.cardBadgeRow);
+  badgeRow.setAttribute('data-card-badge-row', 'true');
+  cardContainer.appendChild(badgeRow);
 
   // Badge logic
   if (tabId === 'my') {
@@ -4565,15 +4572,15 @@ function createCard(content, tabId, aspectClass) {
             ? `<span class="text-[10px] text-black leading-none">${formatted}</span>`
             : ''
         }`;
-        cardContainer.appendChild(badgeEl);
+        badgeRow.appendChild(badgeEl);
       } else if (isCompleted) {
         setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-success'));
         badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
-        cardContainer.appendChild(badgeEl);
+        badgeRow.appendChild(badgeEl);
       } else if (isHiatus) {
         setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-neutral'));
         badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">휴재</span>`;
-        cardContainer.appendChild(badgeEl);
+        badgeRow.appendChild(badgeEl);
       }
     }
   } else if (content.status === '완결') {
@@ -4583,7 +4590,7 @@ function createCard(content, tabId, aspectClass) {
       cx(UI_CLASSES.badgeBase, 'es-badge-neutral gap-0.5 rounded-br-lg'),
     );
     badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">EN</span><span class="text-[10px] leading-none">🔔</span>`;
-    cardContainer.appendChild(badgeEl);
+    badgeRow.appendChild(badgeEl);
   }
 
   const textContainer = document.createElement('div');
