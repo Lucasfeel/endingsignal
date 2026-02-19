@@ -127,7 +127,7 @@ const UI_CLASSES = {
   modalBodyText: 'es-muted text-sm',
 
   // Layout grids
-  grid2to3: 'grid grid-cols-3 gap-2 items-start content-start',
+  grid2to3: 'grid grid-cols-3 gap-2',
 
   // Pages & overlays
   pageOverlayRoot: 'es-page-overlay-root',
