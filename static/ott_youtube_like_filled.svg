@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <path fill="currentColor" fill-rule="evenodd" d="
+    M20 18
+    H44
+    C50.075 18 54 21.925 54 28
+    V36
+    C54 42.075 50.075 46 44 46
+    H20
+    C13.925 46 10 42.075 10 36
+    V28
+    C10 21.925 13.925 18 20 18
+    Z
+    M29 26 L29 38 L40 32 Z
+  "/>
+</svg>
