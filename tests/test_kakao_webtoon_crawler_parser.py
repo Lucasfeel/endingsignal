@@ -104,6 +104,21 @@ def test_parse_ongoing_status_from_card():
     assert entries[0]["kakao_ongoing_status"] == "COMPLETED"
 
 
+def test_extract_ongoing_status_falls_back_to_card_when_content_empty():
+    crawler = KakaoWebtoonCrawler()
+    card = {"onGoingStatus": "COMPLETED"}
+    content = {"onGoingStatus": ""}
+
+    assert crawler._extract_ongoing_status(card, content) == "COMPLETED"
+
+
+def test_extract_ongoing_status_supports_variant_keys():
+    crawler = KakaoWebtoonCrawler()
+
+    assert crawler._extract_ongoing_status({}, {"ongoingStatus": "pause"}) == "PAUSE"
+    assert crawler._extract_ongoing_status({}, {"on_going_status": "completed"}) == "COMPLETED"
+
+
 def test_pause_status_classified_as_hiatus_in_completed():
     crawler = KakaoWebtoonCrawler()
     status = crawler._normalize_status_text("PAUSE")
@@ -111,6 +126,13 @@ def test_pause_status_classified_as_hiatus_in_completed():
     classification = "hiatus" if crawler._is_pause_status(status) else "finished"
 
     assert classification == "hiatus"
+
+
+def test_season_completed_status_classified_as_hiatus():
+    crawler = KakaoWebtoonCrawler()
+    status = crawler._normalize_status_text("SEASON_COMPLETED")
+
+    assert crawler._is_hiatus_like_status(status)
 
 
 def test_thumbnail_prefers_background_image():

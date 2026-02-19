@@ -215,16 +215,29 @@ class KakaoWebtoonCrawler(ContentCrawler):
         return trimmed.upper()
 
     def _extract_ongoing_status(self, card: Dict, content: Dict) -> Optional[str]:
-        status = None
-        if isinstance(content, dict):
-            status = content.get("onGoingStatus")
-        if status is None and isinstance(card, dict):
-            status = card.get("onGoingStatus")
-        return self._normalize_status_text(status)
+        status_keys = ("onGoingStatus", "ongoingStatus", "on_going_status")
+
+        def _extract_normalized(source: Dict) -> Optional[str]:
+            if not isinstance(source, dict):
+                return None
+            for key in status_keys:
+                normalized = self._normalize_status_text(source.get(key))
+                if normalized:
+                    return normalized
+            return None
+
+        content_status = _extract_normalized(content)
+        if content_status:
+            return content_status
+        return _extract_normalized(card)
 
     @staticmethod
     def _is_pause_status(status: Optional[str]) -> bool:
         return status == "PAUSE"
+
+    @classmethod
+    def _is_hiatus_like_status(cls, status: Optional[str]) -> bool:
+        return cls._is_pause_status(status) or status == "SEASON_COMPLETED"
 
     @staticmethod
     def _is_completed_status(status: Optional[str]) -> bool:
@@ -539,7 +552,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
         finished_ids = set()
         completed_candidate_ids = set()
         total_parsed = 0
-        pause_found_in_completed = False
+        hiatus_like_found_in_completed = False
 
         headers = self._build_headers()
         placements: List[Tuple[str, str]] = [
@@ -585,7 +598,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
                         fetch_meta["status_counts"].get(status_key, 0) + 1
                     )
                     placement_status_counts[status_key] = placement_status_counts.get(status_key, 0) + 1
-                    if self._is_pause_status(status):
+                    if self._is_hiatus_like_status(status):
                         hiatus_ids.add(entry["content_id"])
                     elif self._is_completed_status(status):
                         finished_ids.add(entry["content_id"])
@@ -593,6 +606,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
                 for entry in entries:
                     content_id = entry["content_id"]
                     completed_candidate_ids.add(content_id)
+                    entry["kakao_completed_candidate"] = True
                     status = entry.get("kakao_ongoing_status")
                     status_key = status or "UNKNOWN"
                     fetch_meta["status_counts"][status_key] = (
@@ -609,9 +623,11 @@ class KakaoWebtoonCrawler(ContentCrawler):
                             existing["weekdays"] = existing_weekdays
                     else:
                         combined_map[content_id] = dict(entry)
-                    if self._is_pause_status(status):
-                        pause_found_in_completed = True
-                    entry["kakao_completed_candidate"] = True
+                    if self._is_completed_status(status):
+                        finished_ids.add(content_id)
+                    elif self._is_hiatus_like_status(status):
+                        hiatus_ids.add(content_id)
+                        hiatus_like_found_in_completed = True
 
             total_parsed += len(entries)
 
@@ -732,7 +748,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
         if fetch_meta["is_suspicious_empty"]:
             fetch_meta.setdefault("health_warnings", []).append("SUSPICIOUS_EMPTY_RESULT")
             fetch_meta["errors"].append("SUSPICIOUS_EMPTY_RESULT")
-        if pause_found_in_completed:
+        if hiatus_like_found_in_completed:
             fetch_meta.setdefault("health_notes", []).append("pause_found_in_completed_placement")
         if not finished_map:
             fetch_meta.setdefault("health_notes", []).append("finished_count_zero")
