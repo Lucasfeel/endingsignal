@@ -41,11 +41,11 @@ function showFatalBanner(message) {
 }
 
 const ICONS = {
+  home: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M6.5 9.8V20h11V9.8"/><path d="M9.5 20v-5.2h5V20"/></svg>`,
   webtoon: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;"></span>`,
   novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;"></span>`,
-  series: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>`,
-  my: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5a6 6 0 1 0-12 0c0 6-2.1 7.3-2.1 7.3h16.2S18 14.5 18 8.5z"/><path d="M9.5 18.5a2.5 2.5 0 0 0 5 0"/></svg>`,
+  me: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c1.7-3.5 4.5-5.5 7-5.5s5.3 2 7 5.5"/></svg>`,
 };
 
 // UI_CLASSES: Tailwind class tokens for reusable UI primitives.
@@ -170,10 +170,10 @@ const UI_STATE_KEYS = {
     day: 'endingsignal.filters.day', // sessionStorage: reset on new session
   },
   scroll: {
+    home: 'endingsignal.scroll.home',
     webtoon: 'endingsignal.scroll.webtoon',
     novel: 'endingsignal.scroll.novel',
     ott: 'endingsignal.scroll.ott',
-    series: 'endingsignal.scroll.series',
     mysub: 'endingsignal.scroll.mysub',
     search: 'endingsignal.scroll.search',
   },
@@ -327,13 +327,16 @@ const sanitizeFilterValue = (value, allowed, fallback) => {
 };
 
 const getFilterTargetTab = () => {
-  if (STATE.activeTab === 'my') return STATE.lastBrowseTab || 'webtoon';
-  return STATE.activeTab || STATE.lastBrowseTab || 'webtoon';
+  const browseTab = STATE.lastBrowseTab || 'webtoon';
+  if (STATE.isMyPageOpen) return browseTab;
+  if (STATE.activeTab === 'my' || STATE.activeTab === 'home') return browseTab;
+  return STATE.activeTab || browseTab;
 };
 
 const getScrollViewKeyForTab = (tabId) => {
+  if (tabId === 'home') return 'home';
   if (tabId === 'my') return 'mysub';
-  if (tabId === 'webtoon' || tabId === 'novel' || tabId === 'ott' || tabId === 'series') return tabId;
+  if (tabId === 'webtoon' || tabId === 'novel' || tabId === 'ott') return tabId;
   return 'webtoon';
 };
 
@@ -510,14 +513,13 @@ const restoreScroll = (viewKey, { container = null, requireChildren = false } = 
    ========================= */
 
 const STATE = {
-  activeTab: 'webtoon',
+  activeTab: 'home',
   lastBrowseTab: 'webtoon',
   renderToken: 0,
   filters: {
     webtoon: { sources: [], day: 'all' },
     novel: { sources: [], day: 'all' },
-    ott: { sources: [], genre: 'drama' },
-    series: { sort: 'latest' },
+    ott: { sources: [], genre: 'all' },
     my: { viewMode: 'completion' },
   },
   search: {
@@ -2266,9 +2268,8 @@ async function initApp() {
   UIState.apply(initialUIState, { rerender: false, fetch: false });
 
   renderBottomNav();
-  updateTab('webtoon');
+  updateTab('home');
   setupScrollEffect();
-  setupSeriesSortHandlers();
   runDevSelfCheck();
 }
 
@@ -2309,8 +2310,13 @@ const RECENT_SEARCH_KEY = 'es_recent_searches';
 const MAX_RECENT_SEARCHES = 8;
 const RECENTLY_OPENED_KEY = 'es_recently_opened';
 const MAX_RECENTLY_OPENED = 12;
+const RECENTLY_SEARCHED_CONTENTS_KEY = 'es_recently_searched_contents';
+const MAX_RECENTLY_SEARCHED_CONTENTS = 12;
+const HOME_RECOMMENDATIONS_LIMIT = 12;
 const POPULAR_GRID_LIMIT = 9;
 const KAKAO_THUMB_STYLE_ID = 'kakao-thumb-styles';
+const GRID_LAYOUT_CLASS_TOKENS = ['grid', 'grid-cols-3', 'gap-2'];
+const HOME_LAYOUT_CLASS_TOKENS = ['flex', 'flex-col', 'gap-6'];
 
 function ensureKakaoThumbStyles() {
   if (document.getElementById(KAKAO_THUMB_STYLE_ID)) return;
@@ -2382,7 +2388,7 @@ function ensureKakaoThumbStyles() {
 }
 
 const getSearchType = () =>
-  STATE.activeTab === 'my'
+  STATE.activeTab === 'my' || STATE.activeTab === 'home'
     ? STATE.lastBrowseTab || 'webtoon'
     : STATE.activeTab || 'webtoon';
 
@@ -2510,6 +2516,9 @@ const buildRecentContentSnapshot = (content) => {
     source: content?.source || '',
     content_id: content?.content_id || content?.contentId || content?.id,
     id: content?.id || content?.content_id || content?.contentId,
+    content_type:
+      safeString(content?.content_type || content?.contentType || content?.type, '') ||
+      getContentType(content),
     meta: {
       common: {
         ...safeObj(normalizedMeta?.common),
@@ -2534,6 +2543,50 @@ const recordRecentlyOpened = (content) => {
   STATE.search.recentlyOpened = next;
   saveRecentlyOpened(next);
   renderPopularGrid();
+};
+
+const coerceRecentlySearchedEntry = (entry) => {
+  const rawContent = entry?.content || entry;
+  const snapshot = buildRecentContentSnapshot(rawContent);
+  const key = safeString(entry?.key, '') || buildSubscriptionKey(snapshot) || contentKey(snapshot);
+  const openedAt = Number(entry?.openedAt) || 0;
+  if (!key || !snapshot?.content_id || !snapshot?.source) return null;
+  return { key, content: snapshot, openedAt };
+};
+
+const loadRecentlySearchedContents = () => {
+  try {
+    const raw = localStorage.getItem(RECENTLY_SEARCHED_CONTENTS_KEY);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((entry) => coerceRecentlySearchedEntry(entry)).filter(Boolean);
+  } catch (e) {
+    console.warn('Failed to load recently searched contents', e);
+    return [];
+  }
+};
+
+const saveRecentlySearchedContents = (list) => {
+  try {
+    const safeList = Array.isArray(list) ? list.slice(0, MAX_RECENTLY_SEARCHED_CONTENTS) : [];
+    localStorage.setItem(RECENTLY_SEARCHED_CONTENTS_KEY, JSON.stringify(safeList));
+  } catch (e) {
+    console.warn('Failed to save recently searched contents', e);
+  }
+};
+
+const recordRecentlySearchedContent = (content) => {
+  const snapshot = buildRecentContentSnapshot(content);
+  const key = buildSubscriptionKey(snapshot) || contentKey(snapshot);
+  if (!key || !snapshot?.content_id || !snapshot?.source) return;
+
+  const existing = loadRecentlySearchedContents();
+  const next = [
+    { key, content: snapshot, openedAt: Date.now() },
+    ...existing.filter((entry) => entry.key !== key),
+  ].slice(0, MAX_RECENTLY_SEARCHED_CONTENTS);
+
+  saveRecentlySearchedContents(next);
 };
 
 const renderRecentSearches = () => {
@@ -2607,6 +2660,7 @@ const removeRecentSearch = (query) => {
 
 const normalizeContentForGrid = (content, fallbackSource) => {
   const normalizedMeta = normalizeMeta(content?.meta);
+  const normalizedType = safeString(content?.content_type || content?.contentType || content?.type, '');
   const normalized = {
     ...content,
     meta: normalizedMeta,
@@ -2615,6 +2669,7 @@ const normalizeContentForGrid = (content, fallbackSource) => {
     content_id: content?.content_id || content?.contentId || content?.id,
     id: content?.id || content?.content_id || content?.contentId,
     source: content?.source || fallbackSource || '',
+    content_type: normalizedType || undefined,
   };
   normalized.__search_title_n = normalizeSearchText(normalized.title);
   normalized.__search_alt_n = normalizeSearchText(
@@ -3363,6 +3418,7 @@ function openMyPage() {
   }
 
   UI.myPage.classList.remove('hidden');
+  renderBottomNav();
 
   if (STATE.auth.user) renderMyPageEmail(STATE.auth.user);
   fetchMyPageUser();
@@ -3385,6 +3441,7 @@ function closeMyPage({ fromPopstate = false, overlayId = null } = {}) {
   if (UI.profileButton) UI.profileButton.focus();
   else if (UI.myPageEntryButton) UI.myPageEntryButton.focus();
   popOverlayState('myPage', overlayId);
+  renderBottomNav();
 }
 
 function setupMyPageHandlers() {
@@ -3783,17 +3840,22 @@ function renderBottomNav() {
   if (!UI.bottomNav) return;
 
   UI.bottomNav.innerHTML = '';
+  const activeId = STATE.isMyPageOpen
+    ? 'me'
+    : STATE.activeTab === 'my'
+      ? 'me'
+      : STATE.activeTab || 'home';
   const tabs = [
+    { id: 'home', label: '홈', icon: ICONS.home },
     { id: 'webtoon', label: '웹툰', icon: ICONS.webtoon },
     { id: 'novel', label: '웹소설', icon: ICONS.novel },
     { id: 'ott', label: 'OTT', icon: ICONS.ott },
-    { id: 'series', label: '시리즈', icon: ICONS.series },
-    { id: 'my', label: '내 구독', icon: ICONS.my },
+    { id: 'me', label: '마이페이지', icon: ICONS.me },
   ];
 
   tabs.forEach((tab) => {
     const btn = document.createElement('button');
-    const isActive = STATE.activeTab === tab.id;
+    const isActive = activeId === tab.id;
     btn.type = 'button';
     btn.className = 'bottom-nav-item flex flex-col items-center justify-center w-full spring-bounce';
     if (isActive) btn.classList.add('is-active');
@@ -3809,13 +3871,25 @@ function renderBottomNav() {
       </div>
       <span class="text-[10px] leading-[1.15] ${isActive ? 'font-semibold' : 'font-medium'}">${tab.label}</span>
     `;
-    btn.onclick = () => updateTab(tab.id);
+    btn.onclick = () => {
+      if (tab.id === 'me') {
+        openMyPage();
+        renderBottomNav();
+        return;
+      }
+      updateTab(tab.id);
+    };
     UI.bottomNav.appendChild(btn);
   });
 }
 
 async function updateTab(tabId, { preserveScroll = true } = {}) {
-  const prevTab = STATE.activeTab || 'webtoon';
+  if (tabId === 'me') {
+    openMyPage();
+    return;
+  }
+
+  const prevTab = STATE.activeTab || 'home';
   const prevViewKey = getScrollViewKeyForTab(prevTab);
   const nextViewKey = getScrollViewKeyForTab(tabId);
 
@@ -3827,7 +3901,7 @@ async function updateTab(tabId, { preserveScroll = true } = {}) {
 
   if (STATE.search.pageOpen) closeSearchPage({ fromPopstate: true });
   STATE.activeTab = tabId;
-  if (tabId !== 'my') STATE.lastBrowseTab = tabId;
+  if (['webtoon', 'novel', 'ott'].includes(tabId)) STATE.lastBrowseTab = tabId;
   STATE.isMySubOpen = tabId === 'my';
 
   renderBottomNav();
@@ -3850,27 +3924,17 @@ async function updateTab(tabId, { preserveScroll = true } = {}) {
 }
 
 function updateFilterVisibility(tabId) {
-  if (
-    !UI.l1Filter ||
-    !UI.l2Filter ||
-    !UI.mySubToggle ||
-    !UI.seriesSort ||
-    !UI.seriesFooter
-  )
-    return;
+  if (!UI.l1Filter || !UI.l2Filter || !UI.mySubToggle) return;
 
   UI.l1Filter.classList.add('hidden');
   UI.l2Filter.classList.add('hidden');
   UI.mySubToggle.classList.add('hidden');
-  UI.seriesSort.classList.add('hidden');
-  UI.seriesFooter.classList.add('hidden');
+  if (UI.seriesSort) UI.seriesSort.classList.add('hidden');
+  if (UI.seriesFooter) UI.seriesFooter.classList.add('hidden');
 
   if (['webtoon', 'novel', 'ott'].includes(tabId)) {
     UI.l1Filter.classList.remove('hidden');
     UI.l2Filter.classList.remove('hidden');
-  } else if (tabId === 'series') {
-    UI.seriesSort.classList.remove('hidden');
-    UI.seriesFooter.classList.remove('hidden');
   } else if (tabId === 'my') {
     UI.mySubToggle.classList.remove('hidden');
     syncMySubToggleUI();
@@ -3949,6 +4013,7 @@ function renderL2Filters(tabId) {
     items = days;
   } else if (tabId === 'ott') {
     items = [
+      { id: 'all', label: 'ALL' },
       { id: 'drama', label: '드라마' },
       { id: 'anime', label: '애니메이션' },
       { id: 'variety', label: '예능' },
@@ -3961,7 +4026,7 @@ function renderL2Filters(tabId) {
   let activeKey = '';
   if (tabId === 'webtoon' || tabId === 'novel')
     activeKey = STATE.filters?.[tabId]?.day || 'all';
-  if (tabId === 'ott') activeKey = STATE.filters?.[tabId]?.genre;
+  if (tabId === 'ott') activeKey = STATE.filters?.[tabId]?.genre || 'all';
 
   items.forEach((item) => {
     const el = document.createElement('button');
@@ -4016,6 +4081,223 @@ function updateMySubTab(mode) {
    Data fetching + rendering
    ========================= */
 
+const setContentGridLayout = (mode = 'grid') => {
+  if (!UI.contentGrid) return;
+  UI.contentGrid.classList.remove(...GRID_LAYOUT_CLASS_TOKENS, ...HOME_LAYOUT_CLASS_TOKENS);
+  if (mode === 'home') {
+    UI.contentGrid.classList.add(...HOME_LAYOUT_CLASS_TOKENS);
+    return;
+  }
+  UI.contentGrid.classList.add(...GRID_LAYOUT_CLASS_TOKENS);
+};
+
+const resolveCardTabId = (content, fallback = 'webtoon') => {
+  const raw = safeString(content?.content_type || content?.contentType || content?.type, '').toLowerCase();
+  if (['webtoon', 'novel', 'ott', 'series', 'my'].includes(raw)) return raw;
+  if (['webtoon', 'novel', 'ott', 'series', 'my'].includes(fallback)) return fallback;
+  return 'webtoon';
+};
+
+const extractOttGenreTokens = (content) => {
+  const meta = normalizeMeta(content?.meta);
+  const attrs = safeObj(meta?.attributes);
+  const common = safeObj(meta?.common);
+  const candidates = [
+    attrs?.genres,
+    attrs?.genre,
+    attrs?.category,
+    common?.genres,
+    common?.genre,
+    content?.genres,
+    content?.genre,
+  ];
+
+  const parseCandidate = (value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => safeString(entry, '').trim().toLowerCase())
+        .filter(Boolean);
+    }
+    const asString = safeString(value, '').trim();
+    if (!asString) return [];
+
+    if ((asString.startsWith('[') && asString.endsWith(']')) || (asString.startsWith('{') && asString.endsWith('}'))) {
+      try {
+        return parseCandidate(JSON.parse(asString));
+      } catch {
+        return [];
+      }
+    }
+
+    return asString
+      .split(/[,\|\/]/)
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean);
+  };
+
+  const tokenSet = new Set();
+  candidates.forEach((candidate) => {
+    parseCandidate(candidate).forEach((token) => tokenSet.add(token));
+  });
+  return Array.from(tokenSet);
+};
+
+const filterOttItemsByGenre = (items, genreFilter) => {
+  if (!Array.isArray(items)) return [];
+  const target = safeString(genreFilter || 'all', 'all').trim().toLowerCase();
+  if (!target || target === 'all') return items;
+
+  let sawGenreMetadata = false;
+  const filtered = items.filter((item) => {
+    const genres = extractOttGenreTokens(item);
+    if (!genres.length) return true;
+    sawGenreMetadata = true;
+    return genres.some((genre) => genre.includes(target) || target.includes(genre));
+  });
+
+  return sawGenreMetadata ? filtered : items;
+};
+
+async function fetchHomeRecommendations({ limit = HOME_RECOMMENDATIONS_LIMIT, signal } = {}) {
+  const response = await apiRequest('GET', '/api/contents/recommendations', {
+    query: { limit },
+    signal,
+  });
+  const list = Array.isArray(response?.data)
+    ? response.data
+    : Array.isArray(response)
+      ? response
+      : [];
+  return list
+    .map((item) => normalizeContentForGrid(item, item?.source))
+    .filter((item) => item?.content_id && item?.source)
+    .slice(0, HOME_RECOMMENDATIONS_LIMIT);
+}
+
+const renderHomeSection = ({
+  title,
+  items,
+  emptyTitle,
+  emptyMessage,
+  actions = [],
+}) => {
+  const section = document.createElement('section');
+  section.className = 'space-y-3';
+
+  const heading = document.createElement('h2');
+  setClasses(heading, UI_CLASSES.sectionTitle);
+  heading.textContent = title;
+  section.appendChild(heading);
+
+  if (Array.isArray(items) && items.length) {
+    const grid = document.createElement('div');
+    grid.className = 'grid grid-cols-3 gap-2';
+    const fragment = document.createDocumentFragment();
+    items.forEach((item) => {
+      const cardTabId = resolveCardTabId(item, STATE.lastBrowseTab || 'webtoon');
+      fragment.appendChild(createCard(item, cardTabId, getAspectByType(cardTabId)));
+    });
+    grid.appendChild(fragment);
+    section.appendChild(grid);
+    return section;
+  }
+
+  const empty = document.createElement('div');
+  empty.className = 'rounded-2xl border border-slate-200 bg-white p-4 text-center';
+
+  const emptyTitleEl = document.createElement('p');
+  setClasses(emptyTitleEl, UI_CLASSES.emptyTitle);
+  emptyTitleEl.textContent = emptyTitle || '';
+  empty.appendChild(emptyTitleEl);
+
+  if (emptyMessage) {
+    const emptyMsgEl = document.createElement('p');
+    setClasses(emptyMsgEl, cx(UI_CLASSES.emptyMsg, 'mx-auto mt-2'));
+    emptyMsgEl.textContent = emptyMessage;
+    empty.appendChild(emptyMsgEl);
+  }
+
+  if (Array.isArray(actions) && actions.length) {
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'mt-4 flex flex-wrap justify-center gap-2';
+    actions.forEach((action) => {
+      if (!action?.label || typeof action?.onClick !== 'function') return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const variantClass = action.variant === 'secondary' ? UI_CLASSES.btnSecondary : UI_CLASSES.btnPrimary;
+      setClasses(btn, `${variantClass} spring-bounce`);
+      btn.textContent = action.label;
+      btn.onclick = action.onClick;
+      actionsWrap.appendChild(btn);
+    });
+    empty.appendChild(actionsWrap);
+  }
+
+  section.appendChild(empty);
+  return section;
+};
+
+async function renderHomeFeed({ signal } = {}) {
+  if (!UI.contentGrid) return { itemCount: 0 };
+
+  let recommendations = [];
+  try {
+    recommendations = await fetchHomeRecommendations({ signal });
+  } catch (err) {
+    if (!signal?.aborted) {
+      console.warn('Failed to load home recommendations', err);
+    }
+  }
+  if (signal?.aborted) return { itemCount: 0 };
+
+  const historyItems = loadRecentlySearchedContents()
+    .sort((a, b) => (b?.openedAt || 0) - (a?.openedAt || 0))
+    .map((entry) => normalizeContentForGrid(entry?.content, entry?.content?.source))
+    .filter((item) => item?.content_id && item?.source)
+    .slice(0, MAX_RECENTLY_SEARCHED_CONTENTS);
+
+  UI.contentGrid.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  fragment.appendChild(
+    renderHomeSection({
+      title: '추천작',
+      items: recommendations,
+      emptyTitle: '추천작이 아직 준비되지 않았어요',
+      emptyMessage: '웹툰 탭에서 최신 작품을 먼저 살펴보세요.',
+      actions: [
+        {
+          label: '웹툰 보기',
+          variant: 'primary',
+          onClick: () => updateTab('webtoon'),
+        },
+      ],
+    }),
+  );
+  fragment.appendChild(
+    renderHomeSection({
+      title: '검색했던 작품',
+      items: historyItems,
+      emptyTitle: '검색해서 열어본 작품이 없어요',
+      emptyMessage: '검색에서 작품을 열어보면 여기에 저장됩니다.',
+      actions: [
+        {
+          label: '검색 열기',
+          variant: 'primary',
+          onClick: () => openSearchPage({ focus: true }),
+        },
+      ],
+    }),
+  );
+
+  UI.contentGrid.appendChild(fragment);
+  syncAllRenderedStarBadges();
+
+  const totalCount = recommendations.length + historyItems.length;
+  setCountIndicatorText(totalCount ? `총 ${totalCount}건` : '');
+  hideLoadMoreUI();
+  return { itemCount: totalCount };
+}
+
 const appendCardsToGrid = (
   items,
   { tabId = 'webtoon', aspectClass = 'aspect-[3/4]', clearBeforeAppend = false } = {}
@@ -4025,7 +4307,8 @@ const appendCardsToGrid = (
 
   const fragment = document.createDocumentFragment();
   items.forEach((item) => {
-    fragment.appendChild(createCard(item, tabId, aspectClass));
+    const cardTabId = resolveCardTabId(item, tabId);
+    fragment.appendChild(createCard(item, cardTabId, aspectClass));
   });
 
   UI.contentGrid.appendChild(fragment);
@@ -4063,7 +4346,10 @@ async function loadNextPage(category, { signal } = {}) {
     const incoming = Array.isArray(json?.contents)
       ? json.contents.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
       : [];
-    const filteredIncoming = filterItemsBySources(incoming, pg.filterSources);
+    let filteredIncoming = filterItemsBySources(incoming, pg.filterSources);
+    if (pg.tabId === 'ott') {
+      filteredIncoming = filterOttItemsByGenre(filteredIncoming, STATE.filters?.ott?.genre || 'all');
+    }
 
     const next = json?.next_cursor ?? null;
     const legacyNext = !next ? json?.last_title ?? null : null;
@@ -4098,7 +4384,9 @@ async function loadNextPage(category, { signal } = {}) {
     const missingCursor = !hasPaginationToken;
     const reachedEndByCount = returnedCount < responsePageSize;
 
-    const allowEmptyPageStop = !pg.filterSources?.length;
+    const hasOttGenreFilter =
+      pg.tabId === 'ott' && safeString(STATE.filters?.ott?.genre || 'all', 'all') !== 'all';
+    const allowEmptyPageStop = !pg.filterSources?.length && !hasOttGenreFilter;
     if (noNewItems && allowEmptyPageStop) {
       console.warn('No new items returned; marking pagination as done to avoid stalls');
     }
@@ -4153,10 +4441,35 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
 
   UI.contentGrid.innerHTML = '';
   STATE.isLoading = true;
+  setContentGridLayout(tabId === 'home' ? 'home' : 'grid');
 
   let aspectClass = 'aspect-[3/4]';
   if (tabId === 'novel') aspectClass = 'aspect-[1/1.4]';
   if (tabId === 'ott') aspectClass = 'aspect-[2/3]';
+
+  if (tabId === 'home') {
+    try {
+      const homeResult = await renderHomeFeed({ signal });
+      if (isStale()) return { stale: true };
+      return { itemCount: homeResult?.itemCount || 0, aspectClass };
+    } catch (e) {
+      if (signal.aborted) return { stale: true };
+      console.error('Home feed error', e);
+      renderEmptyState(UI.contentGrid, {
+        title: '홈 피드를 불러오지 못했습니다.',
+        actions: [
+          {
+            label: '웹툰 보기',
+            variant: 'primary',
+            onClick: () => updateTab('webtoon'),
+          },
+        ],
+      });
+      return { itemCount: 0, aspectClass };
+    } finally {
+      STATE.isLoading = false;
+    }
+  }
 
   let skeletonShown = false;
   const showSkeleton = () => {
@@ -4258,9 +4571,9 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
                 onClick: () => openSearchAndFocus(),
               },
               {
-                label: '시리즈 보기',
+                label: 'OTT 보기',
                 variant: 'secondary',
-                onClick: () => updateTab('series'),
+                onClick: () => updateTab('ott'),
               },
             ],
           };
@@ -4306,28 +4619,42 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
     } else {
       let url = '';
       let sourceFilter = [];
+      let responsePayload = null;
 
-      if (tabId === 'webtoon' || tabId === 'novel') {
-        const day = STATE.filters[tabId].day;
+      if (tabId === 'webtoon' || tabId === 'novel' || tabId === 'ott') {
         const { querySource, filterSources } = getSourceRequestConfig(tabId);
         sourceFilter = filterSources;
         const query = { type: tabId, source: querySource };
 
-        if (day === 'completed' || day === 'hiatus') {
-          resetPaginationState(day, {
+        let statusKey = 'ongoing';
+        if (tabId === 'webtoon' || tabId === 'novel') {
+          const day = STATE.filters?.[tabId]?.day || 'all';
+          statusKey = day === 'completed' || day === 'hiatus' ? day : 'ongoing';
+        } else if (tabId === 'ott') {
+          const ottStatusRaw = safeString(
+            STATE.filters?.ott?.status || STATE.filters?.ott?.day || 'ongoing',
+            'ongoing',
+          ).toLowerCase();
+          statusKey = ['ongoing', 'completed', 'hiatus'].includes(ottStatusRaw)
+            ? ottStatusRaw
+            : 'ongoing';
+        }
+
+        if (statusKey === 'completed' || statusKey === 'hiatus') {
+          resetPaginationState(statusKey, {
             tabId,
             source: querySource,
             filterSources,
             aspectClass,
             requestSeq,
           });
-          setActivePaginationCategory(day);
-          updateLoadMoreUI(day);
-          updateCountIndicator(day);
-          setupInfiniteObserver(day);
-          await loadNextPage(day, { signal });
+          setActivePaginationCategory(statusKey);
+          updateLoadMoreUI(statusKey);
+          updateCountIndicator(statusKey);
+          setupInfiniteObserver(statusKey);
+          await loadNextPage(statusKey, { signal });
           if (isStale()) return { stale: true };
-          const pg = STATE.pagination?.[day];
+          const pg = STATE.pagination?.[statusKey];
           if (pg && pg.items.length === 0 && pg.done) {
             UI.contentGrid.innerHTML = '';
             renderEmptyState(UI.contentGrid, {
@@ -4339,42 +4666,44 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
             disconnectInfiniteObserver();
             return { itemCount: 0, aspectClass };
           }
-          return { itemCount: STATE.pagination?.[day]?.items?.length || 0, aspectClass };
+          return { itemCount: STATE.pagination?.[statusKey]?.items?.length || 0, aspectClass };
         }
 
-        if (day === 'completed') url = buildUrl('/api/contents/completed', query);
-        else if (day === 'hiatus') url = buildUrl('/api/contents/hiatus', query);
-        else url = buildUrl('/api/contents/ongoing', query);
+        url = buildUrl('/api/contents/ongoing', query);
       }
 
       if (url) {
-        const json = await apiRequest('GET', url, { signal });
+        responsePayload = await apiRequest('GET', url, { signal });
 
         if (tabId === 'webtoon' || tabId === 'novel') {
-          const day = STATE.filters[tabId].day;
+          const day = STATE.filters?.[tabId]?.day || 'all';
 
           if (day !== 'completed' && day !== 'hiatus' && day !== 'all') {
-            data = Array.isArray(json?.[day]) ? json[day] : [];
+            data = Array.isArray(responsePayload?.[day]) ? responsePayload[day] : [];
           } else if (day === 'all') {
             data = [];
-            Object.values(json || {}).forEach((arr) => {
+            Object.values(responsePayload || {}).forEach((arr) => {
               if (Array.isArray(arr)) data.push(...arr);
             });
           } else {
-            data = Array.isArray(json?.contents) ? json.contents : [];
+            data = Array.isArray(responsePayload?.contents) ? responsePayload.contents : [];
           }
+        } else if (tabId === 'ott') {
+          data = Array.isArray(responsePayload?.contents)
+            ? responsePayload.contents
+            : Array.isArray(responsePayload)
+              ? responsePayload
+              : [];
+        } else {
+          data = Array.isArray(responsePayload?.contents) ? responsePayload.contents : [];
         }
-      } else {
-        // minimal mocks for tabs without endpoints in current backend
-        data = [
-          { title: 'Mock Item 1', meta: { common: { thumbnail_url: null, authors: [] } } },
-          { title: 'Mock Item 2', meta: { common: { thumbnail_url: null, authors: [] } } },
-          { title: 'Mock Item 3', meta: { common: { thumbnail_url: null, authors: [] } } },
-        ];
       }
 
       if (sourceFilter.length) {
         data = filterItemsBySources(data, sourceFilter);
+      }
+      if (tabId === 'ott') {
+        data = filterOttItemsByGenre(data, STATE.filters?.ott?.genre || 'all');
       }
     }
 
@@ -4734,6 +5063,9 @@ function openSubscribeModal(content, opts = {}) {
   closeProfileMenu();
 
   recordRecentlyOpened(content);
+  if (STATE.search.pageOpen) {
+    recordRecentlySearchedContent(content);
+  }
 
   const titleText = String(content?.title || '').trim();
   const url = getContentUrl(content);
@@ -4929,25 +5261,6 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
 };
 
 /* =========================
-   Series sort (minimal, optional)
-   ========================= */
-
-function setupSeriesSortHandlers() {
-  if (!UI.seriesSort) return;
-
-  UI.seriesSort.addEventListener('click', (evt) => {
-    const btn = evt.target?.closest?.('[data-sort]');
-    if (!btn) return;
-
-    const sort = btn.getAttribute('data-sort');
-    if (!sort) return;
-
-    STATE.filters.series.sort = sort;
-    fetchAndRenderContent('series');
-  });
-}
-
-/* =========================
    Expose required globals
    ========================= */
 
@@ -4967,5 +5280,3 @@ window.closeSubscribeModal = closeSubscribeModal;
 // 1) localStorage.setItem('es_access_token', '<token>')
 // 2) Reload and open the "My Sub" tab
 // 3) Open a card to trigger the subscribe modal and use the modal button to watch POST/DELETE /api/me/subscriptions
-
-

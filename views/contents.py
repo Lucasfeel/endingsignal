@@ -6,6 +6,7 @@ from utils.text import normalize_search_text
 import base64
 import json
 import os
+from datetime import datetime
 
 contents_bp = Blueprint('contents', __name__)
 
@@ -121,6 +122,30 @@ def _get_search_limit():
     return parsed if parsed > 0 else default_limit
 
 
+def _parse_recommendation_limit(raw_value):
+    default_limit = 12
+    if raw_value is None:
+        return default_limit
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default_limit
+    return max(1, min(parsed, 50))
+
+
+def _updated_at_sort_value(value):
+    if value is None:
+        return float('-inf')
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+        except ValueError:
+            return float('-inf')
+    return float('-inf')
+
+
 def _apply_threshold_overrides(defaults, _q_len):
     if defaults is None:
         return None
@@ -227,6 +252,76 @@ def search_contents():
 
     except Exception:
         current_app.logger.exception("Unhandled error in search_contents")
+        return jsonify({
+            "success": False,
+            "error": {"code": "INTERNAL", "message": "Internal Server Error"}
+        }), 500
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
+@contents_bp.route('/api/contents/recommendations', methods=['GET'])
+def get_recommendations():
+    cursor = None
+    try:
+        limit = _parse_recommendation_limit(request.args.get('limit'))
+        # Fetch extra per type so we can merge/sort and still keep a mixed top-N.
+        per_type = ((limit + 2) // 3) * 2
+
+        conn = get_db()
+        cursor = get_cursor(conn)
+
+        merged_rows = []
+        content_types = ('webtoon', 'novel', 'ott')
+        statuses = ('연재중', '휴재')
+
+        query = """
+            SELECT content_id, title, status, meta, source, content_type, updated_at
+            FROM contents
+            WHERE content_type = %s
+              AND COALESCE(is_deleted, FALSE) = FALSE
+              AND status IN (%s, %s)
+            ORDER BY updated_at DESC, content_id ASC
+            LIMIT %s
+        """
+
+        for content_type in content_types:
+            cursor.execute(query, (content_type, statuses[0], statuses[1], per_type))
+            rows = cursor.fetchall()
+            for row in rows:
+                merged_rows.append(coerce_row_dict(row))
+
+        merged_rows.sort(
+            key=lambda row: _updated_at_sort_value(row.get('updated_at')),
+            reverse=True,
+        )
+
+        deduped = []
+        seen_keys = set()
+        for row in merged_rows:
+            key = (row.get('content_id'), row.get('source'))
+            if not key[0] or not key[1] or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append({
+                'content_id': row.get('content_id'),
+                'title': row.get('title'),
+                'status': row.get('status'),
+                'meta': normalize_meta(row.get('meta')),
+                'source': row.get('source'),
+                'content_type': row.get('content_type'),
+            })
+            if len(deduped) >= limit:
+                break
+
+        return jsonify(deduped)
+
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_recommendations")
         return jsonify({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
