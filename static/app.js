@@ -41,7 +41,7 @@ function showFatalBanner(message) {
 }
 
 const ICONS = {
-  webtoon: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="7.5" height="14" rx="1.8"/><rect x="13" y="5" width="7.5" height="14" rx="1.8"/><path d="M11 8.5h2"/></svg>`,
+  webtoon: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;"></span>`,
   novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="2.4"/><path d="M10 9.1v4.8l4.2-2.4L10 9.1z"/><path d="M8 21h8"/></svg>`,
   series: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2"/><path d="M8 4v16M16 4v16M3 9h5M16 9h5M3 15h5M16 15h5"/></svg>`,
