@@ -288,32 +288,34 @@ body {
 
 .es-card-badge-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
+  min-height: 32px;
   padding: 8px 8px 0;
 }
 
-.es-card-badge-row:empty {
-  display: none;
-}
-
 .es-card-text {
+  height: 74px;
   padding: 8px 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow: hidden;
 }
 
 .es-card-title {
   color: var(--es-text);
-  overflow-wrap: anywhere;
-  word-break: keep-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .es-card-meta {
   color: var(--es-text-muted);
-  overflow-wrap: anywhere;
-  word-break: keep-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .es-star-badge {
