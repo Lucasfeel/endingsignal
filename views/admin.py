@@ -3,6 +3,7 @@
 import json
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from uuid import uuid4
 
 from flask import Blueprint, jsonify, request, g, render_template
 
@@ -31,6 +32,27 @@ from utils.time import now_kst_naive, parse_iso_naive_kst
 
 
 admin_bp = Blueprint('admin', __name__)
+
+
+MANUAL_CONTENT_TYPE_MAP = {
+    '웹툰': 'webtoon',
+    '웹소설': 'novel',
+    'OTT': 'ott',
+}
+
+MANUAL_CONTENT_SOURCE_MAP = {
+    '네이버웹툰': 'naver_webtoon',
+    '카카오웹툰': 'kakao_webtoon',
+    '네이버 시리즈': 'naver_series',
+    '카카오 페이지': 'kakao_page',
+    '문피아': 'munpia',
+    '리디': 'ridi',
+    '넷플릭스': 'netflix',
+    '티빙': 'tving',
+    '디즈니 플러스': 'disney_plus',
+    '웨이브': 'wavve',
+    '라프텔': 'laftel',
+}
 
 
 def _error_response(status_code: int, code: str, message: str):
@@ -245,9 +267,325 @@ def _parse_date_param(date_raw):
     return date(parsed.year, parsed.month, parsed.day)
 
 
+def _normalize_input_text(value):
+    if not isinstance(value, str):
+        return None
+    normalized = ' '.join(value.strip().split())
+    return normalized if normalized else None
+
+
+def _parse_positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _serialize_content_type_option(row):
+    return {
+        'id': row['id'],
+        'name': row['name'],
+        'created_at': row['created_at'].isoformat() if _get_row_value(row, 'created_at') else None,
+        'updated_at': row['updated_at'].isoformat() if _get_row_value(row, 'updated_at') else None,
+    }
+
+
+def _serialize_content_source_option(row):
+    return {
+        'id': row['id'],
+        'type_id': row['type_id'],
+        'name': row['name'],
+        'created_at': row['created_at'].isoformat() if _get_row_value(row, 'created_at') else None,
+        'updated_at': row['updated_at'].isoformat() if _get_row_value(row, 'updated_at') else None,
+    }
+
+
+def _serialize_content_row(row):
+    return {
+        'content_id': row['content_id'],
+        'source': row['source'],
+        'content_type': row['content_type'],
+        'title': row['title'],
+        'status': row['status'],
+        'meta': _normalize_meta(_get_row_value(row, 'meta')),
+        'created_at': row['created_at'].isoformat() if _get_row_value(row, 'created_at') else None,
+        'updated_at': row['updated_at'].isoformat() if _get_row_value(row, 'updated_at') else None,
+    }
+
+
 @admin_bp.route('/admin', methods=['GET'])
+@admin_bp.route('/admin/contents/new', methods=['GET'])
 def admin_page():
     return render_template('admin.html')
+
+
+@admin_bp.route('/api/admin/content-types', methods=['GET'])
+@login_required
+@admin_required
+def list_content_types():
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT id, name, created_at, updated_at
+            FROM content_types
+            ORDER BY created_at ASC, id ASC
+            """
+        )
+        rows = cursor.fetchall()
+
+    return jsonify(
+        {
+            'success': True,
+            'types': [_serialize_content_type_option(row) for row in rows],
+        }
+    )
+
+
+@admin_bp.route('/api/admin/content-types', methods=['POST'])
+@login_required
+@admin_required
+def create_content_type():
+    data = request.get_json() or {}
+    name = _normalize_input_text(data.get('name'))
+    if not name:
+        return _error_response(400, 'INVALID_REQUEST', 'name is required')
+
+    conn = get_db()
+    try:
+        with managed_cursor(conn) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO content_types (name)
+                VALUES (%s)
+                ON CONFLICT DO NOTHING
+                RETURNING id, name, created_at, updated_at
+                """,
+                (name,),
+            )
+            created_row = cursor.fetchone()
+
+        if created_row is None:
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
+            return _error_response(409, 'DUPLICATE_CONTENT_TYPE', 'Content type already exists')
+
+        conn.commit()
+        return jsonify({'success': True, 'type': _serialize_content_type_option(created_row)}), 201
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
+
+
+@admin_bp.route('/api/admin/content-sources', methods=['GET'])
+@login_required
+@admin_required
+def list_content_sources():
+    type_id = _parse_positive_int(request.args.get('typeId') or request.args.get('type_id'))
+    if type_id is None:
+        return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
+
+    conn = get_db()
+    with managed_cursor(conn) as cursor:
+        cursor.execute("SELECT id FROM content_types WHERE id = %s", (type_id,))
+        if cursor.fetchone() is None:
+            return _error_response(400, 'INVALID_TYPE_ID', 'typeId does not exist')
+
+        cursor.execute(
+            """
+            SELECT id, type_id, name, created_at, updated_at
+            FROM content_sources
+            WHERE type_id = %s
+            ORDER BY created_at ASC, id ASC
+            """,
+            (type_id,),
+        )
+        rows = cursor.fetchall()
+
+    return jsonify(
+        {
+            'success': True,
+            'sources': [_serialize_content_source_option(row) for row in rows],
+        }
+    )
+
+
+@admin_bp.route('/api/admin/content-sources', methods=['POST'])
+@login_required
+@admin_required
+def create_content_source():
+    data = request.get_json() or {}
+    type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
+    name = _normalize_input_text(data.get('name'))
+
+    if type_id is None:
+        return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
+    if not name:
+        return _error_response(400, 'INVALID_REQUEST', 'name is required')
+
+    conn = get_db()
+    try:
+        with managed_cursor(conn) as cursor:
+            cursor.execute("SELECT id FROM content_types WHERE id = %s", (type_id,))
+            if cursor.fetchone() is None:
+                return _error_response(400, 'INVALID_TYPE_ID', 'typeId does not exist')
+
+            cursor.execute(
+                """
+                INSERT INTO content_sources (type_id, name)
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING id, type_id, name, created_at, updated_at
+                """,
+                (type_id, name),
+            )
+            created_row = cursor.fetchone()
+
+        if created_row is None:
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
+            return _error_response(
+                409,
+                'DUPLICATE_CONTENT_SOURCE',
+                'Content source already exists for this type',
+            )
+
+        conn.commit()
+        return jsonify({'success': True, 'source': _serialize_content_source_option(created_row)}), 201
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
+
+
+@admin_bp.route('/api/admin/contents', methods=['POST'])
+@login_required
+@admin_required
+def create_admin_content():
+    data = request.get_json() or {}
+    title = _normalize_input_text(data.get('title'))
+    type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
+    source_id = _parse_positive_int(data.get('sourceId') or data.get('source_id'))
+
+    if not title:
+        return _error_response(400, 'INVALID_REQUEST', 'title is required')
+    if type_id is None:
+        return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
+    if source_id is None:
+        return _error_response(400, 'INVALID_REQUEST', 'sourceId is required')
+
+    conn = get_db()
+    try:
+        with managed_cursor(conn) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    s.id AS source_id,
+                    s.name AS source_name,
+                    t.id AS type_id,
+                    t.name AS type_name
+                FROM content_sources s
+                JOIN content_types t
+                  ON t.id = s.type_id
+                WHERE s.id = %s
+                """,
+                (source_id,),
+            )
+            source_row = cursor.fetchone()
+            if source_row is None:
+                return _error_response(400, 'INVALID_SOURCE_ID', 'sourceId does not exist')
+
+            source_type_id = int(_get_row_value(source_row, 'type_id') or 0)
+            if source_type_id != type_id:
+                return _error_response(400, 'SOURCE_TYPE_MISMATCH', 'sourceId does not belong to typeId')
+
+            type_name = _get_row_value(source_row, 'type_name')
+            source_name = _get_row_value(source_row, 'source_name')
+            content_type_value = MANUAL_CONTENT_TYPE_MAP.get(type_name, type_name)
+            content_source_value = MANUAL_CONTENT_SOURCE_MAP.get(source_name, source_name)
+
+            cursor.execute(
+                """
+                SELECT 1
+                FROM contents
+                WHERE source = %s
+                  AND content_type = %s
+                  AND LOWER(TRIM(title)) = LOWER(TRIM(%s))
+                  AND COALESCE(is_deleted, FALSE) = FALSE
+                LIMIT 1
+                """,
+                (content_source_value, content_type_value, title),
+            )
+            if cursor.fetchone() is not None:
+                return _error_response(
+                    409,
+                    'DUPLICATE_CONTENT',
+                    'Content with same title, type, and source already exists',
+                )
+
+            manual_content_id = f"manual:{uuid4().hex}"
+            manual_meta = json.dumps(
+                {
+                    'manual_registration': {
+                        'type_id': source_type_id,
+                        'type_name': type_name,
+                        'source_id': int(_get_row_value(source_row, 'source_id') or 0),
+                        'source_name': source_name,
+                        'admin_id': g.current_user.get('id'),
+                    }
+                },
+                ensure_ascii=False,
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO contents (
+                    content_id,
+                    source,
+                    content_type,
+                    title,
+                    status,
+                    meta
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
+                """,
+                (
+                    manual_content_id,
+                    content_source_value,
+                    content_type_value,
+                    title,
+                    '연재중',
+                    manual_meta,
+                ),
+            )
+            created_row = cursor.fetchone()
+
+        conn.commit()
+        return (
+            jsonify(
+                {
+                    'success': True,
+                    'content': _serialize_content_row(created_row),
+                    'content_type': {
+                        'id': source_type_id,
+                        'name': type_name,
+                    },
+                    'content_source': {
+                        'id': int(_get_row_value(source_row, 'source_id') or 0),
+                        'type_id': source_type_id,
+                        'name': source_name,
+                    },
+                }
+            ),
+            201,
+        )
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
 
 
 @admin_bp.route('/api/admin/contents/override', methods=['POST'])

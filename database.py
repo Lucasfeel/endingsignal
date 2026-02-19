@@ -271,6 +271,99 @@ def setup_database_standalone():
             """
         )
 
+        print("LOG: [DB Setup] Creating 'content_types' table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS content_types (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_types_name_ci ON content_types ((LOWER(name)))"
+        )
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_content_types_updated_at ON content_types;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_content_types_updated_at
+            BEFORE UPDATE ON content_types
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
+        print("LOG: [DB Setup] 'content_types' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'content_sources' table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS content_sources (
+                id SERIAL PRIMARY KEY,
+                type_id INTEGER NOT NULL REFERENCES content_types(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(type_id, name)
+            )
+            """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_content_sources_type_id ON content_sources (type_id)"
+        )
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_sources_type_name_ci ON content_sources (type_id, LOWER(name))"
+        )
+        cursor.execute(
+            "DROP TRIGGER IF EXISTS trg_content_sources_updated_at ON content_sources;"
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER trg_content_sources_updated_at
+            BEFORE UPDATE ON content_sources
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        )
+        print("LOG: [DB Setup] 'content_sources' table created or already exists.")
+
+        print("LOG: [DB Setup] Seeding content type/source options (idempotent)...")
+        seeded_types = ("웹툰", "웹소설", "OTT")
+        for type_name in seeded_types:
+            cursor.execute(
+                """
+                INSERT INTO content_types (name)
+                VALUES (%s)
+                ON CONFLICT DO NOTHING
+                """,
+                (type_name,),
+            )
+
+        seeded_sources_by_type = {
+            "웹툰": ("네이버웹툰", "카카오웹툰"),
+            "웹소설": ("네이버 시리즈", "카카오 페이지", "문피아", "리디"),
+            "OTT": ("넷플릭스", "티빙", "디즈니 플러스", "웨이브", "라프텔"),
+        }
+        for type_name, source_names in seeded_sources_by_type.items():
+            for source_name in source_names:
+                cursor.execute(
+                    """
+                    WITH selected_type AS (
+                        SELECT id
+                        FROM content_types
+                        WHERE name = %s
+                    )
+                    INSERT INTO content_sources (type_id, name)
+                    SELECT id, %s
+                    FROM selected_type
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (type_name, source_name),
+                )
+
         print("LOG: [DB Setup] Creating 'admin_content_overrides' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS admin_content_overrides (

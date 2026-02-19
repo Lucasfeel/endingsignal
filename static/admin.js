@@ -154,6 +154,12 @@
       publicationsMap: new Map(),
       publicationActionMap: new Map(),
     },
+    addContent: {
+      types: [],
+      sourcesByTypeId: new Map(),
+      selectedTypeId: '',
+      selectedSourceId: '',
+    },
     deleted: {
       items: [],
       selected: null,
@@ -583,9 +589,18 @@
     };
   };
 
-  const setTab = (tabName) => {
+  const getTabPath = (tabName) => (tabName === 'addContent' ? '/admin/contents/new' : '/admin');
+
+  const inferTabFromPath = () => {
+    const pathname = window.location.pathname.replace(/\/+$/, '');
+    if (pathname === '/admin/contents/new') return 'addContent';
+    return 'manage';
+  };
+
+  const setTab = (tabName, { syncPath = true, replaceHistory = false } = {}) => {
     STATE.tab = tabName;
     const panels = {
+      addContent: document.getElementById('panelAddContent'),
       manage: document.getElementById('panelManage'),
       deleted: document.getElementById('panelDeleted'),
       publications: document.getElementById('panelPublications'),
@@ -598,6 +613,7 @@
       dailyNotificationReport: document.getElementById('panelDailyNotificationReport'),
     };
     const tabs = {
+      addContent: document.getElementById('tabAddContent'),
       manage: document.getElementById('tabManage'),
       deleted: document.getElementById('tabDeleted'),
       publications: document.getElementById('tabPublications'),
@@ -629,6 +645,17 @@
         button.setAttribute('aria-selected', 'false');
       }
     });
+
+    if (syncPath) {
+      const nextPath = getTabPath(tabName);
+      if (window.location.pathname !== nextPath) {
+        if (replaceHistory) {
+          window.history.replaceState({}, '', nextPath);
+        } else {
+          window.history.pushState({}, '', nextPath);
+        }
+      }
+    }
   };
 
   const confirmState = {
@@ -763,6 +790,342 @@
         closeConfirm();
       }
     });
+  };
+
+  const setAddContentHint = (text = '') => {
+    const hintEl = document.getElementById('addContentFormHint');
+    if (!hintEl) return;
+    hintEl.textContent = text || '';
+  };
+
+  const getSelectedAddContentType = () =>
+    STATE.addContent.types.find(
+      (entry) => String(entry.id) === String(STATE.addContent.selectedTypeId),
+    ) || null;
+
+  const renderAddContentSourceOptions = () => {
+    const sourceSelect = document.getElementById('addContentSourceSelect');
+    const addSourceBtn = document.getElementById('addSourceOpenBtn');
+    if (!sourceSelect) return;
+
+    const selectedTypeId = String(STATE.addContent.selectedTypeId || '');
+    sourceSelect.innerHTML = '';
+
+    if (!selectedTypeId) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '타입을 먼저 선택하세요';
+      sourceSelect.appendChild(option);
+      sourceSelect.disabled = true;
+      setButtonDisabled(addSourceBtn, true);
+      return;
+    }
+
+    const sources = STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [];
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = sources.length ? '소스 선택' : '등록된 소스 없음';
+    sourceSelect.appendChild(placeholder);
+
+    sources.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = String(entry.id);
+      option.textContent = entry.name || String(entry.id);
+      sourceSelect.appendChild(option);
+    });
+
+    const selectedSourceId = String(STATE.addContent.selectedSourceId || '');
+    const selectedExists = sources.some((entry) => String(entry.id) === selectedSourceId);
+    if (selectedExists) {
+      sourceSelect.value = selectedSourceId;
+    } else {
+      sourceSelect.value = '';
+      STATE.addContent.selectedSourceId = '';
+    }
+
+    sourceSelect.disabled = false;
+    setButtonDisabled(addSourceBtn, false);
+  };
+
+  const renderAddContentTypeOptions = () => {
+    const typeSelect = document.getElementById('addContentTypeSelect');
+    if (!typeSelect) return;
+
+    const selectedTypeId = String(STATE.addContent.selectedTypeId || '');
+    const selectedTypeExists = STATE.addContent.types.some(
+      (entry) => String(entry.id) === selectedTypeId,
+    );
+    if (!selectedTypeExists) {
+      STATE.addContent.selectedTypeId = '';
+      STATE.addContent.selectedSourceId = '';
+    }
+
+    typeSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '타입 선택';
+    typeSelect.appendChild(placeholder);
+
+    STATE.addContent.types.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = String(entry.id);
+      option.textContent = entry.name || String(entry.id);
+      typeSelect.appendChild(option);
+    });
+
+    if (STATE.addContent.selectedTypeId) {
+      typeSelect.value = String(STATE.addContent.selectedTypeId);
+    } else {
+      typeSelect.value = '';
+    }
+
+    renderAddContentSourceOptions();
+  };
+
+  const loadContentSourcesByType = async (
+    typeId,
+    { selectSourceId = null, silent = false } = {},
+  ) => {
+    const normalizedTypeId = String(typeId || '');
+    if (!normalizedTypeId) {
+      STATE.addContent.selectedTypeId = '';
+      STATE.addContent.selectedSourceId = '';
+      renderAddContentSourceOptions();
+      return [];
+    }
+
+    try {
+      const payload = await apiRequest(
+        'GET',
+        `/api/admin/content-sources?typeId=${encodeURIComponent(normalizedTypeId)}`,
+        { token: STATE.token },
+      );
+      const sources = Array.isArray(payload?.sources) ? payload.sources : [];
+      STATE.addContent.sourcesByTypeId.set(normalizedTypeId, sources);
+      if (selectSourceId !== null && selectSourceId !== undefined) {
+        STATE.addContent.selectedSourceId = selectSourceId ? String(selectSourceId) : '';
+      }
+      renderAddContentSourceOptions();
+      return sources;
+    } catch (err) {
+      if (!silent) {
+        showToast(err.message || '소스 목록을 불러오지 못했습니다.', { type: 'error' });
+      }
+      return [];
+    }
+  };
+
+  const loadContentTypes = async ({ selectTypeId = null, selectSourceId = null } = {}) => {
+    try {
+      const payload = await apiRequest('GET', '/api/admin/content-types', { token: STATE.token });
+      STATE.addContent.types = Array.isArray(payload?.types) ? payload.types : [];
+      if (selectTypeId !== null && selectTypeId !== undefined) {
+        STATE.addContent.selectedTypeId = selectTypeId ? String(selectTypeId) : '';
+      }
+
+      renderAddContentTypeOptions();
+
+      if (STATE.addContent.selectedTypeId) {
+        await loadContentSourcesByType(STATE.addContent.selectedTypeId, {
+          selectSourceId,
+          silent: true,
+        });
+      }
+    } catch (err) {
+      showToast(err.message || '타입 목록을 불러오지 못했습니다.', { type: 'error' });
+    }
+  };
+
+  const resetAddContentForm = ({ clearHint = true } = {}) => {
+    const titleInput = document.getElementById('addContentTitle');
+    if (titleInput) titleInput.value = '';
+    STATE.addContent.selectedTypeId = '';
+    STATE.addContent.selectedSourceId = '';
+    renderAddContentTypeOptions();
+    if (clearHint) setAddContentHint('');
+  };
+
+  const openAddTypeModal = () => {
+    const modal = document.getElementById('addTypeModal');
+    const input = document.getElementById('addTypeNameInput');
+    if (!modal) return;
+    if (input) input.value = '';
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    input?.focus();
+  };
+
+  const closeAddTypeModal = () => {
+    const modal = document.getElementById('addTypeModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  };
+
+  const openAddSourceModal = () => {
+    const selectedType = getSelectedAddContentType();
+    if (!selectedType) {
+      showToast('소스를 추가하려면 먼저 타입을 선택하세요.', { type: 'error' });
+      return;
+    }
+
+    const modal = document.getElementById('addSourceModal');
+    const input = document.getElementById('addSourceNameInput');
+    const selectedTypeEl = document.getElementById('addSourceSelectedType');
+    if (!modal) return;
+
+    if (selectedTypeEl) {
+      selectedTypeEl.textContent = `현재 타입: ${selectedType.name || selectedType.id}`;
+    }
+    if (input) input.value = '';
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    input?.focus();
+  };
+
+  const closeAddSourceModal = () => {
+    const modal = document.getElementById('addSourceModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  };
+
+  const createContentTypeFromModal = async () => {
+    const input = document.getElementById('addTypeNameInput');
+    const saveBtn = document.getElementById('addTypeSaveBtn');
+    const name = input?.value?.trim() || '';
+    if (!name) {
+      showToast('타입명을 입력해주세요.', { type: 'error' });
+      return;
+    }
+
+    const normalizedName = name.toLocaleLowerCase();
+    const duplicateExists = STATE.addContent.types.some(
+      (entry) => String(entry?.name || '').trim().toLocaleLowerCase() === normalizedName,
+    );
+    if (duplicateExists) {
+      showToast('동일한 타입이 이미 존재합니다.', { type: 'error' });
+      return;
+    }
+
+    try {
+      await withLoading(saveBtn, '추가 중...', async () => {
+        const payload = await apiRequest('POST', '/api/admin/content-types', {
+          token: STATE.token,
+          body: { name },
+        });
+        const createdType = payload?.type || null;
+        closeAddTypeModal();
+        await loadContentTypes({ selectTypeId: createdType?.id ? String(createdType.id) : null });
+        setAddContentHint(`타입 추가 완료: ${createdType?.name || name}`);
+        showToast('타입이 추가되었습니다.', { type: 'success' });
+      });
+    } catch (err) {
+      showToast(err.message || '타입 추가에 실패했습니다.', { type: 'error' });
+    }
+  };
+
+  const createContentSourceFromModal = async () => {
+    const input = document.getElementById('addSourceNameInput');
+    const saveBtn = document.getElementById('addSourceSaveBtn');
+    const selectedTypeId = String(STATE.addContent.selectedTypeId || '');
+    const name = input?.value?.trim() || '';
+    if (!selectedTypeId) {
+      showToast('타입을 먼저 선택하세요.', { type: 'error' });
+      return;
+    }
+    if (!name) {
+      showToast('소스명을 입력해주세요.', { type: 'error' });
+      return;
+    }
+
+    const currentSources = STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [];
+    const normalizedName = name.toLocaleLowerCase();
+    const duplicateExists = currentSources.some(
+      (entry) => String(entry?.name || '').trim().toLocaleLowerCase() === normalizedName,
+    );
+    if (duplicateExists) {
+      showToast('동일한 소스가 이미 존재합니다.', { type: 'error' });
+      return;
+    }
+
+    try {
+      await withLoading(saveBtn, '추가 중...', async () => {
+        const payload = await apiRequest('POST', '/api/admin/content-sources', {
+          token: STATE.token,
+          body: { typeId: Number(selectedTypeId), name },
+        });
+        const createdSource = payload?.source || null;
+        closeAddSourceModal();
+        await loadContentSourcesByType(selectedTypeId, {
+          selectSourceId: createdSource?.id ? String(createdSource.id) : null,
+          silent: true,
+        });
+        setAddContentHint(`소스 추가 완료: ${createdSource?.name || name}`);
+        showToast('소스가 추가되었습니다.', { type: 'success' });
+      });
+    } catch (err) {
+      showToast(err.message || '소스 추가에 실패했습니다.', { type: 'error' });
+    }
+  };
+
+  const handleAddContentTypeChange = async () => {
+    const typeSelect = document.getElementById('addContentTypeSelect');
+    const nextTypeId = typeSelect?.value || '';
+    STATE.addContent.selectedTypeId = nextTypeId;
+    STATE.addContent.selectedSourceId = '';
+    renderAddContentSourceOptions();
+
+    if (nextTypeId) {
+      await loadContentSourcesByType(nextTypeId, { selectSourceId: '' });
+    }
+  };
+
+  const handleAddContentSourceChange = () => {
+    const sourceSelect = document.getElementById('addContentSourceSelect');
+    STATE.addContent.selectedSourceId = sourceSelect?.value || '';
+  };
+
+  const submitAddContent = async (event) => {
+    if (event?.preventDefault) event.preventDefault();
+
+    const title = document.getElementById('addContentTitle')?.value?.trim() || '';
+    const typeId = String(STATE.addContent.selectedTypeId || '');
+    const sourceId = String(STATE.addContent.selectedSourceId || '');
+    const submitBtn = document.getElementById('addContentSubmitBtn');
+
+    if (!title) {
+      showToast('제목을 입력해주세요.', { type: 'error' });
+      return;
+    }
+    if (!typeId) {
+      showToast('타입을 선택해주세요.', { type: 'error' });
+      return;
+    }
+    if (!sourceId) {
+      showToast('소스를 선택해주세요.', { type: 'error' });
+      return;
+    }
+
+    try {
+      await withLoading(submitBtn, '추가 중...', async () => {
+        const payload = await apiRequest('POST', '/api/admin/contents', {
+          token: STATE.token,
+          body: {
+            title,
+            typeId: Number(typeId),
+            sourceId: Number(sourceId),
+          },
+        });
+        const createdId = payload?.content?.content_id || '-';
+        resetAddContentForm({ clearHint: false });
+        setAddContentHint(`등록 완료: ${createdId}`);
+        showToast('콘텐츠가 추가되었습니다.', { type: 'success' });
+      });
+    } catch (err) {
+      showToast(err.message || '콘텐츠 추가에 실패했습니다.', { type: 'error' });
+    }
   };
 
   const renderManageResults = () => {
@@ -2418,6 +2781,7 @@
   const bindEvents = () => {
     const manageSearchBtn = document.getElementById('manageSearchBtn');
     const manageSearchInput = document.getElementById('manageSearchInput');
+    const tabAddContent = document.getElementById('tabAddContent');
     const tabManage = document.getElementById('tabManage');
     const tabDeleted = document.getElementById('tabDeleted');
     const tabPublications = document.getElementById('tabPublications');
@@ -2459,6 +2823,18 @@
     const detailCopyJsonBtn = document.getElementById('detailCopyJsonBtn');
     const detailCopyIdBtn = document.getElementById('detailCopyIdBtn');
     const detailCopyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
+    const addContentForm = document.getElementById('addContentForm');
+    const addContentResetBtn = document.getElementById('addContentResetBtn');
+    const addContentTypeSelect = document.getElementById('addContentTypeSelect');
+    const addContentSourceSelect = document.getElementById('addContentSourceSelect');
+    const addTypeOpenBtn = document.getElementById('addTypeOpenBtn');
+    const addSourceOpenBtn = document.getElementById('addSourceOpenBtn');
+    const addTypeSaveBtn = document.getElementById('addTypeSaveBtn');
+    const addTypeCancelBtn = document.getElementById('addTypeCancelBtn');
+    const addSourceSaveBtn = document.getElementById('addSourceSaveBtn');
+    const addSourceCancelBtn = document.getElementById('addSourceCancelBtn');
+    const addTypeNameInput = document.getElementById('addTypeNameInput');
+    const addSourceNameInput = document.getElementById('addSourceNameInput');
 
     manageSearchBtn?.addEventListener('click', () =>
       withLoading(manageSearchBtn, '검색 중...', performSearch),
@@ -2469,6 +2845,10 @@
       }
     });
 
+    tabAddContent?.addEventListener('click', () => {
+      setTab('addContent');
+      loadContentTypes();
+    });
     tabManage?.addEventListener('click', () => setTab('manage'));
     tabDeleted?.addEventListener('click', () => {
       setTab('deleted');
@@ -2506,6 +2886,41 @@
     tabDailyNotificationReport?.addEventListener('click', () => {
       setTab('dailyNotificationReport');
       loadDailyNotificationReport();
+    });
+
+    addContentForm?.addEventListener('submit', submitAddContent);
+    addContentResetBtn?.addEventListener('click', () => resetAddContentForm());
+    addContentTypeSelect?.addEventListener('change', () => {
+      handleAddContentTypeChange();
+    });
+    addContentSourceSelect?.addEventListener('change', handleAddContentSourceChange);
+    addTypeOpenBtn?.addEventListener('click', openAddTypeModal);
+    addSourceOpenBtn?.addEventListener('click', openAddSourceModal);
+    addTypeSaveBtn?.addEventListener('click', createContentTypeFromModal);
+    addTypeCancelBtn?.addEventListener('click', closeAddTypeModal);
+    addSourceSaveBtn?.addEventListener('click', createContentSourceFromModal);
+    addSourceCancelBtn?.addEventListener('click', closeAddSourceModal);
+    addTypeNameInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        createContentTypeFromModal();
+      }
+    });
+    addSourceNameInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        createContentSourceFromModal();
+      }
+    });
+    document.getElementById('addTypeModal')?.addEventListener('click', (event) => {
+      if (event.target?.id === 'addTypeModal') {
+        closeAddTypeModal();
+      }
+    });
+    document.getElementById('addSourceModal')?.addEventListener('click', (event) => {
+      if (event.target?.id === 'addSourceModal') {
+        closeAddSourceModal();
+      }
     });
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
@@ -2764,6 +3179,8 @@
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         closeDetailModal();
+        closeAddTypeModal();
+        closeAddSourceModal();
       }
     });
   };
@@ -2796,7 +3213,12 @@
 
       initConfirmModal();
       bindEvents();
-      await prefetchCaches();
+      await Promise.all([prefetchCaches(), loadContentTypes()]);
+      const initialTab = inferTabFromPath();
+      setTab(initialTab, { syncPath: true, replaceHistory: true });
+      window.addEventListener('popstate', () => {
+        setTab(inferTabFromPath(), { syncPath: false });
+      });
       hideGateOverlay();
     } catch (err) {
       const isForbidden = err?.httpStatus === 401 || err?.httpStatus === 403;
