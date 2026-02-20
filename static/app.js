@@ -171,6 +171,8 @@ const UI_STATE_KEYS = {
     source: 'endingsignal.filters.source', // legacy single-source key
     status: 'endingsignal.filters.status', // localStorage: keep across reloads
     day: 'endingsignal.filters.day', // sessionStorage: reset on new session
+    novelGenreGroup: 'endingsignal.filters.novel.genreGroup',
+    novelIsCompleted: 'endingsignal.filters.novel.isCompleted',
   },
   scroll: {
     home: 'endingsignal.scroll.home',
@@ -189,6 +191,18 @@ const UI_STATE_DEFAULTS = {
     day: 'all', // Day defaults to ALL on a fresh visit per product decision
   },
 };
+
+const DEFAULT_NOVEL_GENRE_GROUP = 'all';
+const DEFAULT_NOVEL_IS_COMPLETED = false;
+const NOVEL_GENRE_GROUP_OPTIONS = [
+  { id: 'all', label: '\uC804\uCCB4' },
+  { id: 'fantasy', label: '\uD310\uD0C0\uC9C0(\uD604\uD310 \uD3EC\uD568)' },
+  { id: 'romance', label: '\uB85C\uB9E8\uC2A4' },
+  { id: 'romance_fantasy', label: '\uB85C\uD310(\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0)' },
+  { id: 'wuxia', label: '\uBB34\uD611' },
+  { id: 'bl', label: 'BL' },
+];
+const NOVEL_GENRE_GROUP_IDS = NOVEL_GENRE_GROUP_OPTIONS.map((item) => item.id);
 
 const SOURCE_OPTIONS = {
   webtoon: [
@@ -329,6 +343,22 @@ const sanitizeFilterValue = (value, allowed, fallback) => {
   return allowed.includes(safeVal) ? safeVal : fallback;
 };
 
+const sanitizeNovelGenreGroup = (value, fallback = DEFAULT_NOVEL_GENRE_GROUP) => {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return NOVEL_GENRE_GROUP_IDS.includes(normalized) ? normalized : fallback;
+};
+
+const coerceBooleanFilter = (value, fallback = false) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 't', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'f', 'no', 'n', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+};
+
 const getFilterTargetTab = () => {
   const browseTab = STATE.lastBrowseTab || 'webtoon';
   if (STATE.isMyPageOpen) return browseTab;
@@ -354,6 +384,14 @@ const UIState = {
     const savedSource = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.source);
     const savedStatus = safeLoadStorage(localStorage, UI_STATE_KEYS.filters.status);
     const savedDay = safeLoadStorage(sessionStorage, UI_STATE_KEYS.filters.day);
+    const savedNovelGenreGroup = safeLoadStorage(
+      localStorage,
+      UI_STATE_KEYS.filters.novelGenreGroup,
+    );
+    const savedNovelIsCompleted = safeLoadStorage(
+      localStorage,
+      UI_STATE_KEYS.filters.novelIsCompleted,
+    );
     const migratedSources =
       savedSources !== null && savedSources !== undefined ? savedSources : savedSource;
 
@@ -370,6 +408,14 @@ const UIState = {
           ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
           UI_STATE_DEFAULTS.filters.day,
         ),
+        novelGenreGroup: sanitizeNovelGenreGroup(
+          savedNovelGenreGroup,
+          DEFAULT_NOVEL_GENRE_GROUP,
+        ),
+        novelIsCompleted: coerceBooleanFilter(
+          savedNovelIsCompleted,
+          DEFAULT_NOVEL_IS_COMPLETED,
+        ),
       },
     };
   },
@@ -379,52 +425,94 @@ const UIState = {
     const fallbackFilters = UI_STATE_DEFAULTS.filters;
     const tabFilters = STATE.filters?.[tabId] || {};
     const allowedSources = getAllowedSourcesForTab(tabId);
-    return {
+    const snapshot = {
       filters: {
         sources: sanitizeSourcesArray(tabFilters.sources, allowedSources),
-        status: sanitizeFilterValue(tabFilters.status, ['ongoing', 'completed'], fallbackFilters.status),
-        day: sanitizeFilterValue(
-          tabFilters.day,
-          ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
-          fallbackFilters.day,
+        novelGenreGroup: sanitizeNovelGenreGroup(
+          STATE.filters?.novel?.genreGroup,
+          DEFAULT_NOVEL_GENRE_GROUP,
+        ),
+        novelIsCompleted: coerceBooleanFilter(
+          STATE.filters?.novel?.isCompleted,
+          DEFAULT_NOVEL_IS_COMPLETED,
         ),
       },
     };
+
+    if (tabId === 'novel') {
+      return snapshot;
+    }
+
+    snapshot.filters.status = sanitizeFilterValue(
+      tabFilters.status,
+      ['ongoing', 'completed'],
+      fallbackFilters.status,
+    );
+    snapshot.filters.day = sanitizeFilterValue(
+      tabFilters.day,
+      ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+      fallbackFilters.day,
+    );
+
+    return snapshot;
   },
 
   apply(nextState, { rerender = true, fetch = false } = {}) {
     const tabId = getFilterTargetTab();
     if (!STATE.filters?.[tabId]) return;
 
-    const incoming = nextState?.filters || UI_STATE_DEFAULTS.filters;
+    const incoming = nextState?.filters || {};
     const allowedSources = getAllowedSourcesForTab(tabId);
     const nextSources = sanitizeSourcesArray(incoming.sources ?? incoming.source, allowedSources);
-    const nextStatus = sanitizeFilterValue(
-      incoming.status,
-      ['ongoing', 'completed'],
-      UI_STATE_DEFAULTS.filters.status,
-    );
-    const nextDay = sanitizeFilterValue(
-      incoming.day,
-      ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
-      UI_STATE_DEFAULTS.filters.day,
-    );
 
     const current = STATE.filters[tabId];
-    const changed =
-      !areSourcesEqual(current.sources, nextSources) ||
-      current.status !== nextStatus ||
-      current.day !== nextDay;
-
+    let changed = !areSourcesEqual(current.sources, nextSources);
     STATE.filters[tabId].sources = nextSources;
-    STATE.filters[tabId].status = nextStatus;
-    STATE.filters[tabId].day = nextDay;
 
-    // Keep day in sync for novel, which shares the same filter surface.
-    ['webtoon', 'novel'].forEach((type) => {
-      if (!STATE.filters[type]) return;
-      STATE.filters[type].day = nextDay;
-    });
+    if (tabId === 'novel') {
+      const nextGenreGroup = sanitizeNovelGenreGroup(
+        incoming.novelGenreGroup ?? incoming.genreGroup,
+        DEFAULT_NOVEL_GENRE_GROUP,
+      );
+      const nextIsCompleted = coerceBooleanFilter(
+        incoming.novelIsCompleted ?? incoming.isCompleted,
+        DEFAULT_NOVEL_IS_COMPLETED,
+      );
+
+      changed =
+        changed ||
+        current.genreGroup !== nextGenreGroup ||
+        current.isCompleted !== nextIsCompleted;
+
+      STATE.filters[tabId].genreGroup = nextGenreGroup;
+      STATE.filters[tabId].isCompleted = nextIsCompleted;
+    } else {
+      const nextStatus = sanitizeFilterValue(
+        incoming.status,
+        ['ongoing', 'completed'],
+        UI_STATE_DEFAULTS.filters.status,
+      );
+      const nextDay = sanitizeFilterValue(
+        incoming.day,
+        ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+        UI_STATE_DEFAULTS.filters.day,
+      );
+
+      changed = changed || current.status !== nextStatus || current.day !== nextDay;
+      STATE.filters[tabId].status = nextStatus;
+      STATE.filters[tabId].day = nextDay;
+    }
+
+    if (STATE.filters?.novel) {
+      STATE.filters.novel.genreGroup = sanitizeNovelGenreGroup(
+        incoming.novelGenreGroup ?? incoming.genreGroup ?? STATE.filters.novel.genreGroup,
+        DEFAULT_NOVEL_GENRE_GROUP,
+      );
+      STATE.filters.novel.isCompleted = coerceBooleanFilter(
+        incoming.novelIsCompleted ?? incoming.isCompleted ?? STATE.filters.novel.isCompleted,
+        DEFAULT_NOVEL_IS_COMPLETED,
+      );
+    }
 
     if (rerender) {
       renderL1Filters(tabId);
@@ -446,8 +534,22 @@ const UIState = {
     } catch (e) {
       console.warn('Failed to remove legacy source filter key', e);
     }
-    safeSaveStorage(localStorage, UI_STATE_KEYS.filters.status, snapshot.filters.status);
-    safeSaveStorage(sessionStorage, UI_STATE_KEYS.filters.day, snapshot.filters.day);
+    if (typeof snapshot.filters.status === 'string') {
+      safeSaveStorage(localStorage, UI_STATE_KEYS.filters.status, snapshot.filters.status);
+    }
+    if (typeof snapshot.filters.day === 'string') {
+      safeSaveStorage(sessionStorage, UI_STATE_KEYS.filters.day, snapshot.filters.day);
+    }
+    safeSaveStorage(
+      localStorage,
+      UI_STATE_KEYS.filters.novelGenreGroup,
+      sanitizeNovelGenreGroup(STATE.filters?.novel?.genreGroup, DEFAULT_NOVEL_GENRE_GROUP),
+    );
+    safeSaveStorage(
+      localStorage,
+      UI_STATE_KEYS.filters.novelIsCompleted,
+      coerceBooleanFilter(STATE.filters?.novel?.isCompleted, DEFAULT_NOVEL_IS_COMPLETED),
+    );
   },
 };
 
@@ -521,7 +623,11 @@ const STATE = {
   renderToken: 0,
   filters: {
     webtoon: { sources: [], day: 'all' },
-    novel: { sources: [], day: 'all' },
+    novel: {
+      sources: [],
+      genreGroup: DEFAULT_NOVEL_GENRE_GROUP,
+      isCompleted: DEFAULT_NOVEL_IS_COMPLETED,
+    },
     ott: { sources: [], genre: 'all' },
     my: { viewMode: 'completion' },
   },
@@ -4137,8 +4243,10 @@ function renderL2Filters(tabId) {
     { id: 'completed', label: '완결' },
   ];
 
-  if (tabId === 'webtoon' || tabId === 'novel') {
+  if (tabId === 'webtoon') {
     items = days;
+  } else if (tabId === 'novel') {
+    items = NOVEL_GENRE_GROUP_OPTIONS;
   } else if (tabId === 'ott') {
     items = [
       { id: 'all', label: 'ALL' },
@@ -4152,8 +4260,13 @@ function renderL2Filters(tabId) {
   }
 
   let activeKey = '';
-  if (tabId === 'webtoon' || tabId === 'novel')
+  if (tabId === 'webtoon')
     activeKey = STATE.filters?.[tabId]?.day || 'all';
+  if (tabId === 'novel')
+    activeKey = sanitizeNovelGenreGroup(
+      STATE.filters?.novel?.genreGroup,
+      DEFAULT_NOVEL_GENRE_GROUP,
+    );
   if (tabId === 'ott') activeKey = STATE.filters?.[tabId]?.genre || 'all';
 
   items.forEach((item) => {
@@ -4163,8 +4276,8 @@ function renderL2Filters(tabId) {
     el.textContent = item.label;
 
     el.onclick = () => {
-      if (tabId === 'webtoon' || tabId === 'novel')
-        STATE.filters[tabId].day = item.id;
+      if (tabId === 'webtoon') STATE.filters[tabId].day = item.id;
+      if (tabId === 'novel') STATE.filters[tabId].genreGroup = item.id;
       if (tabId === 'ott') STATE.filters[tabId].genre = item.id;
 
       renderL2Filters(tabId);
@@ -4174,6 +4287,33 @@ function renderL2Filters(tabId) {
 
     UI.l2Filter.appendChild(el);
   });
+
+  if (tabId === 'novel') {
+    const wrap = document.createElement('label');
+    wrap.className = 'l2-checkbox ml-2 inline-flex items-center gap-2 select-none';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'l2-checkbox-input';
+    checkbox.checked = coerceBooleanFilter(
+      STATE.filters?.novel?.isCompleted,
+      DEFAULT_NOVEL_IS_COMPLETED,
+    );
+    checkbox.setAttribute('aria-label', '\uC644\uACB0');
+    checkbox.onchange = () => {
+      STATE.filters.novel.isCompleted = checkbox.checked;
+      fetchAndRenderContent(tabId);
+      UIState.save();
+    };
+
+    const label = document.createElement('span');
+    label.className = 'l2-checkbox-label';
+    label.textContent = '\uC644\uACB0';
+
+    wrap.appendChild(checkbox);
+    wrap.appendChild(label);
+    UI.l2Filter.appendChild(wrap);
+  }
 }
 
 function syncMySubToggleUI() {
@@ -4749,13 +4889,13 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       let sourceFilter = [];
       let responsePayload = null;
 
-      if (tabId === 'webtoon' || tabId === 'novel' || tabId === 'ott') {
+      if (tabId === 'webtoon' || tabId === 'ott') {
         const { querySource, filterSources } = getSourceRequestConfig(tabId);
         sourceFilter = filterSources;
         const query = { type: tabId, source: querySource };
 
         let statusKey = 'ongoing';
-        if (tabId === 'webtoon' || tabId === 'novel') {
+        if (tabId === 'webtoon') {
           const day = STATE.filters?.[tabId]?.day || 'all';
           statusKey = day === 'completed' || day === 'hiatus' ? day : 'ongoing';
         } else if (tabId === 'ott') {
@@ -4798,12 +4938,26 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         }
 
         url = buildUrl('/api/contents/ongoing', query);
+      } else if (tabId === 'novel') {
+        const { querySource, filterSources } = getSourceRequestConfig(tabId);
+        sourceFilter = filterSources;
+        const query = {
+          source: querySource,
+          genre_group: sanitizeNovelGenreGroup(
+            STATE.filters?.novel?.genreGroup,
+            DEFAULT_NOVEL_GENRE_GROUP,
+          ),
+        };
+        if (coerceBooleanFilter(STATE.filters?.novel?.isCompleted, DEFAULT_NOVEL_IS_COMPLETED)) {
+          query.is_completed = 'true';
+        }
+        url = buildUrl('/api/contents/novels', query);
       }
 
       if (url) {
         responsePayload = await apiRequest('GET', url, { signal });
 
-        if (tabId === 'webtoon' || tabId === 'novel') {
+        if (tabId === 'webtoon') {
           const day = STATE.filters?.[tabId]?.day || 'all';
 
           if (day !== 'completed' && day !== 'hiatus' && day !== 'all') {
@@ -4816,6 +4970,12 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           } else {
             data = Array.isArray(responsePayload?.contents) ? responsePayload.contents : [];
           }
+        } else if (tabId === 'novel') {
+          data = Array.isArray(responsePayload?.contents)
+            ? responsePayload.contents
+            : Array.isArray(responsePayload)
+              ? responsePayload
+              : [];
         } else if (tabId === 'ott') {
           data = Array.isArray(responsePayload?.contents)
             ? responsePayload.contents

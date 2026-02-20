@@ -6,9 +6,183 @@ from utils.text import normalize_search_text
 import base64
 import json
 import os
+import re
 from datetime import datetime
 
 contents_bp = Blueprint('contents', __name__)
+
+STATUS_ONGOING = "\uC5F0\uC7AC\uC911"
+STATUS_HIATUS = "\uD734\uC7AC"
+STATUS_COMPLETED = "\uC644\uACB0"
+
+
+def _normalize_genre_token(value):
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[\s_\-/]+", "", value.strip().lower())
+
+
+GENRE_GROUP_MAPPING = {
+    "ALL": [],
+    "FANTASY": [
+        "\uD310\uD0C0\uC9C0",
+        "\uD604\uD310",
+        "\uD604\uB300\uD310\uD0C0\uC9C0",
+        "fantasy",
+        "modern fantasy",
+        "urban fantasy",
+    ],
+    "ROMANCE": [
+        "\uB85C\uB9E8\uC2A4",
+        "romance",
+    ],
+    "ROMANCE_FANTASY": [
+        "\uB85C\uD310",
+        "\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0",
+        "romance fantasy",
+        "romance_fantasy",
+    ],
+    "WUXIA": [
+        "\uBB34\uD611",
+        "wuxia",
+        "martial arts",
+    ],
+    "BL": [
+        "bl",
+        "\uBE44\uC5D8",
+        "boys love",
+        "boys' love",
+    ],
+}
+
+GENRE_GROUP_ALIASES = {
+    "ALL": ("all", "\uC804\uCCB4"),
+    "FANTASY": ("fantasy", "\uD310\uD0C0\uC9C0", "\uD604\uD310", "\uD604\uB300\uD310\uD0C0\uC9C0"),
+    "ROMANCE": ("romance", "\uB85C\uB9E8\uC2A4"),
+    "ROMANCE_FANTASY": (
+        "romancefantasy",
+        "romance_fantasy",
+        "\uB85C\uD310",
+        "\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0",
+    ),
+    "WUXIA": ("wuxia", "\uBB34\uD611"),
+    "BL": ("bl", "\uBE44\uC5D8", "boyslove", "boys'love"),
+}
+
+GENRE_GROUP_ALIAS_MAP = {}
+for _group, _aliases in GENRE_GROUP_ALIASES.items():
+    for _alias in _aliases:
+        _normalized = _normalize_genre_token(_alias)
+        if _normalized:
+            GENRE_GROUP_ALIAS_MAP[_normalized] = _group
+
+
+def _parse_bool_arg(raw_value, default=False):
+    if raw_value is None:
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    normalized = str(raw_value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _resolve_genre_group(raw_value):
+    normalized = _normalize_genre_token(raw_value)
+    if not normalized:
+        return "ALL"
+    return GENRE_GROUP_ALIAS_MAP.get(normalized, "ALL")
+
+
+def _coerce_genre_values(raw_value):
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, (list, tuple, set)):
+        merged = []
+        for entry in raw_value:
+            merged.extend(_coerce_genre_values(entry))
+        return merged
+
+    if isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if not stripped:
+            return []
+        try:
+            parsed = json.loads(stripped)
+            if parsed is not raw_value:
+                parsed_values = _coerce_genre_values(parsed)
+                if parsed_values:
+                    return parsed_values
+        except Exception:
+            pass
+        split_values = [part.strip() for part in re.split(r"[,/|>]+", stripped) if part.strip()]
+        return split_values if split_values else [stripped]
+
+    return []
+
+
+def _extract_internal_genres(meta):
+    safe_meta = normalize_meta(meta)
+    attrs = safe_get_dict(safe_meta.get("attributes"))
+    common = safe_get_dict(safe_meta.get("common"))
+
+    candidates = [
+        attrs.get("genres"),
+        attrs.get("genre"),
+        attrs.get("subgenres"),
+        attrs.get("sub_genres"),
+        common.get("genres"),
+        common.get("genre"),
+        safe_meta.get("genres"),
+        safe_meta.get("genre"),
+    ]
+
+    merged = []
+    seen = set()
+    for candidate in candidates:
+        for token in _coerce_genre_values(candidate):
+            normalized = _normalize_genre_token(token)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(token)
+    return merged
+
+
+def _filter_novel_rows_by_genre_group(rows, genre_group):
+    if genre_group == "ALL":
+        return rows
+
+    target_tokens = [
+        _normalize_genre_token(token)
+        for token in GENRE_GROUP_MAPPING.get(genre_group, [])
+        if _normalize_genre_token(token)
+    ]
+    if not target_tokens:
+        return rows
+
+    saw_genre_metadata = False
+    filtered = []
+    for row in rows:
+        genres = _extract_internal_genres(row.get("meta"))
+        normalized_genres = [_normalize_genre_token(token) for token in genres if _normalize_genre_token(token)]
+        if normalized_genres:
+            saw_genre_metadata = True
+
+        matched = any(
+            target in genre or genre in target
+            for genre in normalized_genres
+            for target in target_tokens
+        )
+        if matched:
+            filtered.append(row)
+
+    # If upstream rows do not have genre metadata yet, keep current visibility.
+    return filtered if saw_genre_metadata else rows
 
 
 def normalize_meta(value):
@@ -322,6 +496,78 @@ def get_recommendations():
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_recommendations")
+        return jsonify({
+            "success": False,
+            "error": {"code": "INTERNAL", "message": "Internal Server Error"}
+        }), 500
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
+@contents_bp.route('/api/contents/novels', methods=['GET'])
+def get_novel_contents():
+    """Web novel list endpoint with genre-group and completion filters."""
+    cursor = None
+    try:
+        source = request.args.get('source', 'all')
+        raw_genre_group = request.args.get('genre_group')
+        if raw_genre_group is None:
+            raw_genre_group = request.args.get('genreGroup')
+        genre_group = _resolve_genre_group(raw_genre_group)
+
+        raw_is_completed = request.args.get('is_completed')
+        if raw_is_completed is None:
+            raw_is_completed = request.args.get('isCompleted')
+        is_completed = _parse_bool_arg(raw_is_completed, default=False)
+
+        conn = get_db()
+        cursor = get_cursor(conn)
+
+        query_params = ['novel']
+        where_clause = "WHERE content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE"
+
+        if source != 'all':
+            where_clause += " AND source = %s"
+            query_params.append(source)
+
+        if is_completed:
+            where_clause += " AND status = %s"
+            query_params.append(STATUS_COMPLETED)
+
+        cursor.execute(
+            f"""
+            SELECT content_id, title, status, meta, source
+            FROM contents
+            {where_clause}
+            ORDER BY title ASC, content_id ASC
+            """,
+            tuple(query_params),
+        )
+
+        raw_rows = cursor.fetchall()
+
+        results = []
+        for row in raw_rows:
+            coerced = coerce_row_dict(row)
+            coerced['meta'] = normalize_meta(coerced.get('meta'))
+            results.append(coerced)
+
+        filtered = _filter_novel_rows_by_genre_group(results, genre_group)
+
+        return jsonify({
+            'contents': filtered,
+            'filters': {
+                'genre_group': genre_group,
+                'is_completed': is_completed,
+            },
+        })
+
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_novel_contents")
         return jsonify({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}

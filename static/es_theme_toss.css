@@ -710,6 +710,29 @@ body.es-main-page {
   font-weight: 700;
 }
 
+.l2-checkbox {
+  color: var(--es-text-muted);
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.l2-checkbox-input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--es-primary);
+}
+
+.l2-checkbox-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--es-text-muted);
+}
+
+.l2-checkbox:hover .l2-checkbox-label {
+  color: var(--es-text);
+}
+
 #mySubToggleContainer .es-toggle-shell {
   background: var(--grey-200);
 }
