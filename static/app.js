@@ -196,9 +196,10 @@ const DEFAULT_NOVEL_GENRE_GROUP = 'all';
 const DEFAULT_NOVEL_IS_COMPLETED = false;
 const NOVEL_GENRE_GROUP_OPTIONS = [
   { id: 'all', label: '\uC804\uCCB4' },
-  { id: 'fantasy', label: '\uD310\uD0C0\uC9C0(\uD604\uD310 \uD3EC\uD568)' },
+  { id: 'fantasy', label: '\uD310\uD0C0\uC9C0' },
   { id: 'romance', label: '\uB85C\uB9E8\uC2A4' },
-  { id: 'romance_fantasy', label: '\uB85C\uD310(\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0)' },
+  { id: 'romance_fantasy', label: '\uB85C\uD310' },
+  { id: 'light_novel', label: '\uB77C\uC774\uD2B8\uB178\uBCA8' },
   { id: 'wuxia', label: '\uBB34\uD611' },
   { id: 'bl', label: 'BL' },
 ];

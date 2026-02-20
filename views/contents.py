@@ -42,6 +42,13 @@ GENRE_GROUP_MAPPING = {
         "romance fantasy",
         "romance_fantasy",
     ],
+    "LIGHT_NOVEL": [
+        "\uB77C\uC774\uD2B8\uB178\uBCA8",
+        "\uB77C\uB178\uBCA8",
+        "light novel",
+        "light_novel",
+        "lightnovel",
+    ],
     "WUXIA": [
         "\uBB34\uD611",
         "wuxia",
@@ -64,6 +71,12 @@ GENRE_GROUP_ALIASES = {
         "romance_fantasy",
         "\uB85C\uD310",
         "\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0",
+    ),
+    "LIGHT_NOVEL": (
+        "lightnovel",
+        "light_novel",
+        "\uB77C\uC774\uD2B8\uB178\uBCA8",
+        "\uB77C\uB178\uBCA8",
     ),
     "WUXIA": ("wuxia", "\uBB34\uD611"),
     "BL": ("bl", "\uBE44\uC5D8", "boyslove", "boys'love"),
