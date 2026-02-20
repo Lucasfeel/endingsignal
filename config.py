@@ -92,6 +92,13 @@ NAVER_FINISHED_ORDERS = [
     if order.strip()
 ]
 
+# --- RIDI Novel Crawl Controls ---
+RIDI_CATEGORY_ID = (os.getenv("RIDI_CATEGORY_ID", "3000") or "3000").strip() or "3000"
+RIDI_LIMIT = int(os.getenv("RIDI_LIMIT", 60))
+RIDI_ORDER_BY = (os.getenv("RIDI_ORDER_BY", "popular") or "popular").strip() or "popular"
+RIDI_PLATFORM = (os.getenv("RIDI_PLATFORM", "web") or "web").strip() or "web"
+RIDI_MAX_PAGES = int(os.getenv("RIDI_MAX_PAGES", 500))
+
 # --- Kakao Webtoon Discovery Controls ---
 # 신기능(발견/디버깅) 우선: HTTP 오류 로그 on, 번들 스캔 범위 확장
 KAKAO_DEBUG_HTTP_ERRORS = int(os.getenv("KAKAO_DEBUG_HTTP_ERRORS", 1))

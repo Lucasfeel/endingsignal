@@ -12,6 +12,7 @@ load_dotenv()
 
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
+from crawlers.ridi_novel_crawler import RidiNovelCrawler
 from database import create_standalone_connection, get_cursor
 from services.cdc_event_service import (
     record_due_scheduled_completions,
@@ -22,6 +23,7 @@ from utils.time import now_kst_naive
 ALL_CRAWLERS = [
     NaverWebtoonCrawler,
     KakaoWebtoonCrawler,
+    RidiNovelCrawler,
 ]
 
 ERROR_STATUS_ALIASES = {"error", "fail", "fatal", "실패"}
