@@ -47,6 +47,7 @@ const ICONS = {
   webtoon: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;"></span>`,
   novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;"></span>`,
+  my: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a1.1 1.1 0 0 1 1.01.67l1.95 4.27 4.65.55a1.1 1.1 0 0 1 .62 1.92l-3.44 3.1.94 4.58a1.1 1.1 0 0 1-1.62 1.17L12 17.5l-4.1 2.35a1.1 1.1 0 0 1-1.63-1.16l.94-4.58-3.44-3.1a1.1 1.1 0 0 1 .62-1.92l4.66-.55 1.94-4.27A1.1 1.1 0 0 1 12 3.2z"/></svg>`,
   me: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a4.6 4.6 0 1 1 0 9.2 4.6 4.6 0 0 1 0-9.2m0 10.9c4.8 0 8.8 2.7 9.7 6.5a.9.9 0 0 1-.9 1.2H3.2a.9.9 0 0 1-.9-1.2c.9-3.8 4.9-6.5 9.7-6.5"/></svg>`,
 };
 
@@ -92,7 +93,7 @@ const UI_CLASSES = {
     'es-star-badge absolute top-2 right-2 z-10 flex items-center justify-center h-[24px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
   badgeBase: 'es-badge-base z-10 inline-flex px-2 py-1 rounded-lg items-center',
   affordOverlay:
-    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 bg-gradient-to-t from-white/35 via-white/5 to-transparent group-hover:opacity-100',
+    'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 es-afford-overlay group-hover:opacity-100',
   affordHint:
     'absolute bottom-2 left-2 z-[6] pointer-events-none select-none opacity-0 transition-opacity duration-150 group-hover:opacity-100',
   pillHint: 'es-pill-hint text-[11px] rounded-full px-2 py-1',
@@ -103,7 +104,7 @@ const UI_CLASSES = {
   cardThumb: 'es-card-thumb overflow-hidden relative',
   cardBadgeRow: 'es-card-badge-row',
   cardImage: 'w-full h-full object-cover',
-  cardGradient: 'absolute inset-0 bg-gradient-to-t from-white/60 via-transparent to-transparent opacity-60',
+  cardGradient: 'absolute inset-0 es-card-gradient opacity-60',
   thumbStack: 'thumbStack kakaoStack',
   thumbBg: 'thumbBg',
   thumbChar: 'thumbChar',
@@ -725,6 +726,7 @@ const UI = {
   seriesFooter: document.getElementById('seriesFooterButton'),
   toggleIndicator: document.getElementById('toggleIndicator'),
   header: document.getElementById('mainHeader'),
+  homeButton: document.getElementById('homeButton'),
   profileButton: document.getElementById('profileButton'),
   profileButtonText: document.getElementById('profileButtonText'),
   profileMenu: document.getElementById('profileMenu'),
@@ -1296,6 +1298,8 @@ function showToast(message, { type = 'info', duration = 2200 } = {}) {
 
   const toast = document.createElement('div');
   setClasses(toast, UI_CLASSES.toastWrap);
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('aria-atomic', 'true');
 
   const inner = document.createElement('div');
   const toastTone =
@@ -2315,6 +2319,7 @@ async function initApp() {
   setupThemePreferenceListeners();
   setupAuthModalListeners();
   setupProfileButton();
+  setupHomeButton();
   updateProfileButtonState();
   setupAuthReturnListeners();
   setupSearchHandlers();
@@ -2481,6 +2486,7 @@ const getAspectByType = (type) => {
 };
 
 let searchViewportCleanup = null;
+let myPageViewportCleanup = null;
 
 const applySearchPageViewportHeight = () => {
   if (!UI.searchPage) return;
@@ -2517,6 +2523,46 @@ const stopSearchViewportSync = () => {
   if (UI.searchPage) {
     UI.searchPage.style.removeProperty('--vvh');
     UI.searchPage.style.removeProperty('height');
+  }
+};
+
+const applyMyPageViewportHeight = () => {
+  if (!UI.myPage) return;
+  const viewportHeight = window.visualViewport?.height;
+  if (viewportHeight) {
+    const unit = viewportHeight * 0.01;
+    UI.myPage.style.setProperty('--vvh', `${unit}px`);
+    UI.myPage.style.height = 'calc(var(--vvh, 1vh) * 100)';
+  } else {
+    UI.myPage.style.removeProperty('--vvh');
+    UI.myPage.style.height = '100dvh';
+  }
+};
+
+const startMyPageViewportSync = () => {
+  applyMyPageViewportHeight();
+  if (myPageViewportCleanup) myPageViewportCleanup();
+
+  if (!window.visualViewport) {
+    myPageViewportCleanup = null;
+    return;
+  }
+
+  const handler = () => applyMyPageViewportHeight();
+  window.visualViewport.addEventListener('resize', handler);
+  window.visualViewport.addEventListener('scroll', handler);
+  myPageViewportCleanup = () => {
+    window.visualViewport.removeEventListener('resize', handler);
+    window.visualViewport.removeEventListener('scroll', handler);
+  };
+};
+
+const stopMyPageViewportSync = () => {
+  if (myPageViewportCleanup) myPageViewportCleanup();
+  myPageViewportCleanup = null;
+  if (UI.myPage) {
+    UI.myPage.style.removeProperty('--vvh');
+    UI.myPage.style.removeProperty('height');
   }
 };
 
@@ -3486,6 +3532,7 @@ function openMyPage() {
   if (!wasOpen) {
     STATE.isMyPageOpen = true;
     lockBodyScroll();
+    startMyPageViewportSync();
     pushOverlayState('myPage');
   } else {
     STATE.isMyPageOpen = true;
@@ -3511,6 +3558,7 @@ function closeMyPage({ fromPopstate = false, overlayId = null } = {}) {
 
   STATE.isMyPageOpen = false;
   if (UI.myPage) UI.myPage.classList.add('hidden');
+  stopMyPageViewportSync();
   unlockBodyScroll();
   if (UI.profileButton) UI.profileButton.focus();
   else if (UI.myPageEntryButton) UI.myPageEntryButton.focus();
@@ -3670,8 +3718,8 @@ function updateProfileButtonState() {
 
   if (!isLoggedIn) {
     textEl.innerHTML = PROFILE_OUTLINE_ICON;
-    btn.setAttribute('title', 'Login');
-    btn.setAttribute('aria-label', 'Login');
+    btn.setAttribute('title', '로그인');
+    btn.setAttribute('aria-label', '로그인');
     closeProfileMenu();
     updateAdminEntryVisibility();
     return;
@@ -3694,7 +3742,7 @@ function updateProfileButtonState() {
   if (shouldShowImage) {
     const img = document.createElement('img');
     img.src = avatarUrl;
-    img.alt = displayName ? `${displayName} avatar` : 'User avatar';
+    img.alt = displayName ? `${displayName} 아바타` : '사용자 아바타';
     img.className = 'h-9 w-9 rounded-full object-cover';
     img.addEventListener('error', () => {
       if (STATE.auth.avatarImageFailed) return;
@@ -3710,6 +3758,17 @@ function updateProfileButtonState() {
   btn.setAttribute('title', displayName || '프로필');
   btn.setAttribute('aria-label', displayName ? `프로필 ${displayName}` : '프로필');
   updateAdminEntryVisibility();
+}
+
+function setupHomeButton() {
+  const btn = UI.homeButton;
+  if (!btn) return;
+
+  btn.onclick = (evt) => {
+    evt.preventDefault();
+    closeProfileMenu();
+    updateTab('home');
+  };
 }
 
 function setupProfileButton() {
@@ -3922,17 +3981,13 @@ function renderBottomNav() {
   if (!UI.bottomNav) return;
 
   UI.bottomNav.innerHTML = '';
-  const activeId = STATE.isMyPageOpen
-    ? 'me'
-    : STATE.activeTab === 'my'
-      ? 'me'
-      : STATE.activeTab || 'home';
+  const activeId = STATE.activeTab || 'home';
   const tabs = [
     { id: 'home', label: '홈', icon: ICONS.home },
     { id: 'webtoon', label: '웹툰', icon: ICONS.webtoon },
     { id: 'novel', label: '웹소설', icon: ICONS.novel },
     { id: 'ott', label: 'OTT', icon: ICONS.ott },
-    { id: 'me', label: '마이페이지', icon: ICONS.me },
+    { id: 'my', label: '내 구독', icon: ICONS.my },
   ];
 
   tabs.forEach((tab) => {
@@ -3943,7 +3998,8 @@ function renderBottomNav() {
     if (isActive) btn.classList.add('is-active');
     btn.setAttribute('data-tab-id', tab.id);
     btn.setAttribute('aria-label', tab.label);
-    btn.setAttribute('aria-current', isActive ? 'page' : 'false');
+    if (isActive) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
 
     const iconClass = isActive ? 'scale-105' : 'scale-100 opacity-90';
 
@@ -3954,11 +4010,6 @@ function renderBottomNav() {
       <span class="text-[10px] leading-[1.15] ${isActive ? 'font-semibold' : 'font-medium'}">${tab.label}</span>
     `;
     btn.onclick = () => {
-      if (tab.id === 'me') {
-        openMyPage();
-        renderBottomNav();
-        return;
-      }
       updateTab(tab.id);
     };
     UI.bottomNav.appendChild(btn);
@@ -3966,11 +4017,6 @@ function renderBottomNav() {
 }
 
 async function updateTab(tabId, { preserveScroll = true } = {}) {
-  if (tabId === 'me') {
-    openMyPage();
-    return;
-  }
-
   const prevTab = STATE.activeTab || 'home';
   const prevViewKey = getScrollViewKeyForTab(prevTab);
   const nextViewKey = getScrollViewKeyForTab(tabId);
@@ -4285,7 +4331,7 @@ const renderHomeSection = ({
   }
 
   const empty = document.createElement('div');
-  empty.className = 'rounded-2xl border border-slate-200 bg-white p-4 text-center';
+  empty.className = 'es-page-card rounded-2xl p-4 text-center';
 
   const emptyTitleEl = document.createElement('p');
   setClasses(emptyTitleEl, UI_CLASSES.emptyTitle);
@@ -4953,7 +4999,7 @@ function createCard(content, tabId, aspectClass) {
 
   el.setAttribute('role', 'button');
   el.setAttribute('tabindex', '0');
-  el.setAttribute('aria-label', `${content?.title || '콘텐츠'} — Open`);
+  el.setAttribute('aria-label', `${content?.title || '콘텐츠'} 열기`);
 
   const meta = normalizeMeta(content?.meta);
   const rawAuthors = meta?.common?.authors;
@@ -5184,8 +5230,7 @@ function openSubscribeModal(content, opts = {}) {
       anchor.href = url;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
-      anchor.className =
-        'inline-block text-[#1b64da] underline underline-offset-2 hover:text-[#1957c2] visited:text-[#1b64da] focus-visible:underline focus-visible:outline-none cursor-pointer pointer-events-auto';
+      anchor.className = 'es-link inline-block cursor-pointer pointer-events-auto';
       titleEl.appendChild(anchor);
     } else {
       titleEl.textContent = displayText;

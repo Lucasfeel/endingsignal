@@ -58,6 +58,12 @@
   --es-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --es-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
   --es-star-badge-bg: rgba(255, 255, 255, 0.95);
+  --es-afford-overlay-from: rgba(255, 255, 255, 0.35);
+  --es-afford-overlay-via: rgba(255, 255, 255, 0.05);
+  --es-afford-overlay-to: rgba(255, 255, 255, 0);
+  --es-card-gradient-from: rgba(255, 255, 255, 0.6);
+  --es-card-gradient-via: rgba(255, 255, 255, 0);
+  --es-card-gradient-to: rgba(255, 255, 255, 0);
   --es-kakao-thumb-grad-from: rgba(255, 255, 255, 0.55);
   --es-kakao-thumb-grad-to: rgba(255, 255, 255, 0);
 }
@@ -85,6 +91,12 @@
     --es-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
     --es-shadow-md: 0 18px 40px rgba(0, 0, 0, 0.55);
     --es-star-badge-bg: rgba(19, 35, 52, 0.92);
+    --es-afford-overlay-from: rgba(8, 14, 22, 0.4);
+    --es-afford-overlay-via: rgba(8, 14, 22, 0.12);
+    --es-afford-overlay-to: rgba(8, 14, 22, 0);
+    --es-card-gradient-from: rgba(8, 14, 22, 0.72);
+    --es-card-gradient-via: rgba(8, 14, 22, 0.08);
+    --es-card-gradient-to: rgba(8, 14, 22, 0);
     --es-kakao-thumb-grad-from: rgba(8, 14, 22, 0.72);
     --es-kakao-thumb-grad-to: rgba(8, 14, 22, 0);
   }
@@ -112,6 +124,12 @@
   --es-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --es-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
   --es-star-badge-bg: rgba(255, 255, 255, 0.95);
+  --es-afford-overlay-from: rgba(255, 255, 255, 0.35);
+  --es-afford-overlay-via: rgba(255, 255, 255, 0.05);
+  --es-afford-overlay-to: rgba(255, 255, 255, 0);
+  --es-card-gradient-from: rgba(255, 255, 255, 0.6);
+  --es-card-gradient-via: rgba(255, 255, 255, 0);
+  --es-card-gradient-to: rgba(255, 255, 255, 0);
   --es-kakao-thumb-grad-from: rgba(255, 255, 255, 0.55);
   --es-kakao-thumb-grad-to: rgba(255, 255, 255, 0);
 }
@@ -138,6 +156,12 @@
   --es-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
   --es-shadow-md: 0 18px 40px rgba(0, 0, 0, 0.55);
   --es-star-badge-bg: rgba(19, 35, 52, 0.92);
+  --es-afford-overlay-from: rgba(8, 14, 22, 0.4);
+  --es-afford-overlay-via: rgba(8, 14, 22, 0.12);
+  --es-afford-overlay-to: rgba(8, 14, 22, 0);
+  --es-card-gradient-from: rgba(8, 14, 22, 0.72);
+  --es-card-gradient-via: rgba(8, 14, 22, 0.08);
+  --es-card-gradient-to: rgba(8, 14, 22, 0);
   --es-kakao-thumb-grad-from: rgba(8, 14, 22, 0.72);
   --es-kakao-thumb-grad-to: rgba(8, 14, 22, 0);
 }
@@ -163,15 +187,6 @@ body {
 
 ::selection {
   background: var(--blue-100);
-}
-
-::-webkit-scrollbar {
-  display: none;
-}
-
-* {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
 }
 
 .hide-scrollbar {
@@ -404,7 +419,25 @@ body {
   color: var(--es-text-muted);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: clip;
+  text-overflow: ellipsis;
+}
+
+.es-afford-overlay {
+  background: linear-gradient(
+    to top,
+    var(--es-afford-overlay-from),
+    var(--es-afford-overlay-via),
+    var(--es-afford-overlay-to)
+  );
+}
+
+.es-card-gradient {
+  background: linear-gradient(
+    to top,
+    var(--es-card-gradient-from),
+    var(--es-card-gradient-via),
+    var(--es-card-gradient-to)
+  );
 }
 
 .es-star-badge {
@@ -439,6 +472,27 @@ body {
   border: 1px solid var(--es-border);
   background: var(--es-surface);
   color: var(--es-text-muted);
+}
+
+.es-link {
+  color: var(--es-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.16s ease;
+}
+
+.es-link:hover {
+  color: var(--es-primary-hover);
+}
+
+.es-link:visited {
+  color: var(--es-primary);
+}
+
+.es-link:focus-visible {
+  text-decoration: underline;
+  outline: 2px solid var(--es-primary);
+  outline-offset: 2px;
 }
 
 .es-page-overlay-root {
