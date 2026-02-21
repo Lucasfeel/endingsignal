@@ -14,6 +14,8 @@
 const DEBUG_API = false;
 const DEBUG_TOOLS = false;
 const DEBUG_RUNTIME = typeof window !== 'undefined' && Boolean(window.ES_DEBUG);
+const USE_BROWSE_PAGINATION_V2 = true;
+const PAGE_SIZE = 80;
 const THEME_STORAGE_KEY = 'es_theme';
 const DARK_MODE_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 
@@ -442,15 +444,38 @@ const getSelectedSourcesForTab = (tabId) => {
   return sanitizeSourcesArray(STATE.filters?.[tabId]?.sources, allowed);
 };
 
-const getSourceRequestConfig = (tabId) => {
+const getSourceRequestConfig = (tabId, { preferServerMulti = false } = {}) => {
   const selectedSources = getSelectedSourcesForTab(tabId);
   if (selectedSources.length === 1) {
-    return { querySource: toApiSourceId(selectedSources[0]) || 'all', filterSources: [] };
+    return {
+      querySource: toApiSourceId(selectedSources[0]) || 'all',
+      querySources: null,
+      filterSources: [],
+    };
   }
   if (selectedSources.length > 1) {
-    return { querySource: 'all', filterSources: selectedSources };
+    const apiSources = selectedSources.map((sourceId) => toApiSourceId(sourceId)).filter(Boolean);
+    if (preferServerMulti && apiSources.length) {
+      return {
+        querySource: 'all',
+        querySources: apiSources.join(','),
+        filterSources: [],
+      };
+    }
+    return { querySource: 'all', querySources: null, filterSources: selectedSources };
   }
-  return { querySource: 'all', filterSources: [] };
+  return { querySource: 'all', querySources: null, filterSources: [] };
+};
+
+const applySourceQuery = (query, sourceConfig) => {
+  const nextQuery = { ...(query || {}) };
+  if (sourceConfig?.querySources) {
+    nextQuery.sources = sourceConfig.querySources;
+    delete nextQuery.source;
+    return nextQuery;
+  }
+  nextQuery.source = sourceConfig?.querySource || 'all';
+  return nextQuery;
 };
 
 const filterItemsBySources = (items, sources) => {
@@ -823,6 +848,36 @@ const STATE = {
   subscriptionsNeedFreshHintAt: 0,
 
   pagination: {
+    ongoing: {
+      cursor: null,
+      legacyCursor: null,
+      done: false,
+      loading: false,
+      items: [],
+      totalLoaded: 0,
+      requestSeq: 0,
+      tabId: null,
+      source: 'all',
+      filterSources: [],
+      aspectClass: 'aspect-[3/4]',
+      endpointPath: '',
+      baseQuery: {},
+    },
+    novels: {
+      cursor: null,
+      legacyCursor: null,
+      done: false,
+      loading: false,
+      items: [],
+      totalLoaded: 0,
+      requestSeq: 0,
+      tabId: null,
+      source: 'all',
+      filterSources: [],
+      aspectClass: 'aspect-[3/4]',
+      endpointPath: '',
+      baseQuery: {},
+    },
     completed: {
       cursor: null,
       legacyCursor: null,
@@ -835,6 +890,8 @@ const STATE = {
       source: 'all',
       filterSources: [],
       aspectClass: 'aspect-[3/4]',
+      endpointPath: '',
+      baseQuery: {},
     },
     hiatus: {
       cursor: null,
@@ -848,6 +905,8 @@ const STATE = {
       source: 'all',
       filterSources: [],
       aspectClass: 'aspect-[3/4]',
+      endpointPath: '',
+      baseQuery: {},
     },
   },
   activePaginationCategory: null,
@@ -1492,7 +1551,10 @@ const contentKey = (c) => {
   return `${src}:${cid}`;
 };
 
-const resetPaginationState = (category, { tabId, source, filterSources, aspectClass, requestSeq }) => {
+const resetPaginationState = (
+  category,
+  { tabId, source, filterSources, aspectClass, requestSeq, endpointPath, baseQuery }
+) => {
   const target = STATE.pagination?.[category];
   if (!target) return;
 
@@ -1507,6 +1569,9 @@ const resetPaginationState = (category, { tabId, source, filterSources, aspectCl
   target.filterSources = Array.isArray(filterSources) ? filterSources : [];
   target.aspectClass = aspectClass;
   target.requestSeq = requestSeq;
+  target.endpointPath = typeof endpointPath === 'string' ? endpointPath : '';
+  target.baseQuery =
+    baseQuery && typeof baseQuery === 'object' && !Array.isArray(baseQuery) ? { ...baseQuery } : {};
 };
 
 const setActivePaginationCategory = (category) => {
@@ -4814,17 +4879,29 @@ async function loadNextPage(category, { signal } = {}) {
   updateLoadMoreUI(category);
   updateCountIndicator(category);
 
-  const perPage = 300;
-  const query = {
-    type: pg.tabId,
-    source: pg.source || 'all',
-    per_page: perPage,
-  };
+  const perPage = PAGE_SIZE;
+  const baseQuery =
+    pg.baseQuery && typeof pg.baseQuery === 'object' && !Array.isArray(pg.baseQuery)
+      ? { ...pg.baseQuery }
+      : {};
+  const query = { ...baseQuery, per_page: perPage };
+  const useLegacyDefaults = !pg.endpointPath;
+  if (useLegacyDefaults && !Object.prototype.hasOwnProperty.call(query, 'type') && pg.tabId) {
+    query.type = pg.tabId;
+  }
+  if (
+    useLegacyDefaults &&
+    !Object.prototype.hasOwnProperty.call(query, 'source') &&
+    !Object.prototype.hasOwnProperty.call(query, 'sources')
+  ) {
+    query.source = pg.source || 'all';
+  }
 
   if (pg.cursor !== null && pg.cursor !== undefined) query.cursor = pg.cursor;
   else if (pg.legacyCursor) query.last_title = pg.legacyCursor;
 
-  const url = buildUrl(`/api/contents/${category}`, query);
+  const endpointPath = pg.endpointPath || `/api/contents/${category}`;
+  const url = buildUrl(endpointPath, query);
 
   try {
     const json = await apiRequest('GET', url, { signal: effectiveSignal });
@@ -5109,15 +5186,44 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       let sourceFilter = [];
       let responsePayload = null;
 
-      if (tabId === 'webtoon' || tabId === 'ott') {
-        const { querySource, filterSources } = getSourceRequestConfig(tabId);
-        sourceFilter = filterSources;
-        const query = { type: tabId, source: querySource };
+      const runPaginatedBrowse = async ({ category, sourceConfig, endpointPath, baseQuery }) => {
+        resetPaginationState(category, {
+          tabId,
+          source: sourceConfig?.querySource || 'all',
+          filterSources: sourceConfig?.filterSources || [],
+          aspectClass,
+          requestSeq,
+          endpointPath,
+          baseQuery,
+        });
+        setActivePaginationCategory(category);
+        updateLoadMoreUI(category);
+        updateCountIndicator(category);
+        setupInfiniteObserver(category);
+        await loadNextPage(category, { signal });
+        if (isStale()) return { stale: true };
 
+        const pg = STATE.pagination?.[category];
+        if (pg && pg.items.length === 0 && pg.done) {
+          UI.contentGrid.innerHTML = '';
+          renderEmptyState(UI.contentGrid, {
+            title: '콘텐츠가 없습니다.',
+            message: '조건에 맞는 콘텐츠가 없습니다.',
+          });
+          setCountIndicatorText('');
+          hideLoadMoreUI();
+          disconnectInfiniteObserver();
+          return { itemCount: 0 };
+        }
+
+        return { itemCount: pg?.items?.length || 0 };
+      };
+
+      if (tabId === 'webtoon' || tabId === 'ott') {
         let statusKey = 'ongoing';
+        const webtoonDay = safeString(STATE.filters?.webtoon?.day || 'all', 'all').toLowerCase();
         if (tabId === 'webtoon') {
-          const day = STATE.filters?.[tabId]?.day || 'all';
-          statusKey = day === 'completed' || day === 'hiatus' ? day : 'ongoing';
+          statusKey = webtoonDay === 'completed' || webtoonDay === 'hiatus' ? webtoonDay : 'ongoing';
         } else if (tabId === 'ott') {
           const ottStatusRaw = safeString(
             STATE.filters?.ott?.status || STATE.filters?.ott?.day || 'ongoing',
@@ -5128,41 +5234,45 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
             : 'ongoing';
         }
 
-        if (statusKey === 'completed' || statusKey === 'hiatus') {
-          resetPaginationState(statusKey, {
-            tabId,
-            source: querySource,
-            filterSources,
-            aspectClass,
-            requestSeq,
+        const shouldUsePaginatedStatus = statusKey === 'completed' || statusKey === 'hiatus';
+        const shouldUsePaginatedOngoing = USE_BROWSE_PAGINATION_V2 && statusKey === 'ongoing';
+        const sourceConfig = getSourceRequestConfig(tabId, {
+          preferServerMulti: shouldUsePaginatedStatus || shouldUsePaginatedOngoing,
+        });
+        sourceFilter = sourceConfig.filterSources;
+
+        if (shouldUsePaginatedStatus) {
+          const pagedResult = await runPaginatedBrowse({
+            category: statusKey,
+            sourceConfig,
+            endpointPath: `/api/contents/${statusKey}`,
+            baseQuery: applySourceQuery({ type: tabId }, sourceConfig),
           });
-          setActivePaginationCategory(statusKey);
-          updateLoadMoreUI(statusKey);
-          updateCountIndicator(statusKey);
-          setupInfiniteObserver(statusKey);
-          await loadNextPage(statusKey, { signal });
-          if (isStale()) return { stale: true };
-          const pg = STATE.pagination?.[statusKey];
-          if (pg && pg.items.length === 0 && pg.done) {
-            UI.contentGrid.innerHTML = '';
-            renderEmptyState(UI.contentGrid, {
-              title: '콘텐츠가 없습니다.',
-              message: '조건에 맞는 콘텐츠가 없습니다.',
-            });
-            setCountIndicatorText('');
-            hideLoadMoreUI();
-            disconnectInfiniteObserver();
-            return { itemCount: 0, aspectClass };
-          }
-          return { itemCount: STATE.pagination?.[statusKey]?.items?.length || 0, aspectClass };
+          if (pagedResult?.stale) return { stale: true };
+          return { itemCount: pagedResult?.itemCount || 0, aspectClass };
         }
 
+        if (shouldUsePaginatedOngoing) {
+          const ongoingBaseQuery =
+            tabId === 'webtoon' ? { type: 'webtoon', day: webtoonDay } : { type: 'ott' };
+          const pagedResult = await runPaginatedBrowse({
+            category: 'ongoing',
+            sourceConfig,
+            endpointPath: '/api/contents/ongoing_v2',
+            baseQuery: applySourceQuery(ongoingBaseQuery, sourceConfig),
+          });
+          if (pagedResult?.stale) return { stale: true };
+          return { itemCount: pagedResult?.itemCount || 0, aspectClass };
+        }
+
+        const query = applySourceQuery({ type: tabId }, sourceConfig);
         url = buildUrl('/api/contents/ongoing', query);
       } else if (tabId === 'novel') {
-        const { querySource, filterSources } = getSourceRequestConfig(tabId);
-        sourceFilter = filterSources;
+        const sourceConfig = getSourceRequestConfig(tabId, {
+          preferServerMulti: USE_BROWSE_PAGINATION_V2,
+        });
+        sourceFilter = sourceConfig.filterSources;
         const query = {
-          source: querySource,
           genre_group: sanitizeNovelGenreGroup(
             STATE.filters?.novel?.genreGroup,
             DEFAULT_NOVEL_GENRE_GROUP,
@@ -5171,7 +5281,19 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         if (coerceBooleanFilter(STATE.filters?.novel?.isCompleted, DEFAULT_NOVEL_IS_COMPLETED)) {
           query.is_completed = 'true';
         }
-        url = buildUrl('/api/contents/novels', query);
+
+        if (USE_BROWSE_PAGINATION_V2) {
+          const pagedResult = await runPaginatedBrowse({
+            category: 'novels',
+            sourceConfig,
+            endpointPath: '/api/contents/novels_v2',
+            baseQuery: applySourceQuery(query, sourceConfig),
+          });
+          if (pagedResult?.stale) return { stale: true };
+          return { itemCount: pagedResult?.itemCount || 0, aspectClass };
+        }
+
+        url = buildUrl('/api/contents/novels', applySourceQuery(query, sourceConfig));
       }
 
       if (url) {

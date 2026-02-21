@@ -670,6 +670,29 @@ def setup_database_standalone():
             """
         )
 
+        print("LOG: [DB Setup] Creating active browse list indexes...")
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contents_active_type_status_title_source_id
+            ON contents (content_type, status, title, source, content_id)
+            WHERE COALESCE(is_deleted, FALSE) = FALSE;
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contents_active_type_title_source_id
+            ON contents (content_type, title, source, content_id)
+            WHERE COALESCE(is_deleted, FALSE) = FALSE;
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contents_weekdays_gin
+            ON contents
+            USING gin ((meta->'attributes'->'weekdays'));
+            """
+        )
+
         print("LOG: [DB Setup] Backfilling normalized search fields (idempotent)...")
         cursor.execute(
             """

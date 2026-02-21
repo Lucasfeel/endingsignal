@@ -14,6 +14,8 @@ contents_bp = Blueprint('contents', __name__)
 STATUS_ONGOING = "\uC5F0\uC7AC\uC911"
 STATUS_HIATUS = "\uD734\uC7AC"
 STATUS_COMPLETED = "\uC644\uACB0"
+ALLOWED_CONTENT_TYPES = {"webtoon", "novel", "ott", "series"}
+ALLOWED_BROWSE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun", "daily", "all"}
 
 
 def _normalize_genre_token(value):
@@ -255,9 +257,13 @@ def coerce_row_dict(row):
         return {}
 
 
-def encode_cursor(title, content_id):
+def encode_cursor(title, content_id, source=None):
     try:
-        payload = {"t": title or '', "id": content_id or ''}
+        payload = {
+            "t": "" if title is None else title,
+            "s": source,
+            "id": "" if content_id is None else content_id,
+        }
         raw = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         return base64.urlsafe_b64encode(raw).decode('utf-8').rstrip('=')
     except Exception:
@@ -266,16 +272,86 @@ def encode_cursor(title, content_id):
 
 def decode_cursor(cursor):
     if not cursor:
-        return None, None
+        return None, None, None
     try:
         padded = cursor + '=' * (-len(cursor) % 4)
         decoded = base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8')
         payload = json.loads(decoded)
         if not isinstance(payload, dict):
-            return None, None
-        return payload.get('t'), payload.get('id')
+            return None, None, None
+        title = payload.get("t")
+        content_id = payload.get("id")
+        source = payload.get("s") if "s" in payload else None
+        return title, source, content_id
     except Exception:
-        return None, None
+        return None, None, None
+
+
+def _parse_per_page_arg(raw_value, *, default=80, min_value=1, max_value=200):
+    try:
+        parsed = int(raw_value) if raw_value is not None else default
+    except (TypeError, ValueError):
+        parsed = default
+    return max(min_value, min(parsed, max_value))
+
+
+def _parse_sources_args():
+    raw_sources = request.args.get("sources")
+    if raw_sources is not None:
+        seen = set()
+        parsed_sources = []
+        for entry in str(raw_sources).split(","):
+            source_id = entry.strip()
+            if not source_id or source_id in seen:
+                continue
+            seen.add(source_id)
+            parsed_sources.append(source_id)
+        if parsed_sources:
+            return {
+                "mode": "multi",
+                "source": "all",
+                "sources": parsed_sources,
+            }
+
+    source = request.args.get("source", "all")
+    safe_source = str(source).strip() if source is not None else "all"
+    if safe_source and safe_source != "all":
+        return {
+            "mode": "single",
+            "source": safe_source,
+            "sources": [safe_source],
+        }
+
+    return {
+        "mode": "all",
+        "source": "all",
+        "sources": [],
+    }
+
+
+def _append_source_filter(where_parts, params, source_filter):
+    mode = source_filter.get("mode")
+    sources = source_filter.get("sources") or []
+    if mode == "multi" and sources:
+        placeholders = ", ".join(["%s"] * len(sources))
+        where_parts.append(f"source IN ({placeholders})")
+        params.extend(sources)
+        return
+    if mode == "single" and sources:
+        where_parts.append("source = %s")
+        params.append(sources[0])
+
+
+def _append_cursor_filter(where_parts, params, cursor_title, cursor_source, cursor_content_id):
+    if cursor_title is None or cursor_content_id is None:
+        return False
+    if cursor_source is not None:
+        where_parts.append("(title, source, content_id) > (%s, %s, %s)")
+        params.extend([cursor_title, cursor_source, cursor_content_id])
+    else:
+        where_parts.append("(title, content_id) > (%s, %s)")
+        params.extend([cursor_title, cursor_content_id])
+    return True
 
 
 def _parse_float_env(name):
@@ -464,7 +540,7 @@ def get_recommendations():
 
         merged_rows = []
         content_types = ('webtoon', 'novel', 'ott')
-        statuses = ('연재중', '휴재')
+        statuses = (STATUS_ONGOING, STATUS_HIATUS)
 
         query = """
             SELECT content_id, title, status, meta, source, content_type, updated_at
@@ -608,9 +684,9 @@ def get_ongoing_contents():
             "SELECT content_id, title, status, meta, source "
             "FROM contents "
             "WHERE content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE "
-            "AND (status = '연재중' OR status = '휴재')"
+            "AND status IN (%s, %s)"
         )
-        params = [content_type]
+        params = [content_type, STATUS_ONGOING, STATUS_HIATUS]
 
         if source != 'all':
             base_query += " AND source = %s"
@@ -667,6 +743,276 @@ def get_ongoing_contents():
             pass
 
 
+@contents_bp.route('/api/contents/ongoing_v2', methods=['GET'])
+def get_ongoing_contents_v2():
+    """Flat paginated ongoing/hiatus browse endpoint."""
+    cursor = None
+    try:
+        raw_type = request.args.get("type", "webtoon")
+        content_type = str(raw_type).strip().lower() if raw_type is not None else "webtoon"
+        if content_type not in ALLOWED_CONTENT_TYPES:
+            content_type = "webtoon"
+
+        raw_day = request.args.get("day", "all")
+        day = str(raw_day).strip().lower() if raw_day is not None else "all"
+        if day not in ALLOWED_BROWSE_DAYS:
+            day = "all"
+
+        source_filter = _parse_sources_args()
+        raw_cursor = request.args.get("cursor")
+        cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
+        per_page = _parse_per_page_arg(
+            request.args.get("per_page"),
+            default=80,
+            min_value=1,
+            max_value=200,
+        )
+
+        conn = get_db()
+        cursor = get_cursor(conn)
+
+        where_parts = [
+            "content_type = %s",
+            "COALESCE(is_deleted, FALSE) = FALSE",
+            "status IN (%s, %s)",
+        ]
+        query_params = [content_type, STATUS_ONGOING, STATUS_HIATUS]
+
+        _append_source_filter(where_parts, query_params, source_filter)
+        _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
+
+        if content_type in {"webtoon", "novel"} and day != "all":
+            where_parts.append("(meta->'attributes'->'weekdays') ? %s")
+            query_params.append(day)
+
+        cursor.execute(
+            f"""
+            SELECT content_id, title, status, meta, source, content_type
+            FROM contents
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY title ASC, source ASC, content_id ASC
+            LIMIT %s
+            """,
+            (*query_params, per_page),
+        )
+        raw_rows = cursor.fetchall()
+
+        results = []
+        for row in raw_rows:
+            coerced = coerce_row_dict(row)
+            coerced["meta"] = normalize_meta(coerced.get("meta"))
+            results.append(coerced)
+
+        last_row = results[-1] if results else None
+        next_cursor = None
+        if len(results) == per_page and last_row:
+            next_cursor = encode_cursor(
+                last_row.get("title"),
+                last_row.get("content_id"),
+                source=last_row.get("source"),
+            )
+
+        response_payload = {
+            "contents": results,
+            "next_cursor": next_cursor,
+            "page_size": per_page,
+            "returned": len(results),
+            "filters": {
+                "type": content_type,
+                "day": day,
+            },
+        }
+
+        current_app.logger.info(
+            "[contents.ongoing_v2] type=%s day=%s source_mode=%s per_page=%s cursor=%s returned=%s next_cursor=%s",
+            content_type,
+            day,
+            source_filter.get("mode"),
+            per_page,
+            bool(raw_cursor),
+            len(results),
+            bool(next_cursor),
+        )
+
+        return jsonify(response_payload)
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_ongoing_contents_v2")
+        return jsonify({
+            "success": False,
+            "error": {"code": "INTERNAL", "message": "Internal Server Error"}
+        }), 500
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
+@contents_bp.route('/api/contents/novels_v2', methods=['GET'])
+def get_novel_contents_v2():
+    """Paginated novel list endpoint with genre-group and completion filters."""
+    cursor = None
+    try:
+        source_filter = _parse_sources_args()
+
+        raw_genre_group = request.args.get("genre_group")
+        if raw_genre_group is None:
+            raw_genre_group = request.args.get("genreGroup")
+        genre_group = _resolve_genre_group(raw_genre_group)
+
+        raw_is_completed = request.args.get("is_completed")
+        if raw_is_completed is None:
+            raw_is_completed = request.args.get("isCompleted")
+        is_completed = _parse_bool_arg(raw_is_completed, default=False)
+
+        raw_cursor = request.args.get("cursor")
+        cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
+        per_page = _parse_per_page_arg(
+            request.args.get("per_page"),
+            default=80,
+            min_value=1,
+            max_value=200,
+        )
+
+        conn = get_db()
+        cursor = get_cursor(conn)
+
+        def _build_base_query(limit_value, scan_title, scan_source, scan_content_id):
+            where_parts = [
+                "content_type = %s",
+                "COALESCE(is_deleted, FALSE) = FALSE",
+            ]
+            query_params = ["novel"]
+
+            if is_completed:
+                where_parts.append("status = %s")
+                query_params.append(STATUS_COMPLETED)
+
+            _append_source_filter(where_parts, query_params, source_filter)
+            _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
+
+            return f"""
+                SELECT content_id, title, status, meta, source, content_type
+                FROM contents
+                WHERE {' AND '.join(where_parts)}
+                ORDER BY title ASC, source ASC, content_id ASC
+                LIMIT %s
+            """, (*query_params, limit_value)
+
+        results = []
+        next_cursor = None
+
+        if genre_group == "ALL":
+            query, params = _build_base_query(
+                per_page,
+                cursor_title,
+                cursor_source,
+                cursor_content_id,
+            )
+            cursor.execute(query, params)
+            raw_rows = cursor.fetchall()
+
+            for row in raw_rows:
+                coerced = coerce_row_dict(row)
+                coerced["meta"] = normalize_meta(coerced.get("meta"))
+                results.append(coerced)
+
+            if len(results) == per_page and results:
+                last_row = results[-1]
+                next_cursor = encode_cursor(
+                    last_row.get("title"),
+                    last_row.get("content_id"),
+                    source=last_row.get("source"),
+                )
+        else:
+            chunk_size = min(per_page * 4, 500)
+            scan_title = cursor_title
+            scan_source = cursor_source
+            scan_content_id = cursor_content_id
+            has_more_rows = False
+            last_scanned_row = None
+
+            while len(results) < per_page:
+                query, params = _build_base_query(
+                    chunk_size,
+                    scan_title,
+                    scan_source,
+                    scan_content_id,
+                )
+                cursor.execute(query, params)
+                raw_rows = cursor.fetchall()
+                if not raw_rows:
+                    has_more_rows = False
+                    break
+
+                normalized_rows = []
+                for row in raw_rows:
+                    coerced = coerce_row_dict(row)
+                    coerced["meta"] = normalize_meta(coerced.get("meta"))
+                    normalized_rows.append(coerced)
+
+                last_scanned_row = normalized_rows[-1]
+                scan_title = last_scanned_row.get("title")
+                scan_source = last_scanned_row.get("source")
+                scan_content_id = last_scanned_row.get("content_id")
+
+                matched_rows = _filter_novel_rows_by_genre_group(normalized_rows, genre_group)
+                if matched_rows:
+                    remaining = per_page - len(results)
+                    results.extend(matched_rows[:remaining])
+
+                has_more_rows = len(raw_rows) == chunk_size
+                if len(results) >= per_page:
+                    break
+                if len(raw_rows) < chunk_size:
+                    has_more_rows = False
+                    break
+
+            if has_more_rows and last_scanned_row:
+                next_cursor = encode_cursor(
+                    last_scanned_row.get("title"),
+                    last_scanned_row.get("content_id"),
+                    source=last_scanned_row.get("source"),
+                )
+
+        response_payload = {
+            "contents": results,
+            "next_cursor": next_cursor,
+            "page_size": per_page,
+            "returned": len(results),
+            "filters": {
+                "genre_group": genre_group,
+                "is_completed": is_completed,
+            },
+        }
+
+        current_app.logger.info(
+            "[contents.novels_v2] source_mode=%s genre_group=%s is_completed=%s per_page=%s cursor=%s returned=%s next_cursor=%s",
+            source_filter.get("mode"),
+            genre_group,
+            is_completed,
+            per_page,
+            bool(raw_cursor),
+            len(results),
+            bool(next_cursor),
+        )
+
+        return jsonify(response_payload)
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_novel_contents_v2")
+        return jsonify({
+            "success": False,
+            "error": {"code": "INTERNAL", "message": "Internal Server Error"}
+        }), 500
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
 @contents_bp.route('/api/contents/hiatus', methods=['GET'])
 def get_hiatus_contents():
     """[페이지네이션] 휴재중인 콘텐츠 전체 목록을 페이지별로 반환합니다."""
@@ -675,7 +1021,7 @@ def get_hiatus_contents():
         raw_cursor = request.args.get('cursor')
         last_title = request.args.get('last_title')
         content_type = request.args.get('type', 'webtoon')
-        source = request.args.get('source', 'all')
+        source_filter = _parse_sources_args()
 
         try:
             per_page = int(request.args.get('per_page', 300))
@@ -684,31 +1030,29 @@ def get_hiatus_contents():
 
         per_page = max(1, min(per_page, 500))
 
-        cursor_title, cursor_content_id = decode_cursor(raw_cursor)
+        cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
 
         conn = get_db()
         cursor = get_cursor(conn)
 
-        query_params = [content_type]
-        where_clause = "WHERE status = '휴재' AND content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE"
+        query_params = [STATUS_HIATUS, content_type]
+        where_parts = [
+            "status = %s",
+            "content_type = %s",
+            "COALESCE(is_deleted, FALSE) = FALSE",
+        ]
 
-        if source != 'all':
-            where_clause += " AND source = %s"
-            query_params.append(source)
-
-        if cursor_title is not None and cursor_content_id is not None:
-            where_clause += " AND (title, content_id) > (%s, %s)"
-            query_params.extend([cursor_title, cursor_content_id])
-        elif last_title:
-            where_clause += " AND title > %s"
+        _append_source_filter(where_parts, query_params, source_filter)
+        if not _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id) and last_title:
+            where_parts.append("title > %s")
             query_params.append(last_title)
 
         cursor.execute(
             f"""
             SELECT content_id, title, status, meta, source
             FROM contents
-            {where_clause}
-            ORDER BY title ASC, content_id ASC
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY title ASC, source ASC, content_id ASC
             LIMIT %s
             """,
             (*query_params, per_page),
@@ -725,7 +1069,11 @@ def get_hiatus_contents():
         last_row = results[-1] if results else None
         next_cursor = None
         if len(results) == per_page and last_row:
-            next_cursor = encode_cursor(last_row.get('title'), last_row.get('content_id'))
+            next_cursor = encode_cursor(
+                last_row.get('title'),
+                last_row.get('content_id'),
+                source=last_row.get('source'),
+            )
 
         response_payload = {
             'contents': results,
@@ -737,9 +1085,9 @@ def get_hiatus_contents():
         }
 
         current_app.logger.info(
-            "[contents.hiatus] type=%s source=%s per_page=%s cursor=%s last_title=%s returned=%s next_cursor=%s",
+            "[contents.hiatus] type=%s source_mode=%s per_page=%s cursor=%s last_title=%s returned=%s next_cursor=%s",
             content_type,
-            source,
+            source_filter.get("mode"),
             per_page,
             bool(raw_cursor),
             bool(last_title),
@@ -771,7 +1119,7 @@ def get_completed_contents():
         raw_cursor = request.args.get('cursor')
         last_title = request.args.get('last_title')
         content_type = request.args.get('type', 'webtoon')
-        source = request.args.get('source', 'all')
+        source_filter = _parse_sources_args()
 
         try:
             per_page = int(request.args.get('per_page', 300))
@@ -780,31 +1128,29 @@ def get_completed_contents():
 
         per_page = max(1, min(per_page, 500))
 
-        cursor_title, cursor_content_id = decode_cursor(raw_cursor)
+        cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
 
         conn = get_db()
         cursor = get_cursor(conn)
 
-        query_params = [content_type]
-        where_clause = "WHERE status = '완결' AND content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE"
+        query_params = [STATUS_COMPLETED, content_type]
+        where_parts = [
+            "status = %s",
+            "content_type = %s",
+            "COALESCE(is_deleted, FALSE) = FALSE",
+        ]
 
-        if source != 'all':
-            where_clause += " AND source = %s"
-            query_params.append(source)
-
-        if cursor_title is not None and cursor_content_id is not None:
-            where_clause += " AND (title, content_id) > (%s, %s)"
-            query_params.extend([cursor_title, cursor_content_id])
-        elif last_title:
-            where_clause += " AND title > %s"
+        _append_source_filter(where_parts, query_params, source_filter)
+        if not _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id) and last_title:
+            where_parts.append("title > %s")
             query_params.append(last_title)
 
         cursor.execute(
             f"""
             SELECT content_id, title, status, meta, source
             FROM contents
-            {where_clause}
-            ORDER BY title ASC, content_id ASC
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY title ASC, source ASC, content_id ASC
             LIMIT %s
             """,
             (*query_params, per_page),
@@ -821,7 +1167,11 @@ def get_completed_contents():
         last_row = results[-1] if results else None
         next_cursor = None
         if len(results) == per_page and last_row:
-            next_cursor = encode_cursor(last_row.get('title'), last_row.get('content_id'))
+            next_cursor = encode_cursor(
+                last_row.get('title'),
+                last_row.get('content_id'),
+                source=last_row.get('source'),
+            )
 
         response_payload = {
             'contents': results,
@@ -833,9 +1183,9 @@ def get_completed_contents():
         }
 
         current_app.logger.info(
-            "[contents.completed] type=%s source=%s per_page=%s cursor=%s last_title=%s returned=%s next_cursor=%s",
+            "[contents.completed] type=%s source_mode=%s per_page=%s cursor=%s last_title=%s returned=%s next_cursor=%s",
             content_type,
-            source,
+            source_filter.get("mode"),
             per_page,
             bool(raw_cursor),
             bool(last_title),
