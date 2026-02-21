@@ -237,7 +237,6 @@ const SOURCE_OPTIONS = {
     { id: 'naver_series', label: 'Naver' },
     { id: 'kakao_page', label: 'KakaoPage' },
     { id: 'ridi', label: 'RIDI' },
-    { id: 'munpia', label: 'Munpia' },
   ],
   ott: [
     { id: 'netflix', label: 'Netflix' },
@@ -4336,6 +4335,7 @@ function renderL1Filters(tabId) {
 
   items.forEach((item) => {
     const sourceId = normalizeSourceId(item.id);
+    const keepCurrentLogoFit = sourceId === 'tving' || sourceId === 'laftel';
     const el = document.createElement('div');
     const isActive = selectedSet.has(sourceId);
     const brightnessClass =
@@ -4352,6 +4352,8 @@ function renderL1Filters(tabId) {
     else el.style.removeProperty('--chip-border');
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
+    el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '40px');
+    el.style.setProperty('--logo-fit', keepCurrentLogoFit ? 'contain' : 'cover');
 
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');

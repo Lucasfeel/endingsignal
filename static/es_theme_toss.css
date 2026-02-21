@@ -666,8 +666,8 @@ body.es-main-page {
 }
 
 .l1-logo .l1-icon {
-  width: 30px;
-  height: 30px;
+  width: var(--logo-size, 40px);
+  height: var(--logo-size, 40px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -690,7 +690,7 @@ body.es-main-page {
 .es-source-logo-img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: var(--logo-fit, cover);
   display: block;
 }
 
