@@ -245,7 +245,6 @@ const SOURCE_OPTIONS = {
     { id: 'coupangplay', label: 'Coupang Play' },
     { id: 'disney_plus', label: 'Disney+' },
     { id: 'laftel', label: 'Laftel' },
-    { id: 'watcha', label: 'WATCHA' },
   ],
 };
 
@@ -316,6 +315,7 @@ const SOURCE_BRAND_META = {
 
 const SOURCE_LOGO_ASSETS = {
   naver_webtoon: '/static/source_logos/naver_webtoon.png',
+  kakaowebtoon: '/static/source_logos/kakaowebtoon.jpg',
   naver_series: '/static/source_logos/naver_series.png',
   kakao_page: '/static/source_logos/kakao_page.jpeg',
   ridi: '/static/source_logos/ridi.jpeg',
@@ -4352,9 +4352,8 @@ function renderL1Filters(tabId) {
     else el.style.removeProperty('--chip-border');
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
-    el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '42px');
+    el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '40px');
     el.style.setProperty('--logo-fit', keepCurrentLogoFit ? 'contain' : 'cover');
-    el.style.setProperty('--logo-scale', keepCurrentLogoFit ? '1' : '1.12');
 
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
