@@ -1245,12 +1245,19 @@ let contentGridObserver = null;
 const modalStack = [];
 const modalMeta = new Map();
 let bodyOverflowBackup = '';
+let htmlOverflowBackup = '';
 let scrollLockCount = 0;
+const restoreScrollOverflowStyles = () => {
+  document.body.style.overflow = bodyOverflowBackup || '';
+  document.documentElement.style.overflow = htmlOverflowBackup || '';
+};
 
 const lockBodyScroll = () => {
   if (scrollLockCount === 0) {
     bodyOverflowBackup = document.body.style.overflow;
+    htmlOverflowBackup = document.documentElement.style.overflow;
     document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
   }
   scrollLockCount += 1;
 };
@@ -1258,7 +1265,7 @@ const lockBodyScroll = () => {
 const unlockBodyScroll = () => {
   scrollLockCount = Math.max(0, scrollLockCount - 1);
   if (scrollLockCount === 0) {
-    document.body.style.overflow = bodyOverflowBackup || '';
+    restoreScrollOverflowStyles();
   }
 };
 
@@ -1267,9 +1274,14 @@ const getTopModal = () => modalStack[modalStack.length - 1] || null;
 const ensureScrollLockConsistency = () => {
   const shouldLock =
     isAnyModalOpen() || Boolean(STATE.search?.pageOpen) || Boolean(STATE.isMyPageOpen);
-  if (!shouldLock && scrollLockCount > 0) {
-    scrollLockCount = 0;
-    document.body.style.overflow = bodyOverflowBackup || '';
+  if (!shouldLock) {
+    if (scrollLockCount > 0) scrollLockCount = 0;
+    if (
+      document.body.style.overflow === 'hidden' ||
+      document.documentElement.style.overflow === 'hidden'
+    ) {
+      restoreScrollOverflowStyles();
+    }
   }
 };
 
@@ -5647,6 +5659,7 @@ function performCloseSubscribeModal() {
   STATE.currentModalContent = null;
   STATE.subscribeModalOpen = false;
   restoreScroll(getCurrentScrollViewKey(), { container: UI.contentGrid, requireChildren: true });
+  ensureScrollLockConsistency();
 }
 
 function closeSubscribeModal({ fromPopstate = false, overlayId = null, skipHistory = false } = {}) {
