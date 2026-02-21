@@ -654,20 +654,19 @@ body.es-main-page {
   width: 42px;
   height: 42px;
   border-radius: 999px;
-  border: 1px solid var(--chip-border, var(--es-border)) !important;
-  background: var(--chip-bg, var(--es-surface));
-  color: var(--chip-fg, var(--es-text-muted));
+  border: 1px solid var(--es-border) !important;
+  background: var(--es-surface);
+  color: var(--es-text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 0 transparent;
   transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease,
-    box-shadow 0.16s ease, opacity 0.16s ease;
+    opacity 0.16s ease;
 }
 
 .l1-logo .l1-icon {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -676,36 +675,9 @@ body.es-main-page {
 }
 
 .l1-logo.active {
-  box-shadow: 0 0 0 2px var(--es-primary);
-}
-
-.es-source-logo-wrap {
-  width: 100%;
-  height: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.es-source-logo-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-.es-source-logo-fallback {
-  width: 100%;
-  height: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.es-source-logo-fallback > svg {
-  width: 100%;
-  height: 100%;
-  display: block;
+  border-color: var(--blue-200) !important;
+  background: var(--blue-50);
+  color: var(--blue-700);
 }
 
 .l1-logo.inactive,
