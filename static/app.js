@@ -925,15 +925,38 @@ const requestCloseOverlay = (overlay) => {
 };
 
 const handleOverlayPopstate = (event) => {
-  const st = event.state;
-  if (!st?.overlay) {
+  const targetOverlay = event?.state?.overlay || null;
+  const targetId = event?.state?.id || null;
+  const maxSteps = 20;
+  let safety = 0;
+
+  // Reconcile from the current stack top so browser back always unwinds overlays in LIFO order.
+  while (safety < maxSteps) {
     const top = getOverlayStackTop();
-    if (top?.overlay) {
-      closeOverlayByType(top.overlay, { fromPopstate: true, overlayId: top.id });
+    if (!top) break;
+
+    if (targetOverlay) {
+      const reachedTarget =
+        top.overlay === targetOverlay && (!targetId || top.id === targetId);
+      if (reachedTarget) break;
     }
-    return;
+
+    const closed = closeOverlayByType(top.overlay, { fromPopstate: true, overlayId: top.id });
+    if (!closed) {
+      popOverlayState(top.overlay, top.id);
+    }
+    safety += 1;
   }
-  closeOverlayByType(st.overlay, { fromPopstate: true, overlayId: st.id });
+
+  if (safety === maxSteps) {
+    console.warn('Overlay popstate reconciliation reached safety limit', {
+      targetOverlay,
+      targetId,
+      stackDepth: STATE.overlayStack.length,
+    });
+  }
+
+  ensureScrollLockConsistency();
 };
 
 function runDevSelfCheck() {
@@ -1241,6 +1264,14 @@ const unlockBodyScroll = () => {
 
 const isAnyModalOpen = () => modalStack.length > 0;
 const getTopModal = () => modalStack[modalStack.length - 1] || null;
+const ensureScrollLockConsistency = () => {
+  const shouldLock =
+    isAnyModalOpen() || Boolean(STATE.search?.pageOpen) || Boolean(STATE.isMyPageOpen);
+  if (!shouldLock && scrollLockCount > 0) {
+    scrollLockCount = 0;
+    document.body.style.overflow = bodyOverflowBackup || '';
+  }
+};
 
 const getFocusableElements = (modalEl) => {
   if (!modalEl) return [];
@@ -1272,7 +1303,8 @@ const setupModalRoot = (modalEl) => {
     const isOverlayClick =
       evt.target === modalEl || evt.target?.dataset?.modalOverlay === 'true';
     if (isOverlayClick && getTopModal() === modalEl) {
-      closeModal(modalEl);
+      if (modalEl.id === 'subscribeModal') requestCloseOverlay('modal');
+      else closeModal(modalEl);
     }
   });
 };
@@ -1332,6 +1364,7 @@ function closeModal(modalEl) {
   }
 
   unlockBodyScroll();
+  ensureScrollLockConsistency();
 
   const hadReturnEl = Boolean(meta.returnFocusEl);
   const focusTarget =
@@ -1409,6 +1442,10 @@ document.addEventListener(
 
     if (evt.key === 'Escape') {
       evt.preventDefault();
+      if (topModal.id === 'subscribeModal') {
+        requestCloseOverlay('modal');
+        return;
+      }
       closeModal(topModal);
       return;
     }
@@ -3486,7 +3523,11 @@ function openSearchPage({ focus = true } = {}) {
 }
 
 function closeSearchPage({ fromPopstate = false, overlayId = null } = {}) {
-  if (!STATE.search.pageOpen) return;
+  if (!STATE.search.pageOpen) {
+    popOverlayState('search', overlayId);
+    ensureScrollLockConsistency();
+    return;
+  }
   if (!fromPopstate) {
     const top = getOverlayStackTop();
     if (top?.overlay === 'search') {
@@ -3509,6 +3550,7 @@ function closeSearchPage({ fromPopstate = false, overlayId = null } = {}) {
     requireChildren: true,
   });
   popOverlayState('search', overlayId);
+  ensureScrollLockConsistency();
 }
 
 function openSearchAndFocus() {
@@ -3798,7 +3840,11 @@ function openMyPage() {
 }
 
 function closeMyPage({ fromPopstate = false, overlayId = null } = {}) {
-  if (!STATE.isMyPageOpen) return;
+  if (!STATE.isMyPageOpen) {
+    popOverlayState('myPage', overlayId);
+    ensureScrollLockConsistency();
+    return;
+  }
 
   if (!fromPopstate) {
     const top = getOverlayStackTop();
@@ -3815,6 +3861,7 @@ function closeMyPage({ fromPopstate = false, overlayId = null } = {}) {
   if (UI.profileButton) UI.profileButton.focus();
   else if (UI.myPageEntryButton) UI.myPageEntryButton.focus();
   popOverlayState('myPage', overlayId);
+  ensureScrollLockConsistency();
   renderBottomNav();
 }
 
@@ -5603,7 +5650,11 @@ function performCloseSubscribeModal() {
 }
 
 function closeSubscribeModal({ fromPopstate = false, overlayId = null, skipHistory = false } = {}) {
-  if (!STATE.subscribeModalOpen && !STATE.currentModalContent) return;
+  if (!STATE.subscribeModalOpen && !STATE.currentModalContent) {
+    popOverlayState('modal', overlayId);
+    ensureScrollLockConsistency();
+    return;
+  }
 
   if (!fromPopstate && !skipHistory) {
     const top = getOverlayStackTop();
@@ -5615,6 +5666,7 @@ function closeSubscribeModal({ fromPopstate = false, overlayId = null, skipHisto
 
   performCloseSubscribeModal();
   popOverlayState('modal', overlayId);
+  ensureScrollLockConsistency();
 }
 
 window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
