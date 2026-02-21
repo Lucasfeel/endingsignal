@@ -99,21 +99,22 @@ class ContentCrawler(ABC):
         - 성공 시 run_daily_check에서 1회 commit
         - 실패 시 rollback
         """
-        cursor = None
+        read_cursor = None
+        write_cursor = None
         try:
-            cursor = get_cursor(conn)
+            read_cursor = get_cursor(conn)
 
             # 1) Load previous crawler status snapshot (raw)
-            cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
-            db_status_map = {str(row["content_id"]): row["status"] for row in cursor.fetchall()}
+            read_cursor.execute("SELECT content_id, status FROM contents WHERE source = %s", (self.source_name,))
+            db_status_map = {str(row["content_id"]): row["status"] for row in read_cursor.fetchall()}
 
             # 2) Load overrides (overlay)
-            cursor.execute(
+            read_cursor.execute(
                 "SELECT content_id, override_status, override_completed_at "
                 "FROM admin_content_overrides WHERE source = %s",
                 (self.source_name,),
             )
-            override_map = {str(row["content_id"]): row for row in cursor.fetchall()}
+            override_map = {str(row["content_id"]): row for row in read_cursor.fetchall()}
 
             # 3) Resolve previous final states
             db_state_before_sync = {}
@@ -121,6 +122,11 @@ class ContentCrawler(ABC):
                 db_state_before_sync[content_id] = resolve_final_state(
                     db_status_map.get(content_id), override_map.get(content_id)
                 )
+
+            # End the read phase before any network I/O so no transaction is left open.
+            conn.rollback()
+            read_cursor.close()
+            read_cursor = None
 
             # 4) Fetch today's data
             fetch_result = await self.fetch_all_data()
@@ -262,6 +268,9 @@ class ContentCrawler(ABC):
                     "message": "crawler run completed",
                 }
 
+            # Start a fresh transaction for the write phase.
+            write_cursor = get_cursor(conn)
+
             if not is_degraded_fetch:
                 for content_id, final_completed_at, resolved_by in pending_cdc_records:
                     inserted = record_content_completed_event(
@@ -296,7 +305,7 @@ class ContentCrawler(ABC):
             default_publication_seeded_count = 0
             default_publication_seed_error = None
             try:
-                default_publication_seeded_count = self.seed_webtoon_publication_dates(cursor)
+                default_publication_seeded_count = self.seed_webtoon_publication_dates(write_cursor)
             except Exception as seed_error:
                 default_publication_seed_error = str(seed_error)
             cdc_info["default_publication_seeded_count"] = default_publication_seeded_count
@@ -316,8 +325,13 @@ class ContentCrawler(ABC):
             raise
 
         finally:
-            if cursor:
+            if read_cursor:
                 try:
-                    cursor.close()
+                    read_cursor.close()
+                except Exception:
+                    pass
+            if write_cursor:
+                try:
+                    write_cursor.close()
                 except Exception:
                     pass

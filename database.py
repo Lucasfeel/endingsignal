@@ -24,6 +24,7 @@ DEFAULT_DB_INIT_STALE_DDL_MAX_AGE_SECONDS = 300
 DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION = "cancel"
 DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE = 20000
 DEFAULT_DB_INIT_STRICT_MAINTENANCE = False
+PG_TIMEOUT_LITERAL_PATTERN = re.compile(r"^\d+(?:ms|s|min|h|d)?$", re.IGNORECASE)
 
 
 class DatabaseUnavailableError(ValueError):
@@ -36,16 +37,47 @@ def has_database_config():
         return True
     return all((os.environ.get(var) or '').strip() for var in REQUIRED_DB_ENV_VARS)
 
+
+def _read_pg_timeout_literal(env_name):
+    raw = (os.environ.get(env_name) or "").strip()
+    if not raw:
+        return None
+    if PG_TIMEOUT_LITERAL_PATTERN.fullmatch(raw):
+        return raw
+    print(
+        f"WARN: Invalid {env_name} '{raw}'. Ignoring value.",
+        file=sys.stderr,
+    )
+    return None
+
+
+def _build_connection_kwargs():
+    db_timezone = os.environ.get('DB_TIMEZONE', '').strip() or 'Asia/Seoul'
+    option_parts = [f"-c timezone={db_timezone}"]
+
+    idle_in_tx_timeout = _read_pg_timeout_literal("DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT")
+    if idle_in_tx_timeout:
+        option_parts.append(f"-c idle_in_transaction_session_timeout={idle_in_tx_timeout}")
+
+    statement_timeout = _read_pg_timeout_literal("DB_STATEMENT_TIMEOUT")
+    if statement_timeout:
+        option_parts.append(f"-c statement_timeout={statement_timeout}")
+
+    kwargs = {"options": " ".join(option_parts)}
+    application_name = (os.environ.get("DB_APPLICATION_NAME") or "").strip()
+    if application_name:
+        kwargs["application_name"] = application_name
+    return kwargs
+
 def _create_connection():
     """
     Create a new database connection from environment configuration.
     Prefer DATABASE_URL, otherwise use individual DB_* variables.
     """
-    db_timezone = os.environ.get('DB_TIMEZONE', '').strip() or 'Asia/Seoul'
-    options = f"-c timezone={db_timezone}"
+    connection_kwargs = _build_connection_kwargs()
     database_url = os.environ.get('DATABASE_URL')
     if database_url:
-        return psycopg2.connect(database_url, options=options)
+        return psycopg2.connect(database_url, **connection_kwargs)
 
     # Validate local/deployment DB configuration when DATABASE_URL is absent.
     if not has_database_config():
@@ -60,7 +92,7 @@ def _create_connection():
         password=os.environ.get('DB_PASSWORD'),
         host=os.environ.get('DB_HOST'),
         port=os.environ.get('DB_PORT'),
-        options=options
+        **connection_kwargs
     )
 
 def get_db():

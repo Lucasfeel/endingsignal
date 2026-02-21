@@ -48,6 +48,10 @@
   - `scripts/start_web.py` runs `init_db.py` only when DB config exists (`DATABASE_URL` or all `DB_*` vars).
   - Set `SKIP_DB_INIT=1` to force skip.
   - Set `RUN_DB_INIT=1` to force run.
+  - Session safety env vars (applied to all DB connections created via `database._create_connection()`: web app, crawlers, scripts, init):
+    - `DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT` (recommended: `60s` to `300s`): PostgreSQL kills sessions that stay `idle in transaction`, preventing stale crawler transactions from blocking DDL.
+    - `DB_STATEMENT_TIMEOUT` (optional, recommended for production): global query timeout per session.
+    - `DB_APPLICATION_NAME` (optional): sets PostgreSQL `application_name` for easier lock diagnostics.
   - DB init lock-safety env vars:
     - `DB_INIT_LOCK_TIMEOUT` (default: `5s`): session `lock_timeout` used by `init_db.py`/`database.setup_database_standalone()`.
     - `DB_INIT_STATEMENT_TIMEOUT` (default: unset): optional session `statement_timeout` for DB init only.
@@ -64,6 +68,7 @@
 ## Deploy lock troubleshooting
 
 - Symptom: deploy pre-step hangs or fails during DB init around DDL (`ALTER TABLE ...` / index creation).
+- Crawler safety rule: never hold a DB transaction open across network I/O. `ContentCrawler.run_daily_check()` now ends the snapshot read transaction before `fetch_all_data()` and starts a fresh write-phase transaction afterward.
 - `init_db.py` now applies session timeouts and an advisory lock (`endingsignal_init_db` app name).
 - On lock timeout during schema DDL, setup retries with backoff, emits relation lock reports (`pg_locks` + lock mode/granted), and attempts stale waiter cleanup.
 - On lock or statement timeout that still cannot be recovered, setup exits non-zero and prints blocker diagnostics from `pg_stat_activity` including `pg_blocking_pids`.

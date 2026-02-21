@@ -90,3 +90,51 @@ def test_db_timezone_env_override(monkeypatch):
 
     assert result is sentinel
     assert calls["kwargs"]["options"] == "-c timezone=UTC"
+
+
+def test_create_connection_includes_session_timeout_options(monkeypatch):
+    calls = {}
+    sentinel = object()
+
+    def fake_connect(*args, **kwargs):
+        calls["args"] = args
+        calls["kwargs"] = kwargs
+        return sentinel
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://example")
+    monkeypatch.setenv("DB_TIMEZONE", "UTC")
+    monkeypatch.setenv("DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT", "60s")
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT", "30s")
+    monkeypatch.setenv("DB_APPLICATION_NAME", "endingsignal_crawler")
+    monkeypatch.setattr(database.psycopg2, "connect", fake_connect)
+
+    result = database._create_connection()
+
+    assert result is sentinel
+    assert calls["args"][0] == "postgres://example"
+    assert (
+        calls["kwargs"]["options"]
+        == "-c timezone=UTC -c idle_in_transaction_session_timeout=60s -c statement_timeout=30s"
+    )
+    assert calls["kwargs"]["application_name"] == "endingsignal_crawler"
+
+
+def test_create_connection_ignores_invalid_session_timeout_literals(monkeypatch):
+    calls = {}
+    sentinel = object()
+
+    def fake_connect(*args, **kwargs):
+        calls["args"] = args
+        calls["kwargs"] = kwargs
+        return sentinel
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://example")
+    monkeypatch.delenv("DB_TIMEZONE", raising=False)
+    monkeypatch.setenv("DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT", "1;SELECT pg_sleep(10)")
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT", "abc")
+    monkeypatch.setattr(database.psycopg2, "connect", fake_connect)
+
+    result = database._create_connection()
+
+    assert result is sentinel
+    assert calls["kwargs"]["options"] == "-c timezone=Asia/Seoul"
