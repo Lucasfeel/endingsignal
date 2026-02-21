@@ -656,15 +656,16 @@ body {
   width: 42px;
   height: 42px;
   border-radius: 999px;
-  border: 0 !important;
-  background: var(--chip-bg, var(--es-surface));
+  border: 1px solid transparent !important;
+  background: transparent;
   color: var(--chip-fg, var(--es-text-muted));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 0 transparent;
-  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease,
-    box-shadow 0.16s ease, opacity 0.16s ease;
+  outline: none;
+  box-shadow: none;
+  filter: brightness(1);
+  transition: background-color 0.16s ease, color 0.16s ease, filter 0.16s ease, opacity 0.16s ease;
 }
 
 .l1-logo .l1-icon {
@@ -678,7 +679,13 @@ body {
 }
 
 .l1-logo.active {
-  box-shadow: 0 0 0 2px var(--es-primary);
+  box-shadow: none;
+}
+
+.l1-logo:focus,
+.l1-logo:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .es-source-logo-wrap {
@@ -710,13 +717,32 @@ body {
   display: block;
 }
 
+.l1-logo.is-dim {
+  opacity: 1;
+  filter: brightness(1);
+}
+
 .l1-logo.inactive,
-.l1-logo.is-bright {
+.l1-logo.is-bright,
+.l1-logo:focus-visible {
   opacity: 1;
 }
 
-.l1-logo.is-dim {
+.l1-logo.is-bright,
+.l1-logo:focus-visible {
+  filter: brightness(1.08);
+}
+
+.l1-logo[aria-disabled='true'] {
   opacity: 0.45;
+  filter: brightness(1);
+  cursor: not-allowed;
+}
+
+.l1-logo[aria-disabled='true']:focus,
+.l1-logo[aria-disabled='true']:focus-visible,
+.l1-logo[aria-disabled='true'].is-bright {
+  filter: brightness(1);
 }
 
 #l2FilterContainer {

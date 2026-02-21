@@ -4462,18 +4462,13 @@ function renderL1Filters(tabId) {
     const keepCurrentLogoFit = sourceId === 'tving' || sourceId === 'laftel';
     const el = document.createElement('div');
     const isActive = selectedSet.has(sourceId);
-    const brightnessClass =
-      selectedSet.size === 0 ? 'is-bright' : isActive ? 'is-bright' : 'is-dim';
+    const brightnessClass = selectedSet.size > 0 && isActive ? 'is-bright' : 'is-dim';
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
     } ${brightnessClass}`;
     el.dataset.sourceId = sourceId;
 
     const brandMeta = SOURCE_BRAND_META[sourceId] || {};
-    if (brandMeta.bg) el.style.setProperty('--chip-bg', brandMeta.bg);
-    else el.style.removeProperty('--chip-bg');
-    if (brandMeta.border) el.style.setProperty('--chip-border', brandMeta.border);
-    else el.style.removeProperty('--chip-border');
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
     el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '40px');
