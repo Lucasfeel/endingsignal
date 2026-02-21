@@ -58,3 +58,37 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 PYTHONPATH=. pytest -q
 ```
+
+## Novel backfill (one-time)
+
+Backfills novel works into `contents` for:
+- Naver Series (`source='naver_series'`, 연재 웹소설 범위)
+- KakaoPage (`source='kakao_page'`, 웹소설 genre/11)
+
+Setup:
+
+```bash
+pip install -r requirements-backfill.txt
+python -m playwright install chromium
+```
+
+Dry runs:
+
+```bash
+python scripts/backfill_novels_once.py --sources naver_series --max-pages 1 --dry-run
+python scripts/backfill_novels_once.py --sources kakao_page --max-items 20 --dry-run
+```
+
+Real run:
+
+```bash
+python scripts/backfill_novels_once.py --sources naver_series,kakao_page
+```
+
+Notes:
+- The backfill writes only to `contents` (batched upsert on `(content_id, source)`).
+- It does not run daily crawlers and does not emit CDC events.
+- Resume state is stored under `.backfill_state/` by default (`--state-dir` configurable).
+- Optional cookie env for age-gated KakaoPage pages:
+  - `KAKAOPAGE_COOKIE_HEADER`
+  - `KAKAOPAGE_COOKIES_JSON`
