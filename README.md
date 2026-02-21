@@ -48,8 +48,31 @@
   - `scripts/start_web.py` runs `init_db.py` only when DB config exists (`DATABASE_URL` or all `DB_*` vars).
   - Set `SKIP_DB_INIT=1` to force skip.
   - Set `RUN_DB_INIT=1` to force run.
+  - DB init lock-safety env vars:
+    - `DB_INIT_LOCK_TIMEOUT` (default: `5s`): session `lock_timeout` used by `init_db.py`/`database.setup_database_standalone()`.
+    - `DB_INIT_STATEMENT_TIMEOUT` (default: unset): optional session `statement_timeout` for DB init only.
+    - `DB_INIT_ADVISORY_LOCK_WAIT_SECONDS` (default: `60`): max wait to acquire the DB init advisory lock.
   - Web bind target is `0.0.0.0:${PORT}` (`PORT` default: `5000`).
   - Health check endpoint: `GET /healthz`.
+
+## Deploy lock troubleshooting
+
+- Symptom: deploy pre-step hangs or fails during DB init around DDL (`ALTER TABLE ...` / index creation).
+- `init_db.py` now applies session timeouts and an advisory lock (`endingsignal_init_db` app name).
+- On lock or statement timeout, setup exits non-zero and prints lock diagnostics from `pg_stat_activity` including `pg_blocking_pids`.
+- Typical checks:
+  - Look for long-running transactions holding locks on hot tables (especially `contents`).
+  - Re-run with tighter timeout for fast feedback:
+
+    ```bash
+    DB_INIT_LOCK_TIMEOUT=5s DB_INIT_ADVISORY_LOCK_WAIT_SECONDS=30 python init_db.py
+    ```
+
+  - If needed, also bound long-running statements:
+
+    ```bash
+    DB_INIT_LOCK_TIMEOUT=5s DB_INIT_STATEMENT_TIMEOUT=60s python init_db.py
+    ```
 
 ## Testing
 

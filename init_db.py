@@ -1,5 +1,6 @@
 """Database bootstrap script with readiness checks and idempotency."""
 
+import os
 import sys
 import time
 
@@ -55,6 +56,21 @@ def main():
 
     try:
         load_dotenv()
+        lock_timeout = (
+            os.environ.get("DB_INIT_LOCK_TIMEOUT", "5s").strip() or "5s"
+        )
+        statement_timeout = (
+            os.environ.get("DB_INIT_STATEMENT_TIMEOUT", "").strip() or "unset"
+        )
+        advisory_wait_seconds = (
+            os.environ.get("DB_INIT_ADVISORY_LOCK_WAIT_SECONDS", "60").strip() or "60"
+        )
+        print(
+            "[INFO] DB init settings: "
+            f"DB_INIT_LOCK_TIMEOUT={lock_timeout}, "
+            f"DB_INIT_STATEMENT_TIMEOUT={statement_timeout}, "
+            f"DB_INIT_ADVISORY_LOCK_WAIT_SECONDS={advisory_wait_seconds}"
+        )
 
         already_initialized = database_already_initialized()
         if already_initialized:

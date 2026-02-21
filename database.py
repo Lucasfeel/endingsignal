@@ -1,13 +1,21 @@
 # database.py
 
+import os
+import re
+import sys
+import time
+from contextlib import contextmanager
+
 import psycopg2
 import psycopg2.extras
 from flask import g
-from contextlib import contextmanager
-import os
-import sys
+from psycopg2 import sql
 
 REQUIRED_DB_ENV_VARS = ('DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT')
+DB_INIT_APPLICATION_NAME = "endingsignal_init_db"
+DB_INIT_ADVISORY_LOCK_NAME = "endingsignal:init_db"
+DEFAULT_DB_INIT_LOCK_TIMEOUT = "5s"
+DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS = 60.0
 
 
 class DatabaseUnavailableError(ValueError):
@@ -22,8 +30,8 @@ def has_database_config():
 
 def _create_connection():
     """
-    환경 변수를 기반으로 새로운 데이터베이스 연결을 생성합니다.
-    DATABASE_URL이 있으면 우선 사용하고, 없으면 개별 변수를 사용합니다.
+    Create a new database connection from environment configuration.
+    Prefer DATABASE_URL, otherwise use individual DB_* variables.
     """
     db_timezone = os.environ.get('DB_TIMEZONE', '').strip() or 'Asia/Seoul'
     options = f"-c timezone={db_timezone}"
@@ -31,7 +39,7 @@ def _create_connection():
     if database_url:
         return psycopg2.connect(database_url, options=options)
 
-    # 로컬 개발 환경을 위한 개별 변수 확인
+    # Validate local/deployment DB configuration when DATABASE_URL is absent.
     if not has_database_config():
         raise DatabaseUnavailableError(
             "Database configuration is missing. Set DATABASE_URL or "
@@ -48,13 +56,13 @@ def _create_connection():
     )
 
 def get_db():
-    """Application Context 내에서 유일한 DB 연결을 가져옵니다."""
+    """Return a request-scoped DB connection from Flask's application context."""
     if 'db' not in g:
         g.db = _create_connection()
     return g.db
 
 def get_cursor(db):
-    """지정된 DB 연결로부터 DictCursor를 반환합니다."""
+    """Return a DictCursor for the provided DB connection."""
     return db.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
 
@@ -70,29 +78,437 @@ def managed_cursor(conn):
             pass
 
 def close_db(exception=None):
-    """요청(request)이 끝나면 자동으로 호출되어 DB 연결을 닫습니다."""
+    """Close the request-scoped DB connection if one exists."""
     db = g.pop('db', None)
     if db is not None:
         db.close()
 
 def create_standalone_connection():
-    """Flask 컨텍스트 없이 독립적인 DB 연결을 생성합니다."""
+    """Create a standalone DB connection outside Flask request context."""
     return _create_connection()
 
-def setup_database_standalone():
-    """독립 실행형 스크립트에서 테이블을 생성합니다."""
-    conn = None
+
+def _read_db_init_timeouts():
+    lock_timeout = (
+        os.environ.get("DB_INIT_LOCK_TIMEOUT", DEFAULT_DB_INIT_LOCK_TIMEOUT).strip()
+        or DEFAULT_DB_INIT_LOCK_TIMEOUT
+    )
+    statement_timeout = (os.environ.get("DB_INIT_STATEMENT_TIMEOUT") or "").strip() or None
+    raw_wait_seconds = (
+        os.environ.get("DB_INIT_ADVISORY_LOCK_WAIT_SECONDS") or ""
+    ).strip()
+    advisory_wait_seconds = DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS
+    if raw_wait_seconds:
+        try:
+            advisory_wait_seconds = float(raw_wait_seconds)
+            if advisory_wait_seconds < 0:
+                raise ValueError("must be non-negative")
+        except ValueError:
+            print(
+                "WARN: [DB Setup] Invalid DB_INIT_ADVISORY_LOCK_WAIT_SECONDS "
+                f"'{raw_wait_seconds}'. Using default "
+                f"{DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS:.0f}s.",
+                file=sys.stderr,
+            )
+            advisory_wait_seconds = DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS
+    return lock_timeout, statement_timeout, advisory_wait_seconds
+
+
+def configure_db_init_session(cursor, lock_timeout, statement_timeout=None):
+    cursor.execute("SET application_name = %s", (DB_INIT_APPLICATION_NAME,))
+    cursor.execute("SET lock_timeout = %s", (lock_timeout,))
+    if statement_timeout:
+        cursor.execute("SET statement_timeout = %s", (statement_timeout,))
+
+
+def acquire_init_advisory_lock(conn, wait_seconds):
+    deadline = time.monotonic() + max(wait_seconds, 0.0)
+    while True:
+        with managed_cursor(conn) as cursor:
+            cursor.execute(
+                "SELECT pg_try_advisory_lock(hashtext(%s))",
+                (DB_INIT_ADVISORY_LOCK_NAME,),
+            )
+            row = cursor.fetchone()
+            has_lock = bool(row and row[0])
+
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+        if has_lock:
+            return True
+
+        if time.monotonic() >= deadline:
+            return False
+
+        time.sleep(min(1.0, max(deadline - time.monotonic(), 0.1)))
+
+
+def release_init_advisory_lock(conn):
     try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_unlock(hashtext(%s))",
+            (DB_INIT_ADVISORY_LOCK_NAME,),
+        )
+        row = cursor.fetchone()
+        return bool(row and row[0])
+
+
+def column_exists(cursor, table, column, schema='public'):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+          AND column_name = %s
+        LIMIT 1
+        """,
+        (schema, table, column),
+    )
+    return cursor.fetchone() is not None
+
+
+def get_column_default(cursor, table, column, schema='public'):
+    cursor.execute(
+        """
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+          AND column_name = %s
+        """,
+        (schema, table, column),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return row[0]
+
+
+def is_column_nullable(cursor, table, column, schema='public'):
+    cursor.execute(
+        """
+        SELECT is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+          AND column_name = %s
+        """,
+        (schema, table, column),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return row[0] == "YES"
+
+
+def index_exists(cursor, index_name, schema='public'):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM pg_class cls
+        JOIN pg_namespace n ON n.oid = cls.relnamespace
+        WHERE n.nspname = %s
+          AND cls.relname = %s
+          AND cls.relkind = 'i'
+        LIMIT 1
+        """,
+        (schema, index_name),
+    )
+    return cursor.fetchone() is not None
+
+
+def trigger_exists(cursor, table, trigger_name, schema='public'):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = %s
+          AND c.relname = %s
+          AND t.tgname = %s
+          AND NOT t.tgisinternal
+        LIMIT 1
+        """,
+        (schema, table, trigger_name),
+    )
+    return cursor.fetchone() is not None
+
+
+def _canonicalize_default_expression(expression):
+    if expression is None:
+        return None
+    normalized = expression.strip().lower()
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"::[a-zA-Z0-9_ \[\]\.]+", "", normalized)
+    while normalized.startswith("(") and normalized.endswith(")"):
+        normalized = normalized[1:-1].strip()
+    return normalized
+
+
+def column_default_matches(existing_default, desired_default):
+    existing_normalized = _canonicalize_default_expression(existing_default)
+    desired_normalized = _canonicalize_default_expression(desired_default)
+    if existing_normalized == desired_normalized:
+        return True
+
+    now_equivalents = {
+        "now()",
+        "current_timestamp",
+        "transaction_timestamp()",
+        "statement_timestamp()",
+        "clock_timestamp()",
+    }
+    if desired_normalized in now_equivalents and existing_normalized in now_equivalents:
+        return True
+
+    return False
+
+
+def ensure_column_exists(cursor, table, column, column_definition, schema='public'):
+    if column_exists(cursor, table, column, schema=schema):
+        print(
+            "LOG: [DB Setup] Column "
+            f"'{schema}.{table}.{column}' already exists. Skipping ALTER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Adding missing column "
+        f"'{schema}.{table}.{column}'."
+    )
+    cursor.execute(
+        sql.SQL("ALTER TABLE {}.{} ADD COLUMN {} {}").format(
+            sql.Identifier(schema),
+            sql.Identifier(table),
+            sql.Identifier(column),
+            sql.SQL(column_definition),
+        )
+    )
+    return True
+
+
+def ensure_column_default(cursor, table, column, default_expression, schema='public'):
+    current_default = get_column_default(cursor, table, column, schema=schema)
+    if column_default_matches(current_default, default_expression):
+        print(
+            "LOG: [DB Setup] Default for "
+            f"'{schema}.{table}.{column}' already set. Skipping ALTER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Setting default for "
+        f"'{schema}.{table}.{column}' to {default_expression}."
+    )
+    cursor.execute(
+        sql.SQL("ALTER TABLE {}.{} ALTER COLUMN {} SET DEFAULT {}").format(
+            sql.Identifier(schema),
+            sql.Identifier(table),
+            sql.Identifier(column),
+            sql.SQL(default_expression),
+        )
+    )
+    return True
+
+
+def ensure_column_not_null(cursor, table, column, schema='public'):
+    nullable = is_column_nullable(cursor, table, column, schema=schema)
+    if nullable is None:
+        print(
+            "WARN: [DB Setup] Column "
+            f"'{schema}.{table}.{column}' does not exist. Skipping SET NOT NULL.",
+            file=sys.stderr,
+        )
+        return False
+    if not nullable:
+        print(
+            "LOG: [DB Setup] Column "
+            f"'{schema}.{table}.{column}' is already NOT NULL. Skipping ALTER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Setting column "
+        f"'{schema}.{table}.{column}' to NOT NULL."
+    )
+    cursor.execute(
+        sql.SQL("ALTER TABLE {}.{} ALTER COLUMN {} SET NOT NULL").format(
+            sql.Identifier(schema),
+            sql.Identifier(table),
+            sql.Identifier(column),
+        )
+    )
+    return True
+
+
+def ensure_updated_at_trigger(cursor, table, trigger_name, schema='public'):
+    if trigger_exists(cursor, table, trigger_name, schema=schema):
+        print(
+            "LOG: [DB Setup] Trigger "
+            f"'{trigger_name}' already exists on '{schema}.{table}'. Skipping CREATE TRIGGER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Creating missing trigger "
+        f"'{trigger_name}' on '{schema}.{table}'."
+    )
+    cursor.execute(
+        sql.SQL(
+            """
+            CREATE TRIGGER {}
+            BEFORE UPDATE ON {}.{}
+            FOR EACH ROW
+            EXECUTE PROCEDURE set_updated_at();
+            """
+        ).format(
+            sql.Identifier(trigger_name),
+            sql.Identifier(schema),
+            sql.Identifier(table),
+        )
+    )
+    return True
+
+
+def create_index_if_missing(cursor, schema, index_name, create_sql):
+    if index_exists(cursor, index_name, schema=schema):
+        print(
+            "LOG: [DB Setup] Index "
+            f"'{schema}.{index_name}' already exists. Skipping CREATE INDEX."
+        )
+        return False
+
+    cursor.execute(create_sql)
+    return True
+
+
+def is_lock_timeout_error(exc):
+    if not exc:
+        return False
+    pgcode = getattr(exc, "pgcode", None)
+    if pgcode == "55P03":
+        return True
+    return "lock timeout" in str(exc).lower()
+
+
+def is_statement_timeout_error(exc):
+    if not exc:
+        return False
+    pgcode = getattr(exc, "pgcode", None)
+    if pgcode == "57014":
+        return True
+    return "statement timeout" in str(exc).lower()
+
+
+def print_lock_diagnostics(conn):
+    if not conn:
+        return
+
+    print(
+        "ERROR: [DB Setup] Lock diagnostics (pg_stat_activity):",
+        file=sys.stderr,
+    )
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    try:
+        with managed_cursor(conn) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    pid,
+                    usename,
+                    state,
+                    wait_event_type,
+                    wait_event,
+                    age(now(), xact_start) AS xact_age,
+                    age(now(), query_start) AS query_age,
+                    pg_blocking_pids(pid) AS blocking_pids,
+                    LEFT(COALESCE(query, ''), 200) AS query_text
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                ORDER BY COALESCE(xact_start, query_start) NULLS LAST
+                """
+            )
+            rows = cursor.fetchall() or []
+
+        for row in rows:
+            print(
+                "ERROR: [DB Setup] "
+                f"pid={row['pid']} user={row['usename']} state={row['state']} "
+                f"wait={row['wait_event_type']}/{row['wait_event']} "
+                f"xact_age={row['xact_age']} query_age={row['query_age']} "
+                f"blocking_pids={row['blocking_pids']} "
+                f"query={row['query_text']}",
+                file=sys.stderr,
+            )
+    except Exception as diag_exc:
+        print(
+            "ERROR: [DB Setup] Could not fetch lock diagnostics "
+            f"(permissions or connection issue): {diag_exc}",
+            file=sys.stderr,
+        )
+
+
+def setup_database_standalone():
+    """Create and reconcile tables for standalone bootstrap/migration scripts."""
+    conn = None
+    cursor = None
+    advisory_lock_acquired = False
+    current_step = "startup"
+    lock_timeout, statement_timeout, advisory_wait_seconds = _read_db_init_timeouts()
+    try:
+        current_step = "connect"
         print("LOG: [DB Setup] Attempting to connect to the database...")
         conn = create_standalone_connection()
         cursor = get_cursor(conn)
         print("LOG: [DB Setup] Connection successful.")
 
+        current_step = "configure session"
+        configure_db_init_session(
+            cursor,
+            lock_timeout=lock_timeout,
+            statement_timeout=statement_timeout,
+        )
+        print(
+            "LOG: [DB Setup] Session config applied "
+            f"(application_name={DB_INIT_APPLICATION_NAME}, lock_timeout={lock_timeout}, "
+            f"statement_timeout={statement_timeout or 'unset'})."
+        )
+        conn.commit()
+
+        current_step = "acquire advisory lock"
+        print(
+            "LOG: [DB Setup] Waiting for DB init advisory lock "
+            f"(max {advisory_wait_seconds:g}s)..."
+        )
+        if not acquire_init_advisory_lock(conn, advisory_wait_seconds):
+            raise RuntimeError(
+                "Could not acquire DB init advisory lock within "
+                f"{advisory_wait_seconds:g}s. Another migration may be running."
+            )
+        advisory_lock_acquired = True
+        print("LOG: [DB Setup] Advisory lock acquired.")
+
+        current_step = "contents schema"
         # print("LOG: [DB Setup] Dropping existing tables (if any)...")
         # # cursor.execute("DROP TABLE IF EXISTS subscriptions;")
         # cursor.execute("DROP TABLE IF EXISTS contents;")
         # print("LOG: [DB Setup] Tables dropped.")
 
+        current_step = "create contents table"
         print("LOG: [DB Setup] Creating 'contents' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS contents (
@@ -108,21 +524,15 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'contents' table created or already exists.")
 
+        current_step = "ensure contents normalized columns"
         print("LOG: [DB Setup] Ensuring normalized search columns exist...")
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS normalized_title TEXT"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS normalized_authors TEXT"
-        )
+        ensure_column_exists(cursor, "contents", "normalized_title", "TEXT")
+        ensure_column_exists(cursor, "contents", "normalized_authors", "TEXT")
 
+        current_step = "ensure contents soft-delete columns"
         print("LOG: [DB Setup] Ensuring soft-delete columns exist...")
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ALTER COLUMN is_deleted SET DEFAULT FALSE"
-        )
+        ensure_column_exists(cursor, "contents", "is_deleted", "BOOLEAN")
+        ensure_column_default(cursor, "contents", "is_deleted", "FALSE")
         cursor.execute(
             """
             UPDATE contents
@@ -130,32 +540,17 @@ def setup_database_standalone():
             WHERE is_deleted IS NULL;
             """
         )
-        cursor.execute(
-            "ALTER TABLE contents ALTER COLUMN is_deleted SET NOT NULL"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_reason TEXT"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS deleted_by INTEGER"
-        )
+        ensure_column_not_null(cursor, "contents", "is_deleted")
+        ensure_column_exists(cursor, "contents", "deleted_at", "TIMESTAMP")
+        ensure_column_exists(cursor, "contents", "deleted_reason", "TEXT")
+        ensure_column_exists(cursor, "contents", "deleted_by", "INTEGER")
 
+        current_step = "ensure contents timestamps"
         print("LOG: [DB Setup] Ensuring contents timestamps exist...")
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS created_at TIMESTAMP"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ALTER COLUMN created_at SET DEFAULT NOW()"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ALTER COLUMN updated_at SET DEFAULT NOW()"
-        )
+        ensure_column_exists(cursor, "contents", "created_at", "TIMESTAMP")
+        ensure_column_exists(cursor, "contents", "updated_at", "TIMESTAMP")
+        ensure_column_default(cursor, "contents", "created_at", "NOW()")
+        ensure_column_default(cursor, "contents", "updated_at", "NOW()")
         cursor.execute(
             """
             UPDATE contents
@@ -170,12 +565,9 @@ def setup_database_standalone():
             WHERE updated_at IS NULL;
             """
         )
-        cursor.execute(
-            "ALTER TABLE contents ALTER COLUMN created_at SET NOT NULL"
-        )
-        cursor.execute(
-            "ALTER TABLE contents ALTER COLUMN updated_at SET NOT NULL"
-        )
+        ensure_column_not_null(cursor, "contents", "created_at")
+        ensure_column_not_null(cursor, "contents", "updated_at")
+        current_step = "ensure set_updated_at function"
         cursor.execute(
             """
             CREATE OR REPLACE FUNCTION set_updated_at()
@@ -187,18 +579,16 @@ def setup_database_standalone():
             $$ LANGUAGE plpgsql;
             """
         )
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS trg_contents_updated_at ON contents;"
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER trg_contents_updated_at
-            BEFORE UPDATE ON contents
-            FOR EACH ROW
-            EXECUTE PROCEDURE set_updated_at();
-            """
-        )
+        ensure_updated_at_trigger(cursor, "contents", "trg_contents_updated_at")
 
+        current_step = "commit contents schema"
+        print("LOG: [DB Setup] Committing contents schema phase...")
+        conn.commit()
+        print("LOG: [DB Setup] Contents schema phase committed.")
+
+        current_step = "remaining schema"
+
+        current_step = "create users table"
         print("LOG: [DB Setup] Creating 'users' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -213,16 +603,10 @@ def setup_database_standalone():
         )""")
         print("LOG: [DB Setup] 'users' table created or already exists.")
 
+        current_step = "ensure users updated_at column"
         print("LOG: [DB Setup] Ensuring 'users.updated_at' column exists and has defaults...")
-        cursor.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
-            """
-        )
-        cursor.execute(
-            "ALTER TABLE users ALTER COLUMN updated_at SET DEFAULT NOW();"
-        )
+        ensure_column_exists(cursor, "users", "updated_at", "TIMESTAMP")
+        ensure_column_default(cursor, "users", "updated_at", "NOW()")
         cursor.execute(
             """
             UPDATE users
@@ -230,18 +614,9 @@ def setup_database_standalone():
             WHERE updated_at IS NULL;
             """
         )
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS trg_users_updated_at ON users;"
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER trg_users_updated_at
-            BEFORE UPDATE ON users
-            FOR EACH ROW
-            EXECUTE PROCEDURE set_updated_at();
-            """
-        )
+        ensure_updated_at_trigger(cursor, "users", "trg_users_updated_at")
 
+        current_step = "create subscriptions table"
         print("LOG: [DB Setup] Creating 'subscriptions' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS subscriptions (
@@ -256,12 +631,19 @@ def setup_database_standalone():
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_subscriptions_content_source ON subscriptions (content_id, source)"
         )
+        current_step = "ensure subscriptions alert flags"
         print("LOG: [DB Setup] Ensuring subscription alert flags exist...")
-        cursor.execute(
-            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS wants_completion BOOLEAN NOT NULL DEFAULT FALSE"
+        ensure_column_exists(
+            cursor,
+            "subscriptions",
+            "wants_completion",
+            "BOOLEAN NOT NULL DEFAULT FALSE",
         )
-        cursor.execute(
-            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS wants_publication BOOLEAN NOT NULL DEFAULT FALSE"
+        ensure_column_exists(
+            cursor,
+            "subscriptions",
+            "wants_publication",
+            "BOOLEAN NOT NULL DEFAULT FALSE",
         )
         cursor.execute(
             """
@@ -285,17 +667,7 @@ def setup_database_standalone():
         cursor.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_types_name_ci ON content_types ((LOWER(name)))"
         )
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS trg_content_types_updated_at ON content_types;"
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER trg_content_types_updated_at
-            BEFORE UPDATE ON content_types
-            FOR EACH ROW
-            EXECUTE PROCEDURE set_updated_at();
-            """
-        )
+        ensure_updated_at_trigger(cursor, "content_types", "trg_content_types_updated_at")
         print("LOG: [DB Setup] 'content_types' table created or already exists.")
 
         print("LOG: [DB Setup] Creating 'content_sources' table...")
@@ -317,21 +689,11 @@ def setup_database_standalone():
         cursor.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_sources_type_name_ci ON content_sources (type_id, LOWER(name))"
         )
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS trg_content_sources_updated_at ON content_sources;"
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER trg_content_sources_updated_at
-            BEFORE UPDATE ON content_sources
-            FOR EACH ROW
-            EXECUTE PROCEDURE set_updated_at();
-            """
-        )
+        ensure_updated_at_trigger(cursor, "content_sources", "trg_content_sources_updated_at")
         print("LOG: [DB Setup] 'content_sources' table created or already exists.")
 
         print("LOG: [DB Setup] Seeding content type/source options (idempotent)...")
-        seeded_types = ("웹툰", "웹소설", "OTT")
+        seeded_types = ("\uc6f9\ud230", "\uc6f9\uc18c\uc124", "OTT")
         for type_name in seeded_types:
             cursor.execute(
                 """
@@ -343,9 +705,20 @@ def setup_database_standalone():
             )
 
         seeded_sources_by_type = {
-            "웹툰": ("네이버웹툰", "카카오웹툰"),
-            "웹소설": ("네이버 시리즈", "카카오 페이지", "문피아", "리디"),
-            "OTT": ("넷플릭스", "티빙", "디즈니 플러스", "웨이브", "라프텔"),
+            "\uc6f9\ud230": ("\ub124\uc774\ubc84\uc6f9\ud230", "\uce74\uce74\uc624\uc6f9\ud230"),
+            "\uc6f9\uc18c\uc124": (
+                "\ub124\uc774\ubc84 \uc2dc\ub9ac\uc988",
+                "\uce74\uce74\uc624 \ud398\uc774\uc9c0",
+                "\ubb38\ud53c\uc544",
+                "\ub9ac\ub514",
+            ),
+            "OTT": (
+                "\ub137\ud50c\ub9ad\uc2a4",
+                "\ud2f0\ube59",
+                "\ub514\uc988\ub2c8 \ud50c\ub7ec\uc2a4",
+                "\uc6e8\uc774\ube0c",
+                "\ub77c\ud504\ud154",
+            ),
         }
         for type_name, source_names in seeded_sources_by_type.items():
             for source_name in source_names:
@@ -363,7 +736,6 @@ def setup_database_standalone():
                     """,
                     (type_name, source_name),
                 )
-
         print("LOG: [DB Setup] Creating 'admin_content_overrides' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS admin_content_overrides (
@@ -379,16 +751,10 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_overrides' table created or already exists.")
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS trg_admin_content_overrides_updated_at ON admin_content_overrides;"
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER trg_admin_content_overrides_updated_at
-            BEFORE UPDATE ON admin_content_overrides
-            FOR EACH ROW
-            EXECUTE PROCEDURE set_updated_at();
-            """
+        ensure_updated_at_trigger(
+            cursor,
+            "admin_content_overrides",
+            "trg_admin_content_overrides_updated_at",
         )
 
         print("LOG: [DB Setup] Creating 'admin_content_metadata' table...")
@@ -405,16 +771,10 @@ def setup_database_standalone():
             UNIQUE(content_id, source)
         )""")
         print("LOG: [DB Setup] 'admin_content_metadata' table created or already exists.")
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS trg_admin_content_metadata_updated_at ON admin_content_metadata;"
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER trg_admin_content_metadata_updated_at
-            BEFORE UPDATE ON admin_content_metadata
-            FOR EACH ROW
-            EXECUTE PROCEDURE set_updated_at();
-            """
+        ensure_updated_at_trigger(
+            cursor,
+            "admin_content_metadata",
+            "trg_admin_content_metadata_updated_at",
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_content_metadata_public_at ON admin_content_metadata (public_at)"
@@ -465,6 +825,7 @@ def setup_database_standalone():
         )
         print("LOG: [DB Setup] 'cdc_events' table created or already exists.")
 
+        current_step = "create cdc_event_consumptions table"
         print("LOG: [DB Setup] Creating 'cdc_event_consumptions' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS cdc_event_consumptions (
@@ -479,36 +840,16 @@ def setup_database_standalone():
                 CHECK (status IN ('processed', 'skipped', 'failed'))
         )
         """)
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS consumer TEXT"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS event_id INTEGER"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS status TEXT"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS reason TEXT"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ALTER COLUMN created_at SET DEFAULT NOW()"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ALTER COLUMN consumer SET NOT NULL"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ALTER COLUMN event_id SET NOT NULL"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ALTER COLUMN status SET NOT NULL"
-        )
-        cursor.execute(
-            "ALTER TABLE cdc_event_consumptions ALTER COLUMN created_at SET NOT NULL"
-        )
+        ensure_column_exists(cursor, "cdc_event_consumptions", "consumer", "TEXT")
+        ensure_column_exists(cursor, "cdc_event_consumptions", "event_id", "INTEGER")
+        ensure_column_exists(cursor, "cdc_event_consumptions", "status", "TEXT")
+        ensure_column_exists(cursor, "cdc_event_consumptions", "reason", "TEXT")
+        ensure_column_exists(cursor, "cdc_event_consumptions", "created_at", "TIMESTAMP")
+        ensure_column_default(cursor, "cdc_event_consumptions", "created_at", "NOW()")
+        ensure_column_not_null(cursor, "cdc_event_consumptions", "consumer")
+        ensure_column_not_null(cursor, "cdc_event_consumptions", "event_id")
+        ensure_column_not_null(cursor, "cdc_event_consumptions", "status")
+        ensure_column_not_null(cursor, "cdc_event_consumptions", "created_at")
         cursor.execute(
             """
             DO $$
@@ -618,8 +959,7 @@ def setup_database_standalone():
             "CREATE INDEX IF NOT EXISTS idx_cdc_event_consumptions_event_id ON cdc_event_consumptions (event_id)"
         )
         print("LOG: [DB Setup] 'cdc_event_consumptions' table created or already exists.")
-
-        # === 🚨 [신규] 통합 보고서 저장을 위한 테이블 생성 ===
+        # === Table for crawler daily summary/report snapshots ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS daily_crawler_reports (
@@ -635,64 +975,103 @@ def setup_database_standalone():
         print("LOG: [DB Setup] 'daily_crawler_reports' table created or already exists.")
         # ================================================
 
+        current_step = "commit remaining schema"
+        print("LOG: [DB Setup] Committing remaining schema phase...")
+        conn.commit()
+        print("LOG: [DB Setup] Remaining schema phase committed.")
+
+        current_step = "maintenance"
+
+        current_step = "enable pg_trgm extension"
         print("LOG: [DB Setup] Enabling 'pg_trgm' extension...")
         cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
 
+        current_step = "create idx_contents_title_trgm"
         print("LOG: [DB Setup] Creating GIN index on contents.title...")
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_contents_title_trgm
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_title_trgm",
+            """
+            CREATE INDEX idx_contents_title_trgm
             ON contents
             USING gin (title gin_trgm_ops);
-        """)
+            """,
+        )
 
+        current_step = "create idx_contents_authors_trgm"
         print("LOG: [DB Setup] Creating GIN index on contents meta authors...")
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_contents_authors_trgm
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_authors_trgm",
+            """
+            CREATE INDEX idx_contents_authors_trgm
             ON contents
             USING gin ((COALESCE(meta->'common'->>'authors', '')) gin_trgm_ops);
-        """)
+            """,
+        )
 
+        current_step = "create idx_contents_normalized_title_trgm"
         print("LOG: [DB Setup] Creating GIN index on contents.normalized_title...")
-        cursor.execute(
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_normalized_title_trgm",
             """
-            CREATE INDEX IF NOT EXISTS idx_contents_normalized_title_trgm
+            CREATE INDEX idx_contents_normalized_title_trgm
             ON contents
             USING gin (normalized_title gin_trgm_ops);
-            """
+            """,
         )
 
+        current_step = "create idx_contents_normalized_authors_trgm"
         print("LOG: [DB Setup] Creating GIN index on contents.normalized_authors...")
-        cursor.execute(
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_normalized_authors_trgm",
             """
-            CREATE INDEX IF NOT EXISTS idx_contents_normalized_authors_trgm
+            CREATE INDEX idx_contents_normalized_authors_trgm
             ON contents
             USING gin (normalized_authors gin_trgm_ops);
-            """
+            """,
         )
 
+        current_step = "create active contents browse indexes"
         print("LOG: [DB Setup] Creating active browse list indexes...")
-        cursor.execute(
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_active_type_status_title_source_id",
             """
-            CREATE INDEX IF NOT EXISTS idx_contents_active_type_status_title_source_id
+            CREATE INDEX idx_contents_active_type_status_title_source_id
             ON contents (content_type, status, title, source, content_id)
             WHERE COALESCE(is_deleted, FALSE) = FALSE;
-            """
+            """,
         )
-        cursor.execute(
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_active_type_title_source_id",
             """
-            CREATE INDEX IF NOT EXISTS idx_contents_active_type_title_source_id
+            CREATE INDEX idx_contents_active_type_title_source_id
             ON contents (content_type, title, source, content_id)
             WHERE COALESCE(is_deleted, FALSE) = FALSE;
-            """
+            """,
         )
-        cursor.execute(
+        create_index_if_missing(
+            cursor,
+            "public",
+            "idx_contents_weekdays_gin",
             """
-            CREATE INDEX IF NOT EXISTS idx_contents_weekdays_gin
+            CREATE INDEX idx_contents_weekdays_gin
             ON contents
             USING gin ((meta->'attributes'->'weekdays'));
-            """
+            """,
         )
 
+        current_step = "backfill normalized search fields"
         print("LOG: [DB Setup] Backfilling normalized search fields (idempotent)...")
         cursor.execute(
             """
@@ -711,19 +1090,62 @@ def setup_database_standalone():
 
         print("LOG: [DB Setup] 'pg_trgm' setup complete.")
 
+        current_step = "commit maintenance"
         print("LOG: [DB Setup] Committing changes...")
         conn.commit()
         print("LOG: [DB Setup] Changes committed.")
-
-        cursor.close()
     except psycopg2.Error as e:
-        print(f"FATAL: [DB Setup] A database error occurred: {e}", file=sys.stderr)
-        # Re-raise the exception to ensure the script exits with a non-zero status code
+        print(
+            "FATAL: [DB Setup] A database error occurred "
+            f"during step '{current_step}': {e}",
+            file=sys.stderr,
+        )
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        if is_lock_timeout_error(e) or is_statement_timeout_error(e):
+            print(
+                "ERROR: [DB Setup] Migration failed due to lock/statement timeout. "
+                f"Step: '{current_step}'.",
+                file=sys.stderr,
+            )
+            print_lock_diagnostics(conn)
         raise
     except Exception as e:
-        print(f"FATAL: [DB Setup] An unexpected error occurred: {e}", file=sys.stderr)
+        print(
+            "FATAL: [DB Setup] An unexpected error occurred "
+            f"during step '{current_step}': {e}",
+            file=sys.stderr,
+        )
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         raise
     finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if advisory_lock_acquired and conn:
+            try:
+                unlocked = release_init_advisory_lock(conn)
+                if unlocked:
+                    print("LOG: [DB Setup] Advisory lock released.")
+                else:
+                    print(
+                        "WARN: [DB Setup] Advisory lock was not held during release.",
+                        file=sys.stderr,
+                    )
+            except Exception as unlock_exc:
+                print(
+                    f"WARN: [DB Setup] Failed to release advisory lock: {unlock_exc}",
+                    file=sys.stderr,
+                )
         if conn:
             conn.close()
             print("LOG: [DB Setup] Connection closed.")
