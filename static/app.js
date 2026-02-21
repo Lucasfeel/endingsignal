@@ -205,6 +205,29 @@ const NOVEL_GENRE_GROUP_OPTIONS = [
 ];
 const NOVEL_GENRE_GROUP_IDS = NOVEL_GENRE_GROUP_OPTIONS.map((item) => item.id);
 
+const SOURCE_ID_ALIASES = {
+  disney: 'disney_plus',
+  disneyplus: 'disney_plus',
+  'disney+': 'disney_plus',
+  disney_plus: 'disney_plus',
+  coupang_play: 'coupangplay',
+  kakao_webtoon: 'kakaowebtoon',
+};
+
+const normalizeSourceId = (sourceId) => {
+  const safeSourceId = String(sourceId || '')
+    .trim()
+    .toLowerCase();
+  if (!safeSourceId) return '';
+  return SOURCE_ID_ALIASES[safeSourceId] || safeSourceId;
+};
+
+const toApiSourceId = (sourceId) => {
+  const normalized = normalizeSourceId(sourceId);
+  if (!normalized) return '';
+  return normalized;
+};
+
 const SOURCE_OPTIONS = {
   webtoon: [
     { id: 'naver_webtoon', label: 'Naver' },
@@ -218,11 +241,90 @@ const SOURCE_OPTIONS = {
   ],
   ott: [
     { id: 'netflix', label: 'Netflix' },
-    { id: 'disney', label: 'Disney+' },
     { id: 'tving', label: 'TVING' },
-    { id: 'watcha', label: 'WATCHA' },
     { id: 'wavve', label: 'wavve' },
+    { id: 'coupangplay', label: 'Coupang Play' },
+    { id: 'disney_plus', label: 'Disney+' },
+    { id: 'laftel', label: 'Laftel' },
+    { id: 'watcha', label: 'WATCHA' },
   ],
+};
+
+const SOURCE_BRAND_META = {
+  naver_webtoon: {
+    bg: '#00DC64',
+    border: 'rgba(0,0,0,0.06)',
+    logoColor: '#111111',
+  },
+  kakaowebtoon: {
+    bg: '#FFD400',
+    border: 'rgba(0,0,0,0.08)',
+    logoColor: '#111111',
+  },
+  naver_series: {
+    bg: '#03C75A',
+    border: 'rgba(0,0,0,0.06)',
+    logoColor: '#111111',
+  },
+  kakao_page: {
+    bg: '#FEE102',
+    border: 'rgba(0,0,0,0.08)',
+    logoColor: '#111111',
+  },
+  munpia: {
+    bg: '#2F80FF',
+    border: 'rgba(255,255,255,0.25)',
+    logoColor: '#FFFFFF',
+  },
+  ridi: {
+    bg: '#1E9EFF',
+    border: 'rgba(255,255,255,0.25)',
+    logoColor: '#FFFFFF',
+  },
+  netflix: {
+    bg: '#FFFFFF',
+    border: '#E5E8EB',
+  },
+  tving: {
+    bg: '#000000',
+    border: 'rgba(255,255,255,0.12)',
+    logoColor: '#FF143C',
+  },
+  wavve: {
+    bg: 'linear-gradient(135deg, #5DD0FF 0%, #B4EFFF 100%)',
+    border: 'rgba(255,255,255,0.25)',
+    logoColor: '#FFFFFF',
+  },
+  coupangplay: {
+    bg: '#FFFFFF',
+    border: '#E5E8EB',
+  },
+  disney_plus: {
+    bg: '#01147C',
+    border: 'rgba(255,255,255,0.18)',
+    logoColor: '#FFFFFF',
+  },
+  laftel: {
+    bg: '#816EEB',
+    border: 'rgba(255,255,255,0.20)',
+    logoColor: '#FFFFFF',
+  },
+  watcha: {
+    bg: '#FF0558',
+    border: 'rgba(255,255,255,0.18)',
+    logoColor: '#FFFFFF',
+  },
+};
+
+const SOURCE_LOGO_ASSETS = {
+  naver_series: '/static/source_logos/naver_series.svg',
+  kakao_page: '/static/source_logos/kakao_page.svg',
+  munpia: '/static/source_logos/munpia.svg',
+  ridi: '/static/source_logos/ridi.svg',
+  netflix: '/static/source_logos/netflix.png',
+  tving: '/static/source_logos/tving.svg',
+  coupangplay: '/static/source_logos/coupangplay.svg',
+  disney_plus: '/static/source_logos/disney_plus.svg',
 };
 
 const SOURCE_ICON_SVGS = {
@@ -239,20 +341,27 @@ const SOURCE_ICON_SVGS = {
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#6b7280"/><path d="M8 20V8h2.3l3.7 6.1L17.6 8H20v12h-2.2v-8l-3.5 5.7h-.6L10.2 12v8H8z" fill="#fff"/></svg>',
   netflix:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#111"/><path d="M9 20V8h2.6l4.2 7.2V8H18v12h-2.4l-4.4-7.5V20H9z" fill="#e50914"/></svg>',
+  disney_plus:
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#113b7a"/><path d="M8.2 14.5c1.9-3.4 8.4-3.3 10.5.2m-9.8 2.8h6.2c1.9 0 3-.9 3-2.5s-1.1-2.5-3-2.5h-1.3" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
   disney:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#113b7a"/><path d="M8.2 14.5c1.9-3.4 8.4-3.3 10.5.2m-9.8 2.8h6.2c1.9 0 3-.9 3-2.5s-1.1-2.5-3-2.5h-1.3" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
   tving:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#e11d48"/><path d="M8.4 10h11.2v2.2h-4.4V20h-2.4v-7.8H8.4V10z" fill="#fff"/></svg>',
+  coupangplay:
+    '<svg viewBox="0 0 28 28" fill="none"><path d="M8.4 7.8c.6-.4 1.3-.4 1.9 0l9.2 5.3c1.2.7 1.2 2.4 0 3.1l-9.2 5.3c-.6.4-1.3.4-1.9 0-.6-.4-1-1-.9-1.8V9.6c0-.7.3-1.4.9-1.8z" fill="url(#cp-play-grad)"/><defs><linearGradient id="cp-play-grad" x1="8" y1="7.2" x2="21" y2="21.6" gradientUnits="userSpaceOnUse"><stop stop-color="#63C3FF"/><stop offset="0.55" stop-color="#8E90FF"/><stop offset="1" stop-color="#FF8D5C"/></linearGradient></defs></svg>',
   watcha:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#fb7185"/><path d="M8.3 8h2.6l2.5 8.1L15.9 8h2.5l2.4 12h-2.3l-1.2-7.3-2.2 7.3h-1.7l-2.2-7.3L10 20H7.7L8.3 8z" fill="#fff"/></svg>',
   wavve:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#0f172a"/><path d="M7.8 9h2.4l1.5 6 1.7-6h2.1l1.7 6 1.5-6h2.4l-3 11h-1.9l-1.8-6-1.8 6h-1.9L7.8 9z" fill="#93c5fd"/></svg>',
+  laftel:
+    '<svg viewBox="0 0 28 28" fill="none"><path d="M8 8h5.4v12H8V8zm7.2 0h5v3.2h-5V8zm0 4.6h5V20h-5v-7.4z" fill="#fff"/></svg>',
 };
 
-function getSourceIconMarkup(sourceId, fallbackLabel) {
-  const known = SOURCE_ICON_SVGS[sourceId];
+function getSourceTextFallbackMarkup(sourceId, fallbackLabel) {
+  const normalizedSourceId = normalizeSourceId(sourceId);
+  const known = SOURCE_ICON_SVGS[normalizedSourceId];
   if (known) return known;
-  const safeInitial = String(fallbackLabel || sourceId || '?')
+  const safeInitial = String(fallbackLabel || normalizedSourceId || '?')
     .toUpperCase()
     .replace(/[^A-Z0-9+]/g, '')
     .slice(0, 2);
@@ -260,13 +369,40 @@ function getSourceIconMarkup(sourceId, fallbackLabel) {
   return `<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#1e293b"/><text x="14" y="18" text-anchor="middle" fill="#dbeafe" font-family="system-ui,sans-serif" font-size="10" font-weight="700">${text}</text></svg>`;
 }
 
+function getSourceIconMarkup(sourceId, fallbackLabel) {
+  const normalizedSourceId = normalizeSourceId(sourceId);
+  const fallbackMarkup = getSourceTextFallbackMarkup(normalizedSourceId, fallbackLabel);
+  const assetPath = SOURCE_LOGO_ASSETS[normalizedSourceId];
+  if (!assetPath) return fallbackMarkup;
+  return `<span class="es-source-logo-wrap" aria-hidden="true"><img class="es-source-logo-img" src="${assetPath}" alt="" aria-hidden="true" decoding="async" /><span class="es-source-logo-fallback" aria-hidden="true" hidden>${fallbackMarkup}</span></span>`;
+}
+
+function bindSourceLogoFallback(chipEl) {
+  if (!(chipEl instanceof HTMLElement)) return;
+  const logoImg = chipEl.querySelector('.es-source-logo-img');
+  const fallback = chipEl.querySelector('.es-source-logo-fallback');
+  if (!(logoImg instanceof HTMLImageElement) || !(fallback instanceof HTMLElement)) return;
+
+  const showFallback = () => {
+    logoImg.hidden = true;
+    fallback.hidden = false;
+  };
+
+  if (logoImg.complete && logoImg.naturalWidth === 0) {
+    showFallback();
+    return;
+  }
+  logoImg.addEventListener('error', showFallback, { once: true });
+}
+
 const ALL_SOURCE_IDS = Object.values(SOURCE_OPTIONS).flatMap((group) =>
-  group.map((item) => item.id)
+  group.map((item) => normalizeSourceId(item.id))
 );
 
 const getSourceItemsForTab = (tabId) => SOURCE_OPTIONS[tabId] || [];
 
-const getAllowedSourcesForTab = (tabId) => getSourceItemsForTab(tabId).map((item) => item.id);
+const getAllowedSourcesForTab = (tabId) =>
+  getSourceItemsForTab(tabId).map((item) => normalizeSourceId(item.id));
 
 const sanitizeSourcesArray = (value, allowed = ALL_SOURCE_IDS) => {
   const list = Array.isArray(value)
@@ -274,13 +410,23 @@ const sanitizeSourcesArray = (value, allowed = ALL_SOURCE_IDS) => {
     : typeof value === 'string' && value
       ? [value]
       : [];
-  if (!Array.isArray(allowed) || !allowed.length) return [];
+  const normalizedAllowed = Array.isArray(allowed)
+    ? Array.from(
+        new Set(
+          allowed
+            .map((entry) => normalizeSourceId(entry))
+            .filter(Boolean)
+        )
+      )
+    : [];
+  if (!normalizedAllowed.length) return [];
+  const allowedSet = new Set(normalizedAllowed);
 
   const deduped = [];
   const seen = new Set();
   list.forEach((entry) => {
-    const safeEntry = typeof entry === 'string' ? entry : '';
-    if (!safeEntry || !allowed.includes(safeEntry) || seen.has(safeEntry)) return;
+    const safeEntry = normalizeSourceId(entry);
+    if (!safeEntry || !allowedSet.has(safeEntry) || seen.has(safeEntry)) return;
     seen.add(safeEntry);
     deduped.push(safeEntry);
   });
@@ -304,7 +450,7 @@ const getSelectedSourcesForTab = (tabId) => {
 const getSourceRequestConfig = (tabId) => {
   const selectedSources = getSelectedSourcesForTab(tabId);
   if (selectedSources.length === 1) {
-    return { querySource: selectedSources[0], filterSources: [] };
+    return { querySource: toApiSourceId(selectedSources[0]) || 'all', filterSources: [] };
   }
   if (selectedSources.length > 1) {
     return { querySource: 'all', filterSources: selectedSources };
@@ -314,8 +460,12 @@ const getSourceRequestConfig = (tabId) => {
 
 const filterItemsBySources = (items, sources) => {
   if (!Array.isArray(items) || !Array.isArray(sources) || sources.length === 0) return items;
-  const sourceSet = new Set(sources);
-  return items.filter((item) => sourceSet.has(String(item?.source || '').trim()));
+  const sourceSet = new Set(
+    sources
+      .map((sourceId) => normalizeSourceId(sourceId))
+      .filter(Boolean)
+  );
+  return items.filter((item) => sourceSet.has(normalizeSourceId(item?.source)));
 };
 
 const safeLoadStorage = (storageObj, key) => {
@@ -4189,25 +4339,37 @@ function renderL1Filters(tabId) {
   const selectedSet = new Set(selectedSources);
 
   items.forEach((item) => {
+    const sourceId = normalizeSourceId(item.id);
     const el = document.createElement('div');
-    const isActive = selectedSet.has(item.id);
+    const isActive = selectedSet.has(sourceId);
     const brightnessClass =
       selectedSet.size === 0 ? 'is-bright' : isActive ? 'is-bright' : 'is-dim';
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
     } ${brightnessClass}`;
+    el.dataset.sourceId = sourceId;
+
+    const brandMeta = SOURCE_BRAND_META[sourceId] || {};
+    if (brandMeta.bg) el.style.setProperty('--chip-bg', brandMeta.bg);
+    else el.style.removeProperty('--chip-bg');
+    if (brandMeta.border) el.style.setProperty('--chip-border', brandMeta.border);
+    else el.style.removeProperty('--chip-border');
+    if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
+    else el.style.removeProperty('--chip-fg');
+
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
     el.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-    el.setAttribute('aria-label', item.label);
+    el.setAttribute('aria-label', `${item.label} source filter`);
     el.innerHTML = `
-      <span class="l1-icon" aria-hidden="true">${getSourceIconMarkup(item.id, item.label)}</span>
+      <span class="l1-icon" aria-hidden="true">${getSourceIconMarkup(sourceId, item.label)}</span>
     `;
+    bindSourceLogoFallback(el);
 
     el.onclick = () => {
       const nextSelected = new Set(getSelectedSourcesForTab(tabId));
-      if (nextSelected.has(item.id)) nextSelected.delete(item.id);
-      else nextSelected.add(item.id);
+      if (nextSelected.has(sourceId)) nextSelected.delete(sourceId);
+      else nextSelected.add(sourceId);
       STATE.filters[tabId].sources = Array.from(nextSelected);
       renderL1Filters(tabId);
       fetchAndRenderContent(tabId);
