@@ -65,11 +65,35 @@ def main():
         advisory_wait_seconds = (
             os.environ.get("DB_INIT_ADVISORY_LOCK_WAIT_SECONDS", "60").strip() or "60"
         )
+        ddl_retry_attempts = (
+            os.environ.get("DB_INIT_DDL_RETRY_ATTEMPTS", "5").strip() or "5"
+        )
+        ddl_retry_base_delay_seconds = (
+            os.environ.get("DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS", "1.0").strip() or "1.0"
+        )
+        stale_ddl_max_age_seconds = (
+            os.environ.get("DB_INIT_STALE_DDL_MAX_AGE_SECONDS", "300").strip() or "300"
+        )
+        stale_ddl_cleanup_action = (
+            os.environ.get("DB_INIT_STALE_DDL_CLEANUP_ACTION", "cancel").strip() or "cancel"
+        )
+        backfill_batch_size = (
+            os.environ.get("DB_INIT_BACKFILL_BATCH_SIZE", "20000").strip() or "20000"
+        )
+        strict_maintenance = (
+            os.environ.get("DB_INIT_STRICT_MAINTENANCE", "false").strip() or "false"
+        )
         print(
             "[INFO] DB init settings: "
             f"DB_INIT_LOCK_TIMEOUT={lock_timeout}, "
             f"DB_INIT_STATEMENT_TIMEOUT={statement_timeout}, "
-            f"DB_INIT_ADVISORY_LOCK_WAIT_SECONDS={advisory_wait_seconds}"
+            f"DB_INIT_ADVISORY_LOCK_WAIT_SECONDS={advisory_wait_seconds}, "
+            f"DB_INIT_DDL_RETRY_ATTEMPTS={ddl_retry_attempts}, "
+            f"DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS={ddl_retry_base_delay_seconds}, "
+            f"DB_INIT_STALE_DDL_MAX_AGE_SECONDS={stale_ddl_max_age_seconds}, "
+            f"DB_INIT_STALE_DDL_CLEANUP_ACTION={stale_ddl_cleanup_action}, "
+            f"DB_INIT_BACKFILL_BATCH_SIZE={backfill_batch_size}, "
+            f"DB_INIT_STRICT_MAINTENANCE={strict_maintenance}"
         )
 
         already_initialized = database_already_initialized()

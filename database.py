@@ -1,10 +1,12 @@
 # database.py
 
 import os
+import random
 import re
 import sys
 import time
 from contextlib import contextmanager
+from typing import Callable
 
 import psycopg2
 import psycopg2.extras
@@ -16,6 +18,12 @@ DB_INIT_APPLICATION_NAME = "endingsignal_init_db"
 DB_INIT_ADVISORY_LOCK_NAME = "endingsignal:init_db"
 DEFAULT_DB_INIT_LOCK_TIMEOUT = "5s"
 DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS = 60.0
+DEFAULT_DB_INIT_DDL_RETRY_ATTEMPTS = 5
+DEFAULT_DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS = 1.0
+DEFAULT_DB_INIT_STALE_DDL_MAX_AGE_SECONDS = 300
+DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION = "cancel"
+DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE = 20000
+DEFAULT_DB_INIT_STRICT_MAINTENANCE = False
 
 
 class DatabaseUnavailableError(ValueError):
@@ -88,30 +96,113 @@ def create_standalone_connection():
     return _create_connection()
 
 
+def _read_float_env(name, default, minimum=None):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+        if minimum is not None and value < minimum:
+            raise ValueError(f"must be >= {minimum}")
+        return value
+    except ValueError:
+        print(
+            f"WARN: [DB Setup] Invalid {name} '{raw}'. Using default {default}.",
+            file=sys.stderr,
+        )
+        return default
+
+
+def _read_int_env(name, default, minimum=None):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+        if minimum is not None and value < minimum:
+            raise ValueError(f"must be >= {minimum}")
+        return value
+    except ValueError:
+        print(
+            f"WARN: [DB Setup] Invalid {name} '{raw}'. Using default {default}.",
+            file=sys.stderr,
+        )
+        return default
+
+
+def _read_bool_env(name, default):
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    print(
+        f"WARN: [DB Setup] Invalid {name} '{raw}'. Using default {default}.",
+        file=sys.stderr,
+    )
+    return default
+
+
 def _read_db_init_timeouts():
     lock_timeout = (
         os.environ.get("DB_INIT_LOCK_TIMEOUT", DEFAULT_DB_INIT_LOCK_TIMEOUT).strip()
         or DEFAULT_DB_INIT_LOCK_TIMEOUT
     )
     statement_timeout = (os.environ.get("DB_INIT_STATEMENT_TIMEOUT") or "").strip() or None
-    raw_wait_seconds = (
-        os.environ.get("DB_INIT_ADVISORY_LOCK_WAIT_SECONDS") or ""
-    ).strip()
-    advisory_wait_seconds = DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS
-    if raw_wait_seconds:
-        try:
-            advisory_wait_seconds = float(raw_wait_seconds)
-            if advisory_wait_seconds < 0:
-                raise ValueError("must be non-negative")
-        except ValueError:
-            print(
-                "WARN: [DB Setup] Invalid DB_INIT_ADVISORY_LOCK_WAIT_SECONDS "
-                f"'{raw_wait_seconds}'. Using default "
-                f"{DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS:.0f}s.",
-                file=sys.stderr,
-            )
-            advisory_wait_seconds = DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS
+    advisory_wait_seconds = _read_float_env(
+        "DB_INIT_ADVISORY_LOCK_WAIT_SECONDS",
+        DEFAULT_DB_INIT_ADVISORY_LOCK_WAIT_SECONDS,
+        minimum=0.0,
+    )
     return lock_timeout, statement_timeout, advisory_wait_seconds
+
+
+def _read_db_init_settings():
+    lock_timeout, statement_timeout, advisory_wait_seconds = _read_db_init_timeouts()
+    cleanup_action = (
+        os.environ.get("DB_INIT_STALE_DDL_CLEANUP_ACTION")
+        or DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION
+    ).strip().lower()
+    if cleanup_action not in {"cancel", "terminate"}:
+        print(
+            "WARN: [DB Setup] Invalid DB_INIT_STALE_DDL_CLEANUP_ACTION "
+            f"'{cleanup_action}'. Using default '{DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION}'.",
+            file=sys.stderr,
+        )
+        cleanup_action = DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION
+
+    return {
+        "lock_timeout": lock_timeout,
+        "statement_timeout": statement_timeout,
+        "advisory_wait_seconds": advisory_wait_seconds,
+        "ddl_retry_attempts": _read_int_env(
+            "DB_INIT_DDL_RETRY_ATTEMPTS",
+            DEFAULT_DB_INIT_DDL_RETRY_ATTEMPTS,
+            minimum=1,
+        ),
+        "ddl_retry_base_delay_seconds": _read_float_env(
+            "DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS",
+            DEFAULT_DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS,
+            minimum=0.0,
+        ),
+        "stale_ddl_max_age_seconds": _read_int_env(
+            "DB_INIT_STALE_DDL_MAX_AGE_SECONDS",
+            DEFAULT_DB_INIT_STALE_DDL_MAX_AGE_SECONDS,
+            minimum=1,
+        ),
+        "stale_ddl_cleanup_action": cleanup_action,
+        "backfill_batch_size": _read_int_env(
+            "DB_INIT_BACKFILL_BATCH_SIZE",
+            DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE,
+            minimum=1,
+        ),
+        "strict_maintenance": _read_bool_env(
+            "DB_INIT_STRICT_MAINTENANCE",
+            DEFAULT_DB_INIT_STRICT_MAINTENANCE,
+        ),
+    }
 
 
 def configure_db_init_session(cursor, lock_timeout, statement_timeout=None):
@@ -242,6 +333,15 @@ def trigger_exists(cursor, table, trigger_name, schema='public'):
         (schema, table, trigger_name),
     )
     return cursor.fetchone() is not None
+
+
+def table_exists(cursor, table, schema='public'):
+    cursor.execute(
+        "SELECT to_regclass(%s)",
+        (f"{schema}.{table}",),
+    )
+    row = cursor.fetchone()
+    return bool(row and row[0])
 
 
 def _canonicalize_default_expression(expression):
@@ -462,13 +562,588 @@ def print_lock_diagnostics(conn):
         )
 
 
+def _truncate_query(query_text, max_len=200):
+    if query_text is None:
+        return ""
+    query = str(query_text)
+    if len(query) <= max_len:
+        return query
+    return f"{query[:max_len]}..."
+
+
+def find_stale_ddl_waiters(conn, max_age_seconds):
+    if not conn:
+        return []
+
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    with managed_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT
+                pid,
+                usename,
+                application_name,
+                state,
+                wait_event_type,
+                wait_event,
+                xact_start,
+                query_start,
+                age(now(), xact_start) AS xact_age,
+                age(now(), query_start) AS query_age,
+                LEFT(COALESCE(query, ''), 200) AS query_text
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock'
+              AND query_start IS NOT NULL
+              AND query_start < now() - (%s * interval '1 second')
+              AND query ILIKE ANY (
+                ARRAY[
+                    'ALTER TABLE %',
+                    'CREATE INDEX %',
+                    'DROP TABLE %',
+                    'CREATE EXTENSION %'
+                ]
+              )
+            ORDER BY query_start ASC
+            """,
+            (max_age_seconds,),
+        )
+        rows = cursor.fetchall() or []
+
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+    return rows
+
+
+def cleanup_stale_ddl_waiters(conn, max_age_seconds=None, cleanup_action=None):
+    if not conn:
+        return
+    if max_age_seconds is None or cleanup_action is None:
+        settings = _read_db_init_settings()
+        if max_age_seconds is None:
+            max_age_seconds = settings["stale_ddl_max_age_seconds"]
+        if cleanup_action is None:
+            cleanup_action = settings["stale_ddl_cleanup_action"]
+
+    try:
+        stale_waiters = find_stale_ddl_waiters(conn, max_age_seconds)
+    except Exception as exc:
+        print(
+            f"WARN: [DB Setup] Could not inspect stale DDL waiters: {exc}",
+            file=sys.stderr,
+        )
+        return
+
+    if not stale_waiters:
+        print("LOG: [DB Setup] No stale DDL lock waiters found.")
+        return
+
+    print(
+        "WARN: [DB Setup] Found stale DDL lock waiters "
+        f"(count={len(stale_waiters)}, action={cleanup_action}).",
+        file=sys.stderr,
+    )
+    for row in stale_waiters:
+        pid = row["pid"]
+        action_fn = "pg_terminate_backend" if cleanup_action == "terminate" else "pg_cancel_backend"
+        try:
+            with managed_cursor(conn) as cursor:
+                cursor.execute(
+                    sql.SQL("SELECT {}(%s)").format(sql.SQL(action_fn)),
+                    (pid,),
+                )
+                action_row = cursor.fetchone()
+                action_result = bool(action_row and action_row[0])
+            print(
+                "WARN: [DB Setup] Stale DDL waiter cleanup attempted: "
+                f"pid={pid} app={row['application_name']} state={row['state']} "
+                f"query_age={row['query_age']} action={cleanup_action} result={action_result} "
+                f"query={_truncate_query(row['query_text'])}",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(
+                "WARN: [DB Setup] Failed stale DDL waiter cleanup: "
+                f"pid={pid} action={cleanup_action} error={exc}",
+                file=sys.stderr,
+            )
+        finally:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+
+def print_relation_lock_report(conn, relation='contents'):
+    if not conn:
+        return
+
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    print(
+        f"ERROR: [DB Setup] Relation lock report for '{relation}':",
+        file=sys.stderr,
+    )
+    try:
+        with managed_cursor(conn) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    a.pid,
+                    l.granted,
+                    l.mode,
+                    a.state,
+                    a.application_name,
+                    a.wait_event_type,
+                    a.wait_event,
+                    age(now(), a.xact_start) AS xact_age,
+                    age(now(), a.query_start) AS query_age,
+                    pg_blocking_pids(a.pid) AS blocking_pids,
+                    LEFT(COALESCE(a.query, ''), 200) AS query_text
+                FROM pg_locks l
+                JOIN pg_class c ON c.oid = l.relation
+                JOIN pg_stat_activity a ON a.pid = l.pid
+                WHERE c.relname = %s
+                  AND a.datname = current_database()
+                ORDER BY l.granted ASC, a.query_start ASC NULLS LAST, a.pid ASC
+                """,
+                (relation,),
+            )
+            rows = cursor.fetchall() or []
+
+        if not rows:
+            print(
+                "ERROR: [DB Setup] No relation-lock rows found for "
+                f"'{relation}' in current database.",
+                file=sys.stderr,
+            )
+            return
+
+        blocker_counts = {}
+        for row in rows:
+            print(
+                "ERROR: [DB Setup] "
+                f"pid={row['pid']} granted={row['granted']} mode={row['mode']} "
+                f"state={row['state']} app={row['application_name']} "
+                f"wait={row['wait_event_type']}/{row['wait_event']} "
+                f"xact_age={row['xact_age']} query_age={row['query_age']} "
+                f"blocking_pids={row['blocking_pids']} "
+                f"query={_truncate_query(row['query_text'])}",
+                file=sys.stderr,
+            )
+            for blocker_pid in (row["blocking_pids"] or []):
+                blocker_counts[blocker_pid] = blocker_counts.get(blocker_pid, 0) + 1
+
+        if not blocker_counts:
+            print(
+                "ERROR: [DB Setup] Blocker summary: no blocking pids reported.",
+                file=sys.stderr,
+            )
+            return
+
+        top_blockers = sorted(
+            blocker_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        blocker_pid_list = [pid for pid, _count in top_blockers]
+        try:
+            with managed_cursor(conn) as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        pid,
+                        state,
+                        application_name,
+                        age(now(), query_start) AS query_age,
+                        LEFT(COALESCE(query, ''), 200) AS query_text
+                    FROM pg_stat_activity
+                    WHERE pid = ANY(%s)
+                    ORDER BY pid ASC
+                    """,
+                    (blocker_pid_list,),
+                )
+                blocker_rows = cursor.fetchall() or []
+            blocker_by_pid = {row["pid"]: row for row in blocker_rows}
+        except Exception:
+            blocker_by_pid = {}
+
+        print("ERROR: [DB Setup] Blocker summary:", file=sys.stderr)
+        for blocker_pid, waiter_count in top_blockers:
+            info = blocker_by_pid.get(blocker_pid)
+            if not info:
+                print(
+                    f"ERROR: [DB Setup] blocker_pid={blocker_pid} waiter_count={waiter_count}",
+                    file=sys.stderr,
+                )
+                continue
+            print(
+                "ERROR: [DB Setup] "
+                f"blocker_pid={blocker_pid} waiter_count={waiter_count} "
+                f"state={info['state']} app={info['application_name']} "
+                f"query_age={info['query_age']} "
+                f"query={_truncate_query(info['query_text'])}",
+                file=sys.stderr,
+            )
+    except Exception as exc:
+        print(
+            "ERROR: [DB Setup] Could not build relation lock report: "
+            f"{exc}",
+            file=sys.stderr,
+        )
+
+
+def run_ddl_with_retry(
+    conn,
+    cursor,
+    label,
+    execute_fn: Callable[[], None],
+    *,
+    ddl_retry_attempts,
+    ddl_retry_base_delay_seconds,
+    stale_ddl_max_age_seconds,
+    stale_ddl_cleanup_action,
+    relation='contents',
+):
+    attempt = 0
+    while attempt < ddl_retry_attempts:
+        attempt += 1
+        try:
+            execute_fn()
+            conn.commit()
+            if attempt > 1:
+                print(
+                    "LOG: [DB Setup] DDL retry succeeded "
+                    f"(label={label}, attempt={attempt}/{ddl_retry_attempts})."
+                )
+            return
+        except Exception as exc:
+            if not is_lock_timeout_error(exc):
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(
+                "WARN: [DB Setup] DDL lock timeout "
+                f"(label={label}, attempt={attempt}/{ddl_retry_attempts}): {exc}",
+                file=sys.stderr,
+            )
+            print_relation_lock_report(conn, relation=relation)
+            print_lock_diagnostics(conn)
+            cleanup_stale_ddl_waiters(
+                conn,
+                max_age_seconds=stale_ddl_max_age_seconds,
+                cleanup_action=stale_ddl_cleanup_action,
+            )
+
+            if attempt >= ddl_retry_attempts:
+                raise
+
+            backoff = ddl_retry_base_delay_seconds * (2 ** (attempt - 1))
+            jitter = random.uniform(0.0, max(ddl_retry_base_delay_seconds, 0.01))
+            sleep_seconds = backoff + jitter
+            print(
+                "WARN: [DB Setup] Retrying DDL after backoff "
+                f"{sleep_seconds:.2f}s (label={label}).",
+                file=sys.stderr,
+            )
+            time.sleep(sleep_seconds)
+
+
+def ensure_column_exists_with_retry(
+    conn,
+    cursor,
+    table,
+    column,
+    column_definition,
+    *,
+    settings,
+    schema='public',
+    relation='contents',
+):
+    if column_exists(cursor, table, column, schema=schema):
+        print(
+            "LOG: [DB Setup] Column "
+            f"'{schema}.{table}.{column}' already exists. Skipping ALTER."
+        )
+        return False
+
+    print("LOG: [DB Setup] Adding missing column " f"'{schema}.{table}.{column}'.")
+
+    def _execute():
+        cursor.execute(
+            sql.SQL("ALTER TABLE {}.{} ADD COLUMN {} {}").format(
+                sql.Identifier(schema),
+                sql.Identifier(table),
+                sql.Identifier(column),
+                sql.SQL(column_definition),
+            )
+        )
+
+    run_ddl_with_retry(
+        conn,
+        cursor,
+        f"add column {schema}.{table}.{column}",
+        _execute,
+        ddl_retry_attempts=settings["ddl_retry_attempts"],
+        ddl_retry_base_delay_seconds=settings["ddl_retry_base_delay_seconds"],
+        stale_ddl_max_age_seconds=settings["stale_ddl_max_age_seconds"],
+        stale_ddl_cleanup_action=settings["stale_ddl_cleanup_action"],
+        relation=relation,
+    )
+    return True
+
+
+def ensure_column_default_with_retry(
+    conn,
+    cursor,
+    table,
+    column,
+    default_expression,
+    *,
+    settings,
+    schema='public',
+    relation='contents',
+):
+    current_default = get_column_default(cursor, table, column, schema=schema)
+    if column_default_matches(current_default, default_expression):
+        print(
+            "LOG: [DB Setup] Default for "
+            f"'{schema}.{table}.{column}' already set. Skipping ALTER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Setting default for "
+        f"'{schema}.{table}.{column}' to {default_expression}."
+    )
+
+    def _execute():
+        cursor.execute(
+            sql.SQL("ALTER TABLE {}.{} ALTER COLUMN {} SET DEFAULT {}").format(
+                sql.Identifier(schema),
+                sql.Identifier(table),
+                sql.Identifier(column),
+                sql.SQL(default_expression),
+            )
+        )
+
+    run_ddl_with_retry(
+        conn,
+        cursor,
+        f"set default {schema}.{table}.{column}",
+        _execute,
+        ddl_retry_attempts=settings["ddl_retry_attempts"],
+        ddl_retry_base_delay_seconds=settings["ddl_retry_base_delay_seconds"],
+        stale_ddl_max_age_seconds=settings["stale_ddl_max_age_seconds"],
+        stale_ddl_cleanup_action=settings["stale_ddl_cleanup_action"],
+        relation=relation,
+    )
+    return True
+
+
+def ensure_column_not_null_with_retry(
+    conn,
+    cursor,
+    table,
+    column,
+    *,
+    settings,
+    schema='public',
+    relation='contents',
+):
+    nullable = is_column_nullable(cursor, table, column, schema=schema)
+    if nullable is None:
+        print(
+            "WARN: [DB Setup] Column "
+            f"'{schema}.{table}.{column}' does not exist. Skipping SET NOT NULL.",
+            file=sys.stderr,
+        )
+        return False
+    if not nullable:
+        print(
+            "LOG: [DB Setup] Column "
+            f"'{schema}.{table}.{column}' is already NOT NULL. Skipping ALTER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Setting column "
+        f"'{schema}.{table}.{column}' to NOT NULL."
+    )
+
+    def _execute():
+        cursor.execute(
+            sql.SQL("ALTER TABLE {}.{} ALTER COLUMN {} SET NOT NULL").format(
+                sql.Identifier(schema),
+                sql.Identifier(table),
+                sql.Identifier(column),
+            )
+        )
+
+    run_ddl_with_retry(
+        conn,
+        cursor,
+        f"set not null {schema}.{table}.{column}",
+        _execute,
+        ddl_retry_attempts=settings["ddl_retry_attempts"],
+        ddl_retry_base_delay_seconds=settings["ddl_retry_base_delay_seconds"],
+        stale_ddl_max_age_seconds=settings["stale_ddl_max_age_seconds"],
+        stale_ddl_cleanup_action=settings["stale_ddl_cleanup_action"],
+        relation=relation,
+    )
+    return True
+
+
+def ensure_updated_at_trigger_with_retry(
+    conn,
+    cursor,
+    table,
+    trigger_name,
+    *,
+    settings,
+    schema='public',
+    relation='contents',
+):
+    if trigger_exists(cursor, table, trigger_name, schema=schema):
+        print(
+            "LOG: [DB Setup] Trigger "
+            f"'{trigger_name}' already exists on '{schema}.{table}'. Skipping CREATE TRIGGER."
+        )
+        return False
+
+    print(
+        "LOG: [DB Setup] Creating missing trigger "
+        f"'{trigger_name}' on '{schema}.{table}'."
+    )
+
+    def _execute():
+        cursor.execute(
+            sql.SQL(
+                """
+                CREATE TRIGGER {}
+                BEFORE UPDATE ON {}.{}
+                FOR EACH ROW
+                EXECUTE PROCEDURE set_updated_at();
+                """
+            ).format(
+                sql.Identifier(trigger_name),
+                sql.Identifier(schema),
+                sql.Identifier(table),
+            )
+        )
+
+    run_ddl_with_retry(
+        conn,
+        cursor,
+        f"create trigger {trigger_name} on {schema}.{table}",
+        _execute,
+        ddl_retry_attempts=settings["ddl_retry_attempts"],
+        ddl_retry_base_delay_seconds=settings["ddl_retry_base_delay_seconds"],
+        stale_ddl_max_age_seconds=settings["stale_ddl_max_age_seconds"],
+        stale_ddl_cleanup_action=settings["stale_ddl_cleanup_action"],
+        relation=relation,
+    )
+    return True
+
+
+def run_contents_backfill_in_batches(conn, cursor, *, settings):
+    batch_size = settings["backfill_batch_size"]
+    strict_maintenance = settings["strict_maintenance"]
+    updates = [
+        (
+            "backfill contents.is_deleted",
+            """
+            UPDATE contents
+            SET is_deleted = FALSE
+            WHERE ctid IN (
+                SELECT ctid
+                FROM contents
+                WHERE is_deleted IS NULL
+                LIMIT %s
+            )
+            """,
+        ),
+        (
+            "backfill contents.created_at",
+            """
+            UPDATE contents
+            SET created_at = NOW()
+            WHERE ctid IN (
+                SELECT ctid
+                FROM contents
+                WHERE created_at IS NULL
+                LIMIT %s
+            )
+            """,
+        ),
+        (
+            "backfill contents.updated_at",
+            """
+            UPDATE contents
+            SET updated_at = NOW()
+            WHERE ctid IN (
+                SELECT ctid
+                FROM contents
+                WHERE updated_at IS NULL
+                LIMIT %s
+            )
+            """,
+        ),
+    ]
+
+    for label, batch_sql in updates:
+        total_updated = 0
+        while True:
+            try:
+                cursor.execute(batch_sql, (batch_size,))
+                updated = cursor.rowcount or 0
+                conn.commit()
+                total_updated += updated
+                if updated == 0:
+                    print(
+                        "LOG: [DB Setup] Contents backfill complete "
+                        f"({label}, total_updated={total_updated})."
+                    )
+                    break
+            except psycopg2.Error as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if is_lock_timeout_error(exc) or is_statement_timeout_error(exc):
+                    message = (
+                        "WARN: [DB Setup] Contents backfill timed out "
+                        f"({label}): {exc}"
+                    )
+                    if strict_maintenance:
+                        print(message, file=sys.stderr)
+                        raise
+                    print(f"{message}. Continuing because DB_INIT_STRICT_MAINTENANCE=false.", file=sys.stderr)
+                    break
+                raise
 def setup_database_standalone():
     """Create and reconcile tables for standalone bootstrap/migration scripts."""
     conn = None
     cursor = None
     advisory_lock_acquired = False
     current_step = "startup"
-    lock_timeout, statement_timeout, advisory_wait_seconds = _read_db_init_timeouts()
+    settings = _read_db_init_settings()
     try:
         current_step = "connect"
         print("LOG: [DB Setup] Attempting to connect to the database...")
@@ -479,112 +1154,228 @@ def setup_database_standalone():
         current_step = "configure session"
         configure_db_init_session(
             cursor,
-            lock_timeout=lock_timeout,
-            statement_timeout=statement_timeout,
+            lock_timeout=settings["lock_timeout"],
+            statement_timeout=settings["statement_timeout"],
         )
         print(
             "LOG: [DB Setup] Session config applied "
-            f"(application_name={DB_INIT_APPLICATION_NAME}, lock_timeout={lock_timeout}, "
-            f"statement_timeout={statement_timeout or 'unset'})."
+            f"(application_name={DB_INIT_APPLICATION_NAME}, "
+            f"lock_timeout={settings['lock_timeout']}, "
+            f"statement_timeout={settings['statement_timeout'] or 'unset'})."
         )
         conn.commit()
 
         current_step = "acquire advisory lock"
         print(
             "LOG: [DB Setup] Waiting for DB init advisory lock "
-            f"(max {advisory_wait_seconds:g}s)..."
+            f"(max {settings['advisory_wait_seconds']:g}s)..."
         )
-        if not acquire_init_advisory_lock(conn, advisory_wait_seconds):
+        if not acquire_init_advisory_lock(conn, settings["advisory_wait_seconds"]):
             raise RuntimeError(
                 "Could not acquire DB init advisory lock within "
-                f"{advisory_wait_seconds:g}s. Another migration may be running."
+                f"{settings['advisory_wait_seconds']:g}s. Another migration may be running."
             )
         advisory_lock_acquired = True
         print("LOG: [DB Setup] Advisory lock acquired.")
 
-        current_step = "contents schema"
-        # print("LOG: [DB Setup] Dropping existing tables (if any)...")
-        # # cursor.execute("DROP TABLE IF EXISTS subscriptions;")
-        # cursor.execute("DROP TABLE IF EXISTS contents;")
-        # print("LOG: [DB Setup] Tables dropped.")
+        current_step = "cleanup stale ddl waiters preflight"
+        stale_waiters = find_stale_ddl_waiters(
+            conn,
+            settings["stale_ddl_max_age_seconds"],
+        )
+        if stale_waiters:
+            print(
+                "WARN: [DB Setup] Detected stale DDL waiters before schema DDL. "
+                f"count={len(stale_waiters)}",
+                file=sys.stderr,
+            )
+            print_relation_lock_report(conn, relation="contents")
+        cleanup_stale_ddl_waiters(
+            conn,
+            max_age_seconds=settings["stale_ddl_max_age_seconds"],
+            cleanup_action=settings["stale_ddl_cleanup_action"],
+        )
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+        current_step = "contents schema ddl-only"
 
         current_step = "create contents table"
-        print("LOG: [DB Setup] Creating 'contents' table...")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS contents (
-            content_id TEXT NOT NULL,
-            source TEXT NOT NULL,
-            content_type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            normalized_title TEXT,
-            normalized_authors TEXT,
-            status TEXT NOT NULL,
-            meta JSONB,
-            PRIMARY KEY (content_id, source)
-        )""")
+        if table_exists(cursor, "contents"):
+            print("LOG: [DB Setup] 'contents' table already exists. Skipping CREATE TABLE.")
+        else:
+            print("LOG: [DB Setup] Creating 'contents' table...")
+            run_ddl_with_retry(
+                conn,
+                cursor,
+                "create contents table",
+                lambda: cursor.execute(
+                    """
+                    CREATE TABLE contents (
+                        content_id TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        content_type TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        normalized_title TEXT,
+                        normalized_authors TEXT,
+                        status TEXT NOT NULL,
+                        meta JSONB,
+                        PRIMARY KEY (content_id, source)
+                    )
+                    """
+                ),
+                ddl_retry_attempts=settings["ddl_retry_attempts"],
+                ddl_retry_base_delay_seconds=settings["ddl_retry_base_delay_seconds"],
+                stale_ddl_max_age_seconds=settings["stale_ddl_max_age_seconds"],
+                stale_ddl_cleanup_action=settings["stale_ddl_cleanup_action"],
+                relation="contents",
+            )
         print("LOG: [DB Setup] 'contents' table created or already exists.")
 
         current_step = "ensure contents normalized columns"
         print("LOG: [DB Setup] Ensuring normalized search columns exist...")
-        ensure_column_exists(cursor, "contents", "normalized_title", "TEXT")
-        ensure_column_exists(cursor, "contents", "normalized_authors", "TEXT")
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "normalized_title",
+            "TEXT",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "normalized_authors",
+            "TEXT",
+            settings=settings,
+            relation="contents",
+        )
 
         current_step = "ensure contents soft-delete columns"
         print("LOG: [DB Setup] Ensuring soft-delete columns exist...")
-        ensure_column_exists(cursor, "contents", "is_deleted", "BOOLEAN")
-        ensure_column_default(cursor, "contents", "is_deleted", "FALSE")
-        cursor.execute(
-            """
-            UPDATE contents
-            SET is_deleted = FALSE
-            WHERE is_deleted IS NULL;
-            """
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "is_deleted",
+            "BOOLEAN",
+            settings=settings,
+            relation="contents",
         )
-        ensure_column_not_null(cursor, "contents", "is_deleted")
-        ensure_column_exists(cursor, "contents", "deleted_at", "TIMESTAMP")
-        ensure_column_exists(cursor, "contents", "deleted_reason", "TEXT")
-        ensure_column_exists(cursor, "contents", "deleted_by", "INTEGER")
+        ensure_column_default_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "is_deleted",
+            "FALSE",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "deleted_at",
+            "TIMESTAMP",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "deleted_reason",
+            "TEXT",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "deleted_by",
+            "INTEGER",
+            settings=settings,
+            relation="contents",
+        )
 
         current_step = "ensure contents timestamps"
         print("LOG: [DB Setup] Ensuring contents timestamps exist...")
-        ensure_column_exists(cursor, "contents", "created_at", "TIMESTAMP")
-        ensure_column_exists(cursor, "contents", "updated_at", "TIMESTAMP")
-        ensure_column_default(cursor, "contents", "created_at", "NOW()")
-        ensure_column_default(cursor, "contents", "updated_at", "NOW()")
-        cursor.execute(
-            """
-            UPDATE contents
-            SET created_at = NOW()
-            WHERE created_at IS NULL;
-            """
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "created_at",
+            "TIMESTAMP",
+            settings=settings,
+            relation="contents",
         )
-        cursor.execute(
-            """
-            UPDATE contents
-            SET updated_at = NOW()
-            WHERE updated_at IS NULL;
-            """
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "updated_at",
+            "TIMESTAMP",
+            settings=settings,
+            relation="contents",
         )
-        ensure_column_not_null(cursor, "contents", "created_at")
-        ensure_column_not_null(cursor, "contents", "updated_at")
+        ensure_column_default_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "created_at",
+            "NOW()",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_default_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "updated_at",
+            "NOW()",
+            settings=settings,
+            relation="contents",
+        )
+
         current_step = "ensure set_updated_at function"
-        cursor.execute(
-            """
-            CREATE OR REPLACE FUNCTION set_updated_at()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                NEW.updated_at = NOW();
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-            """
+        run_ddl_with_retry(
+            conn,
+            cursor,
+            "create or replace set_updated_at function",
+            lambda: cursor.execute(
+                """
+                CREATE OR REPLACE FUNCTION set_updated_at()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = NOW();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+                """
+            ),
+            ddl_retry_attempts=settings["ddl_retry_attempts"],
+            ddl_retry_base_delay_seconds=settings["ddl_retry_base_delay_seconds"],
+            stale_ddl_max_age_seconds=settings["stale_ddl_max_age_seconds"],
+            stale_ddl_cleanup_action=settings["stale_ddl_cleanup_action"],
+            relation="contents",
         )
-        ensure_updated_at_trigger(cursor, "contents", "trg_contents_updated_at")
+        ensure_updated_at_trigger_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "trg_contents_updated_at",
+            settings=settings,
+            relation="contents",
+        )
 
         current_step = "commit contents schema"
-        print("LOG: [DB Setup] Committing contents schema phase...")
-        conn.commit()
-        print("LOG: [DB Setup] Contents schema phase committed.")
+        # DDL statements above commit individually via run_ddl_with_retry.
+        print("LOG: [DB Setup] Contents schema DDL phase complete.")
 
         current_step = "remaining schema"
 
@@ -980,120 +1771,167 @@ def setup_database_standalone():
         conn.commit()
         print("LOG: [DB Setup] Remaining schema phase committed.")
 
+        current_step = "contents backfill and hardening"
+        print("LOG: [DB Setup] Starting contents backfill/hardening phase...")
+        run_contents_backfill_in_batches(conn, cursor, settings=settings)
+        for column_name in ("is_deleted", "created_at", "updated_at"):
+            try:
+                ensure_column_not_null_with_retry(
+                    conn,
+                    cursor,
+                    "contents",
+                    column_name,
+                    settings=settings,
+                    relation="contents",
+                )
+            except psycopg2.Error as exc:
+                if is_lock_timeout_error(exc) or is_statement_timeout_error(exc):
+                    if settings["strict_maintenance"]:
+                        raise
+                    print(
+                        "WARN: [DB Setup] Could not harden NOT NULL for "
+                        f"contents.{column_name}: {exc}. "
+                        "Continuing because DB_INIT_STRICT_MAINTENANCE=false.",
+                        file=sys.stderr,
+                    )
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    continue
+                raise
+        print("LOG: [DB Setup] Contents backfill/hardening phase complete.")
+
         current_step = "maintenance"
+        try:
+            current_step = "enable pg_trgm extension"
+            print("LOG: [DB Setup] Enabling 'pg_trgm' extension...")
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
 
-        current_step = "enable pg_trgm extension"
-        print("LOG: [DB Setup] Enabling 'pg_trgm' extension...")
-        cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+            current_step = "create idx_contents_title_trgm"
+            print("LOG: [DB Setup] Creating GIN index on contents.title...")
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_title_trgm",
+                """
+                CREATE INDEX idx_contents_title_trgm
+                ON contents
+                USING gin (title gin_trgm_ops);
+                """,
+            )
 
-        current_step = "create idx_contents_title_trgm"
-        print("LOG: [DB Setup] Creating GIN index on contents.title...")
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_title_trgm",
-            """
-            CREATE INDEX idx_contents_title_trgm
-            ON contents
-            USING gin (title gin_trgm_ops);
-            """,
-        )
+            current_step = "create idx_contents_authors_trgm"
+            print("LOG: [DB Setup] Creating GIN index on contents meta authors...")
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_authors_trgm",
+                """
+                CREATE INDEX idx_contents_authors_trgm
+                ON contents
+                USING gin ((COALESCE(meta->'common'->>'authors', '')) gin_trgm_ops);
+                """,
+            )
 
-        current_step = "create idx_contents_authors_trgm"
-        print("LOG: [DB Setup] Creating GIN index on contents meta authors...")
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_authors_trgm",
-            """
-            CREATE INDEX idx_contents_authors_trgm
-            ON contents
-            USING gin ((COALESCE(meta->'common'->>'authors', '')) gin_trgm_ops);
-            """,
-        )
+            current_step = "create idx_contents_normalized_title_trgm"
+            print("LOG: [DB Setup] Creating GIN index on contents.normalized_title...")
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_normalized_title_trgm",
+                """
+                CREATE INDEX idx_contents_normalized_title_trgm
+                ON contents
+                USING gin (normalized_title gin_trgm_ops);
+                """,
+            )
 
-        current_step = "create idx_contents_normalized_title_trgm"
-        print("LOG: [DB Setup] Creating GIN index on contents.normalized_title...")
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_normalized_title_trgm",
-            """
-            CREATE INDEX idx_contents_normalized_title_trgm
-            ON contents
-            USING gin (normalized_title gin_trgm_ops);
-            """,
-        )
+            current_step = "create idx_contents_normalized_authors_trgm"
+            print("LOG: [DB Setup] Creating GIN index on contents.normalized_authors...")
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_normalized_authors_trgm",
+                """
+                CREATE INDEX idx_contents_normalized_authors_trgm
+                ON contents
+                USING gin (normalized_authors gin_trgm_ops);
+                """,
+            )
 
-        current_step = "create idx_contents_normalized_authors_trgm"
-        print("LOG: [DB Setup] Creating GIN index on contents.normalized_authors...")
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_normalized_authors_trgm",
-            """
-            CREATE INDEX idx_contents_normalized_authors_trgm
-            ON contents
-            USING gin (normalized_authors gin_trgm_ops);
-            """,
-        )
+            current_step = "create active contents browse indexes"
+            print("LOG: [DB Setup] Creating active browse list indexes...")
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_active_type_status_title_source_id",
+                """
+                CREATE INDEX idx_contents_active_type_status_title_source_id
+                ON contents (content_type, status, title, source, content_id)
+                WHERE COALESCE(is_deleted, FALSE) = FALSE;
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_active_type_title_source_id",
+                """
+                CREATE INDEX idx_contents_active_type_title_source_id
+                ON contents (content_type, title, source, content_id)
+                WHERE COALESCE(is_deleted, FALSE) = FALSE;
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_weekdays_gin",
+                """
+                CREATE INDEX idx_contents_weekdays_gin
+                ON contents
+                USING gin ((meta->'attributes'->'weekdays'));
+                """,
+            )
 
-        current_step = "create active contents browse indexes"
-        print("LOG: [DB Setup] Creating active browse list indexes...")
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_active_type_status_title_source_id",
-            """
-            CREATE INDEX idx_contents_active_type_status_title_source_id
-            ON contents (content_type, status, title, source, content_id)
-            WHERE COALESCE(is_deleted, FALSE) = FALSE;
-            """,
-        )
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_active_type_title_source_id",
-            """
-            CREATE INDEX idx_contents_active_type_title_source_id
-            ON contents (content_type, title, source, content_id)
-            WHERE COALESCE(is_deleted, FALSE) = FALSE;
-            """,
-        )
-        create_index_if_missing(
-            cursor,
-            "public",
-            "idx_contents_weekdays_gin",
-            """
-            CREATE INDEX idx_contents_weekdays_gin
-            ON contents
-            USING gin ((meta->'attributes'->'weekdays'));
-            """,
-        )
+            current_step = "backfill normalized search fields"
+            print("LOG: [DB Setup] Backfilling normalized search fields (idempotent)...")
+            cursor.execute(
+                """
+                UPDATE contents
+                SET normalized_title = regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')
+                WHERE normalized_title IS NULL OR normalized_title = '';
+                """
+            )
+            cursor.execute(
+                """
+                UPDATE contents
+                SET normalized_authors = regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')
+                WHERE normalized_authors IS NULL OR normalized_authors = '';
+                """
+            )
 
-        current_step = "backfill normalized search fields"
-        print("LOG: [DB Setup] Backfilling normalized search fields (idempotent)...")
-        cursor.execute(
-            """
-            UPDATE contents
-            SET normalized_title = regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')
-            WHERE normalized_title IS NULL OR normalized_title = '';
-            """
-        )
-        cursor.execute(
-            """
-            UPDATE contents
-            SET normalized_authors = regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')
-            WHERE normalized_authors IS NULL OR normalized_authors = '';
-            """
-        )
+            print("LOG: [DB Setup] 'pg_trgm' setup complete.")
 
-        print("LOG: [DB Setup] 'pg_trgm' setup complete.")
-
-        current_step = "commit maintenance"
-        print("LOG: [DB Setup] Committing changes...")
-        conn.commit()
-        print("LOG: [DB Setup] Changes committed.")
+            current_step = "commit maintenance"
+            print("LOG: [DB Setup] Committing changes...")
+            conn.commit()
+            print("LOG: [DB Setup] Changes committed.")
+        except psycopg2.Error as maintenance_exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            if (is_lock_timeout_error(maintenance_exc) or is_statement_timeout_error(maintenance_exc)) and not settings["strict_maintenance"]:
+                print(
+                    "WARN: [DB Setup] Maintenance phase timed out and will be skipped "
+                    "because DB_INIT_STRICT_MAINTENANCE=false: "
+                    f"{maintenance_exc}",
+                    file=sys.stderr,
+                )
+                print_relation_lock_report(conn, relation="contents")
+                print_lock_diagnostics(conn)
+            else:
+                raise
     except psycopg2.Error as e:
         print(
             "FATAL: [DB Setup] A database error occurred "
@@ -1111,6 +1949,7 @@ def setup_database_standalone():
                 f"Step: '{current_step}'.",
                 file=sys.stderr,
             )
+            print_relation_lock_report(conn, relation="contents")
             print_lock_diagnostics(conn)
         raise
     except Exception as e:

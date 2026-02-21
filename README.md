@@ -52,6 +52,12 @@
     - `DB_INIT_LOCK_TIMEOUT` (default: `5s`): session `lock_timeout` used by `init_db.py`/`database.setup_database_standalone()`.
     - `DB_INIT_STATEMENT_TIMEOUT` (default: unset): optional session `statement_timeout` for DB init only.
     - `DB_INIT_ADVISORY_LOCK_WAIT_SECONDS` (default: `60`): max wait to acquire the DB init advisory lock.
+    - `DB_INIT_DDL_RETRY_ATTEMPTS` (default: `5`): retries for lock-timeout DDL on `contents`.
+    - `DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS` (default: `1.0`): base delay for exponential backoff + jitter between DDL retries.
+    - `DB_INIT_STALE_DDL_MAX_AGE_SECONDS` (default: `300`): stale DDL waiter age threshold for cleanup.
+    - `DB_INIT_STALE_DDL_CLEANUP_ACTION` (default: `cancel`): stale waiter cleanup mode (`cancel` or `terminate`).
+    - `DB_INIT_BACKFILL_BATCH_SIZE` (default: `20000`): batch size for `contents` null-fill backfills.
+    - `DB_INIT_STRICT_MAINTENANCE` (default: `false`): if `false`, lock/statement timeout during maintenance/backfill logs WARN and continues.
   - Web bind target is `0.0.0.0:${PORT}` (`PORT` default: `5000`).
   - Health check endpoint: `GET /healthz`.
 
@@ -59,9 +65,22 @@
 
 - Symptom: deploy pre-step hangs or fails during DB init around DDL (`ALTER TABLE ...` / index creation).
 - `init_db.py` now applies session timeouts and an advisory lock (`endingsignal_init_db` app name).
-- On lock or statement timeout, setup exits non-zero and prints lock diagnostics from `pg_stat_activity` including `pg_blocking_pids`.
+- On lock timeout during schema DDL, setup retries with backoff, emits relation lock reports (`pg_locks` + lock mode/granted), and attempts stale waiter cleanup.
+- On lock or statement timeout that still cannot be recovered, setup exits non-zero and prints blocker diagnostics from `pg_stat_activity` including `pg_blocking_pids`.
 - Typical checks:
   - Look for long-running transactions holding locks on hot tables (especially `contents`).
+  - If role permissions allow, manually cancel stale waiters:
+
+    ```sql
+    SELECT pg_cancel_backend(<pid>);
+    ```
+
+  - If cancel is insufficient and you have privileges:
+
+    ```sql
+    SELECT pg_terminate_backend(<pid>);
+    ```
+
   - Re-run with tighter timeout for fast feedback:
 
     ```bash
@@ -72,6 +91,12 @@
 
     ```bash
     DB_INIT_LOCK_TIMEOUT=5s DB_INIT_STATEMENT_TIMEOUT=60s python init_db.py
+    ```
+
+  - Enable aggressive stale waiter cleanup:
+
+    ```bash
+    DB_INIT_STALE_DDL_CLEANUP_ACTION=terminate DB_INIT_STALE_DDL_MAX_AGE_SECONDS=120 python init_db.py
     ```
 
 ## Testing
