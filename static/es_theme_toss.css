@@ -611,7 +611,9 @@ body {
   color: inherit;
 }
 
-body.es-main-page {
+/* Chromium 144+ may block wheel scroll chaining if contain is on body. */
+#searchPageBody,
+#myPage .overflow-y-auto {
   overscroll-behavior-y: contain;
 }
 
