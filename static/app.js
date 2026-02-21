@@ -4352,8 +4352,9 @@ function renderL1Filters(tabId) {
     else el.style.removeProperty('--chip-border');
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
-    el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '40px');
+    el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '42px');
     el.style.setProperty('--logo-fit', keepCurrentLogoFit ? 'contain' : 'cover');
+    el.style.setProperty('--logo-scale', keepCurrentLogoFit ? '1' : '1.12');
 
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
