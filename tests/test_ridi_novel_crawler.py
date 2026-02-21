@@ -32,8 +32,8 @@ def test_parse_item_prefers_serial_title_and_writer_roles():
     assert parsed is not None
     assert parsed["content_id"] == "20002"
     assert parsed["title"] == "Series Title"
-    assert parsed["authors"] == ["Writer A", "Writer B"]
-    assert parsed["authors_display"] == "Writer A, Writer B"
+    assert parsed["authors"] == ["Illustrator A", "Writer A", "Translator A", "Writer B"]
+    assert parsed["primary_authors"] == ["Writer B", "Writer A"]
     assert parsed["content_url"] == "https://ridibooks.com/books/20002"
     assert parsed["completion"] is True
 
@@ -63,5 +63,6 @@ def test_parse_item_falls_back_to_book_fields_and_defaults_completion_false():
     assert parsed["content_id"] == "30003"
     assert parsed["title"] == "Single Work"
     assert parsed["authors"] == ["Translator A", "Illustrator A"]
+    assert parsed["primary_authors"] == ["Translator A", "Illustrator A"]
     assert parsed["content_url"] == "https://ridibooks.com/books/30003"
     assert parsed["completion"] is False

@@ -98,6 +98,9 @@ RIDI_LIMIT = int(os.getenv("RIDI_LIMIT", 60))
 RIDI_ORDER_BY = (os.getenv("RIDI_ORDER_BY", "popular") or "popular").strip() or "popular"
 RIDI_PLATFORM = (os.getenv("RIDI_PLATFORM", "web") or "web").strip() or "web"
 RIDI_MAX_PAGES = int(os.getenv("RIDI_MAX_PAGES", 500))
+RIDI_MAX_PAGES_PER_CATEGORY = int(
+    os.getenv("RIDI_MAX_PAGES_PER_CATEGORY", "0")
+)
 
 # --- Kakao Webtoon Discovery Controls ---
 # 신기능(발견/디버깅) 우선: HTTP 오류 로그 on, 번들 스캔 범위 확장
