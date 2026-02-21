@@ -135,7 +135,18 @@ def test_find_stale_ddl_waiters_returns_rows():
     assert result == rows
     assert conn.rollback_calls >= 1
     assert len(cursor.executed) == 1
-    assert "wait_event_type = 'Lock'" in str(cursor.executed[0][0])
+    executed_sql, executed_params = cursor.executed[0]
+    assert "wait_event_type = 'Lock'" in str(executed_sql)
+    assert "query ILIKE ANY (%s::text[])" in str(executed_sql)
+    assert "'ALTER TABLE %'" not in str(executed_sql)
+    assert len(executed_params) == 2
+    assert executed_params[0] == 300
+    assert executed_params[1] == [
+        "ALTER TABLE %",
+        "CREATE INDEX %",
+        "DROP TABLE %",
+        "CREATE EXTENSION %",
+    ]
 
 
 def test_cleanup_stale_ddl_waiters_cancel(monkeypatch):

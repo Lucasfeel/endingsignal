@@ -575,6 +575,13 @@ def find_stale_ddl_waiters(conn, max_age_seconds):
     if not conn:
         return []
 
+    ddl_patterns = [
+        "ALTER TABLE %",
+        "CREATE INDEX %",
+        "DROP TABLE %",
+        "CREATE EXTENSION %",
+    ]
+
     try:
         conn.rollback()
     except Exception:
@@ -601,17 +608,12 @@ def find_stale_ddl_waiters(conn, max_age_seconds):
               AND wait_event_type = 'Lock'
               AND query_start IS NOT NULL
               AND query_start < now() - (%s * interval '1 second')
-              AND query ILIKE ANY (
-                ARRAY[
-                    'ALTER TABLE %',
-                    'CREATE INDEX %',
-                    'DROP TABLE %',
-                    'CREATE EXTENSION %'
-                ]
-              )
+              -- Keep wildcard patterns parameterized. Raw '%' in query text can
+              -- interfere with psycopg2 placeholder parsing.
+              AND query ILIKE ANY (%s::text[])
             ORDER BY query_start ASC
             """,
-            (max_age_seconds,),
+            (max_age_seconds, ddl_patterns),
         )
         rows = cursor.fetchall() or []
 
@@ -1179,26 +1181,37 @@ def setup_database_standalone():
         print("LOG: [DB Setup] Advisory lock acquired.")
 
         current_step = "cleanup stale ddl waiters preflight"
-        stale_waiters = find_stale_ddl_waiters(
-            conn,
-            settings["stale_ddl_max_age_seconds"],
-        )
-        if stale_waiters:
+        try:
+            stale_waiters = find_stale_ddl_waiters(
+                conn,
+                settings["stale_ddl_max_age_seconds"],
+            )
+            if stale_waiters:
+                print(
+                    "WARN: [DB Setup] Detected stale DDL waiters before schema DDL. "
+                    f"count={len(stale_waiters)}",
+                    file=sys.stderr,
+                )
+                print_relation_lock_report(conn, relation="contents")
+            cleanup_stale_ddl_waiters(
+                conn,
+                max_age_seconds=settings["stale_ddl_max_age_seconds"],
+                cleanup_action=settings["stale_ddl_cleanup_action"],
+            )
+        except Exception as preflight_exc:
+            if settings["strict_maintenance"]:
+                raise
             print(
-                "WARN: [DB Setup] Detected stale DDL waiters before schema DDL. "
-                f"count={len(stale_waiters)}",
+                "WARN: [DB Setup] Preflight stale-waiter cleanup failed and will be skipped "
+                "because DB_INIT_STRICT_MAINTENANCE=false: "
+                f"{preflight_exc}",
                 file=sys.stderr,
             )
-            print_relation_lock_report(conn, relation="contents")
-        cleanup_stale_ddl_waiters(
-            conn,
-            max_age_seconds=settings["stale_ddl_max_age_seconds"],
-            cleanup_action=settings["stale_ddl_cleanup_action"],
-        )
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+        finally:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
         current_step = "contents schema ddl-only"
 
