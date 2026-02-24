@@ -290,7 +290,7 @@ const SOURCE_BRAND_META = {
     border: '#E5E8EB',
   },
   wavve: {
-    bg: 'linear-gradient(135deg, #5DD0FF 0%, #B4EFFF 100%)',
+    bg: '#1312C1',
     border: 'rgba(255,255,255,0.25)',
     logoColor: '#FFFFFF',
   },
@@ -4474,6 +4474,9 @@ function renderL1Filters(tabId) {
     const brandMeta = SOURCE_BRAND_META[sourceId] || {};
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
+    const hasCustomNavBg = sourceId === 'wavve' || sourceId === 'laftel';
+    if (hasCustomNavBg && brandMeta.bg) el.style.background = brandMeta.bg;
+    else el.style.removeProperty('background');
     if (isWideLogo) {
       el.style.setProperty('--logo-width', '40px');
       el.style.setProperty('--logo-height', '16px');
