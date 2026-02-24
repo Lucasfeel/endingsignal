@@ -740,11 +740,6 @@ body {
   filter: brightness(1.18) saturate(1.14) contrast(1.04);
 }
 
-.l1-logo.active .l1-icon,
-.l1-logo:focus-visible .l1-icon {
-  box-shadow: 0 0 0 2px rgba(49, 130, 246, 0.92), 0 0 0 5px rgba(49, 130, 246, 0.28);
-}
-
 .l1-logo[aria-disabled='true'] {
   opacity: 0.45;
   filter: brightness(1);
