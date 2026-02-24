@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
+from crawlers.laftel_ott_crawler import LaftelOttCrawler
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
 from crawlers.ridi_novel_crawler import RidiNovelCrawler
 from database import create_standalone_connection, get_cursor
@@ -24,6 +25,7 @@ ALL_CRAWLERS = [
     NaverWebtoonCrawler,
     KakaoWebtoonCrawler,
     RidiNovelCrawler,
+    LaftelOttCrawler,
 ]
 
 ERROR_STATUS_ALIASES = {"error", "fail", "fatal", "실패"}
