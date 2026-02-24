@@ -4462,7 +4462,8 @@ function renderL1Filters(tabId) {
     const keepCurrentLogoFit = sourceId === 'tving' || sourceId === 'laftel';
     const el = document.createElement('div');
     const isActive = selectedSet.has(sourceId);
-    const brightnessClass = selectedSet.size > 0 && isActive ? 'is-bright' : 'is-dim';
+    const hasSelection = selectedSet.size > 0;
+    const brightnessClass = hasSelection ? (isActive ? 'is-bright' : 'is-dim') : 'is-neutral';
     el.className = `l1-logo flex-shrink-0 cursor-pointer spring-bounce ${
       isActive ? 'active' : 'inactive'
     } ${brightnessClass}`;

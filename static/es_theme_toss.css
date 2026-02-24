@@ -665,7 +665,8 @@ body {
   outline: none;
   box-shadow: none;
   filter: brightness(1);
-  transition: background-color 0.16s ease, color 0.16s ease, filter 0.16s ease, opacity 0.16s ease;
+  transition: background-color 0.16s ease, color 0.16s ease, filter 0.16s ease, opacity 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .l1-logo .l1-icon {
@@ -718,6 +719,11 @@ body {
 }
 
 .l1-logo.is-dim {
+  opacity: 0.36;
+  filter: brightness(0.5) saturate(0.55) contrast(0.9);
+}
+
+.l1-logo.is-neutral {
   opacity: 1;
   filter: brightness(1);
 }
@@ -729,8 +735,14 @@ body {
 }
 
 .l1-logo.is-bright,
+.l1-logo.active,
 .l1-logo:focus-visible {
-  filter: brightness(1.08);
+  filter: brightness(1.18) saturate(1.14) contrast(1.04);
+}
+
+.l1-logo.active .l1-icon,
+.l1-logo:focus-visible .l1-icon {
+  box-shadow: 0 0 0 2px rgba(49, 130, 246, 0.92), 0 0 0 5px rgba(49, 130, 246, 0.28);
 }
 
 .l1-logo[aria-disabled='true'] {
