@@ -327,6 +327,16 @@
     return {};
   };
 
+  const isValidHttpUrl = (value) => {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    try {
+      const parsed = new URL(value.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch (err) {
+      return false;
+    }
+  };
+
   const tryParseJsonObject = (value) => {
     if (typeof value !== 'string') return null;
     try {
@@ -938,7 +948,9 @@
 
   const resetAddContentForm = ({ clearHint = true } = {}) => {
     const titleInput = document.getElementById('addContentTitle');
+    const urlInput = document.getElementById('addContentUrl');
     if (titleInput) titleInput.value = '';
+    if (urlInput) urlInput.value = '';
     STATE.addContent.selectedTypeId = '';
     STATE.addContent.selectedSourceId = '';
     renderAddContentTypeOptions();
@@ -1091,6 +1103,7 @@
     if (event?.preventDefault) event.preventDefault();
 
     const title = document.getElementById('addContentTitle')?.value?.trim() || '';
+    const contentUrl = document.getElementById('addContentUrl')?.value?.trim() || '';
     const typeId = String(STATE.addContent.selectedTypeId || '');
     const sourceId = String(STATE.addContent.selectedSourceId || '');
     const submitBtn = document.getElementById('addContentSubmitBtn');
@@ -1107,16 +1120,24 @@
       showToast('소스를 선택해주세요.', { type: 'error' });
       return;
     }
+    if (contentUrl && !isValidHttpUrl(contentUrl)) {
+      showToast('http(s) 형식 URL을 입력해주세요.', { type: 'error' });
+      return;
+    }
 
     try {
       await withLoading(submitBtn, '추가 중...', async () => {
+        const requestBody = {
+          title,
+          typeId: Number(typeId),
+          sourceId: Number(sourceId),
+        };
+        if (contentUrl) {
+          requestBody.contentUrl = contentUrl;
+        }
         const payload = await apiRequest('POST', '/api/admin/contents', {
           token: STATE.token,
-          body: {
-            title,
-            typeId: Number(typeId),
-            sourceId: Number(sourceId),
-          },
+          body: requestBody,
         });
         const createdId = payload?.content?.content_id || '-';
         resetAddContentForm({ clearHint: false });

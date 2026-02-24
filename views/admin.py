@@ -3,6 +3,7 @@
 import json
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from flask import Blueprint, jsonify, request, g, render_template
@@ -274,6 +275,27 @@ def _normalize_input_text(value):
     return normalized if normalized else None
 
 
+def _parse_optional_http_url(value):
+    if value is None:
+        return None, True
+    if not isinstance(value, str):
+        return None, False
+
+    normalized = value.strip()
+    if not normalized:
+        return None, True
+
+    try:
+        parsed = urlparse(normalized)
+    except Exception:
+        return None, False
+
+    scheme = (parsed.scheme or '').lower()
+    if scheme not in ('http', 'https') or not parsed.netloc:
+        return None, False
+    return normalized, True
+
+
 def _parse_positive_int(value):
     try:
         parsed = int(value)
@@ -468,6 +490,10 @@ def create_admin_content():
     title = _normalize_input_text(data.get('title'))
     type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
     source_id = _parse_positive_int(data.get('sourceId') or data.get('source_id'))
+    content_url_input = data.get('contentUrl')
+    if content_url_input is None:
+        content_url_input = data.get('content_url')
+    content_url, is_valid_content_url = _parse_optional_http_url(content_url_input)
 
     if not title:
         return _error_response(400, 'INVALID_REQUEST', 'title is required')
@@ -475,6 +501,8 @@ def create_admin_content():
         return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
     if source_id is None:
         return _error_response(400, 'INVALID_REQUEST', 'sourceId is required')
+    if not is_valid_content_url:
+        return _error_response(400, 'INVALID_REQUEST', 'contentUrl must be a valid http(s) URL')
 
     conn = get_db()
     try:
@@ -526,16 +554,21 @@ def create_admin_content():
                 )
 
             manual_content_id = f"manual:{uuid4().hex}"
+            manual_meta_payload = {
+                'manual_registration': {
+                    'type_id': source_type_id,
+                    'type_name': type_name,
+                    'source_id': int(_get_row_value(source_row, 'source_id') or 0),
+                    'source_name': source_name,
+                    'admin_id': g.current_user.get('id'),
+                }
+            }
+            if content_url:
+                manual_meta_payload['common'] = {
+                    'content_url': content_url,
+                }
             manual_meta = json.dumps(
-                {
-                    'manual_registration': {
-                        'type_id': source_type_id,
-                        'type_name': type_name,
-                        'source_id': int(_get_row_value(source_row, 'source_id') or 0),
-                        'source_name': source_name,
-                        'admin_id': g.current_user.get('id'),
-                    }
-                },
+                manual_meta_payload,
                 ensure_ascii=False,
             )
 
