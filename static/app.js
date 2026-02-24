@@ -323,6 +323,7 @@ const SOURCE_LOGO_ASSETS = {
   ridi: '/static/source_logos/ridi.jpeg',
   netflix: '/static/source_logos/netflix.jpeg',
   tving: '/static/source_logos/tving.png',
+  wavve: '/static/source_logos/wavve.svg',
   coupangplay: '/static/source_logos/coupangplay.png',
   disney_plus: '/static/source_logos/disney_plus.jpeg',
   laftel: '/static/source_logos/laftel.png',
@@ -4459,7 +4460,8 @@ function renderL1Filters(tabId) {
 
   items.forEach((item) => {
     const sourceId = normalizeSourceId(item.id);
-    const keepCurrentLogoFit = sourceId === 'tving' || sourceId === 'laftel';
+    const isWideLogo = sourceId === 'wavve';
+    const keepCurrentLogoFit = sourceId === 'tving' || sourceId === 'laftel' || isWideLogo;
     const el = document.createElement('div');
     const isActive = selectedSet.has(sourceId);
     const hasSelection = selectedSet.size > 0;
@@ -4472,6 +4474,13 @@ function renderL1Filters(tabId) {
     const brandMeta = SOURCE_BRAND_META[sourceId] || {};
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
+    if (isWideLogo) {
+      el.style.setProperty('--logo-width', '40px');
+      el.style.setProperty('--logo-height', '16px');
+    } else {
+      el.style.removeProperty('--logo-width');
+      el.style.removeProperty('--logo-height');
+    }
     el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '40px');
     el.style.setProperty('--logo-fit', keepCurrentLogoFit ? 'contain' : 'cover');
 

@@ -670,8 +670,8 @@ body {
 }
 
 .l1-logo .l1-icon {
-  width: var(--logo-size, 40px);
-  height: var(--logo-size, 40px);
+  width: var(--logo-width, var(--logo-size, 40px));
+  height: var(--logo-height, var(--logo-size, 40px));
   display: inline-flex;
   align-items: center;
   justify-content: center;
