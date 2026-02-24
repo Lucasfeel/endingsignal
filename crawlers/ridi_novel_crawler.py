@@ -2,7 +2,7 @@ import copy
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlencode, urljoin
 
 import aiohttp
@@ -532,8 +532,14 @@ class RidiNovelCrawler(ContentCrawler):
         return await self._discover_next_build_id(category_id, session=session)
 
     def _build_lightnovel_start_url(self, completed_only: bool) -> str:
+        return self._build_api_start_url(
+            category_id=self.LIGHTNOVEL_ROOT[1],
+            completed_only=completed_only,
+        )
+
+    def _build_api_start_url(self, category_id: int, completed_only: bool) -> str:
         params = {
-            "category_id": self.LIGHTNOVEL_ROOT[1],
+            "category_id": int(category_id),
             "tab": "books",
             "limit": int(config.RIDI_LIMIT),
             "platform": str(config.RIDI_PLATFORM),
@@ -559,6 +565,85 @@ class RidiNovelCrawler(ContentCrawler):
             f"{self.RIDI_WEB_BASE}/_next/data/{build_id}/category/books/{category_id}.json?"
             f"{urlencode(params)}"
         )
+
+    async def _fetch_api_category_listing(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        root_key: str,
+        category_id: int,
+        completed_only: bool,
+    ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+        entries_by_id: Dict[str, Dict[str, Any]] = {}
+        meta = {
+            "strategy": "api",
+            "root_key": root_key,
+            "category_id": int(category_id),
+            "completed_only": bool(completed_only),
+            "pages_fetched": 0,
+            "items_seen": 0,
+            "unique_contents": 0,
+            "completion_missing": 0,
+            "errors": [],
+            "stopped_reason": None,
+        }
+
+        url = self._build_api_start_url(category_id=category_id, completed_only=completed_only)
+        visited_urls: Set[str] = set()
+        max_pages = self._max_pages_per_category()
+        while url:
+            if max_pages is not None and meta["pages_fetched"] >= max_pages:
+                meta["stopped_reason"] = "max_pages"
+                break
+            if url in visited_urls:
+                meta["errors"].append(f"REPEATED_NEXT_PAGE:{url}")
+                meta["stopped_reason"] = "repeated_next_page"
+                break
+            visited_urls.add(url)
+
+            try:
+                payload = await self._fetch_json(session, url)
+            except Exception as exc:
+                meta["errors"].append(f"{type(exc).__name__}:{exc}")
+                meta["stopped_reason"] = "exception"
+                break
+
+            data = payload.get("data")
+            data = data if isinstance(data, dict) else {}
+            items = data.get("items")
+            if not isinstance(items, list):
+                items = []
+
+            meta["pages_fetched"] += 1
+            meta["items_seen"] += len(items)
+
+            for item in items:
+                parsed = self._parse_item(
+                    item,
+                    root_key=root_key,
+                    force_completed=completed_only,
+                )
+                if not parsed:
+                    continue
+                if parsed.get("completion_missing"):
+                    meta["completion_missing"] += 1
+                cid = parsed["content_id"]
+                entries_by_id[cid] = self._merge_entries(entries_by_id.get(cid), parsed)
+
+            pagination = data.get("pagination")
+            pagination = pagination if isinstance(pagination, dict) else {}
+            next_page = pagination.get("nextPage")
+            if isinstance(next_page, str) and next_page.strip():
+                url = urljoin(self.RIDI_API_BASE, next_page.strip())
+            else:
+                meta["stopped_reason"] = meta["stopped_reason"] or "no_next_page"
+                url = None
+
+        if meta["stopped_reason"] is None:
+            meta["stopped_reason"] = "completed"
+        meta["unique_contents"] = len(entries_by_id)
+        meta["fetched_count"] = len(entries_by_id)
+        return entries_by_id, meta
 
     async def _fetch_webnovel_page_items(
         self,
@@ -602,7 +687,7 @@ class RidiNovelCrawler(ContentCrawler):
             )
         return items, structure_found
 
-    async def _fetch_webnovel_listing(
+    async def _fetch_webnovel_listing_from_next_data(
         self,
         session: aiohttp.ClientSession,
         *,
@@ -612,14 +697,16 @@ class RidiNovelCrawler(ContentCrawler):
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
         entries_by_id: Dict[str, Dict[str, Any]] = {}
         meta = {
+            "strategy": "next_data",
+            "root_key": root_key,
+            "category_id": int(category_id),
+            "completed_only": bool(completed_only),
             "pages_fetched": 0,
             "items_seen": 0,
             "unique_contents": 0,
             "completion_missing": 0,
             "errors": [],
             "stopped_reason": None,
-            "category_id": category_id,
-            "completed_only": bool(completed_only),
         }
         max_pages = self._max_pages_per_category()
         page = 1
@@ -666,6 +753,43 @@ class RidiNovelCrawler(ContentCrawler):
         meta["unique_contents"] = len(entries_by_id)
         meta["fetched_count"] = len(entries_by_id)
         return entries_by_id, meta
+
+    async def _fetch_webnovel_listing(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        root_key: str,
+        category_id: int,
+        completed_only: bool,
+    ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+        api_entries, api_meta = await self._fetch_api_category_listing(
+            session,
+            root_key=root_key,
+            category_id=category_id,
+            completed_only=completed_only,
+        )
+        api_unique_contents = int(api_meta.get("unique_contents") or 0)
+        api_errors = list(api_meta.get("errors") or [])
+        api_stopped_reason = api_meta.get("stopped_reason")
+        should_fallback = (
+            api_unique_contents <= 0
+            or api_stopped_reason == "exception"
+            or bool(api_errors)
+        )
+        if not should_fallback:
+            return api_entries, api_meta
+
+        next_data_entries, next_data_meta = await self._fetch_webnovel_listing_from_next_data(
+            session,
+            root_key=root_key,
+            category_id=category_id,
+            completed_only=completed_only,
+        )
+        next_data_meta["api_errors"] = api_errors
+        next_data_meta["api_stopped_reason"] = api_stopped_reason
+        next_data_meta["api_unique_contents"] = api_unique_contents
+        next_data_meta["fallback_from"] = "api"
+        return next_data_entries, next_data_meta
 
     def _merge_discovered_entries(
         self,
@@ -736,8 +860,16 @@ class RidiNovelCrawler(ContentCrawler):
                 for label, meta in (("all", all_meta), ("completed", completed_meta)):
                     for error in meta.get("errors", []):
                         fetch_meta["errors"].append(f"{root_key}:{label}:{error}")
+                    for api_error in meta.get("api_errors", []):
+                        fetch_meta["errors"].append(f"{root_key}:{label}:api:{api_error}")
                     if meta.get("stopped_reason") == "max_pages":
                         fetch_meta["health_warnings"].append(f"MAX_PAGES_REACHED:{root_key}:{label}")
+                    if meta.get("strategy") == "next_data" and meta.get("fallback_from") == "api":
+                        fetch_meta["health_warnings"].append(f"WEBNOVEL_API_FALLBACK:{root_key}:{label}")
+                        fetch_meta["health_notes"].append(
+                            f"WEBNOVEL_API_FALLBACK_USED:{root_key}:{label}:"
+                            f"api_stopped_reason={meta.get('api_stopped_reason')}"
+                        )
 
             light_root, light_category_id = self.LIGHTNOVEL_ROOT
             light_all_entries, light_all_meta = await self._fetch_lightnovel_listing(
@@ -786,6 +918,9 @@ class RidiNovelCrawler(ContentCrawler):
             "finished": len(finished_today),
             "hiatus": 0,
         }
+        if len(all_content_today) == 0:
+            fetch_meta["is_suspicious_empty"] = True
+            fetch_meta["errors"].append("SUSPICIOUS_EMPTY_RESULT:RIDI")
         return ongoing_today, hiatus_today, finished_today, dict(all_content_today), fetch_meta
 
     def synchronize_database(
@@ -922,70 +1057,9 @@ class RidiNovelCrawler(ContentCrawler):
         *,
         completed_only: bool,
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
-        entries_by_id: Dict[str, Dict[str, Any]] = {}
-        meta = {
-            "pages_fetched": 0,
-            "items_seen": 0,
-            "unique_contents": 0,
-            "completion_missing": 0,
-            "errors": [],
-            "stopped_reason": None,
-            "completed_only": bool(completed_only),
-        }
-
-        url = self._build_lightnovel_start_url(completed_only=completed_only)
-        visited_urls = set()
-        max_pages = self._max_pages_per_category()
-        while url:
-            if max_pages is not None and meta["pages_fetched"] >= max_pages:
-                meta["stopped_reason"] = "max_pages"
-                break
-            if url in visited_urls:
-                meta["errors"].append(f"REPEATED_NEXT_PAGE:{url}")
-                meta["stopped_reason"] = "repeated_next_page"
-                break
-            visited_urls.add(url)
-
-            try:
-                payload = await self._fetch_json(session, url)
-            except Exception as exc:
-                meta["errors"].append(f"{type(exc).__name__}:{exc}")
-                meta["stopped_reason"] = "exception"
-                break
-
-            data = payload.get("data")
-            data = data if isinstance(data, dict) else {}
-            items = data.get("items")
-            if not isinstance(items, list):
-                items = []
-
-            meta["pages_fetched"] += 1
-            meta["items_seen"] += len(items)
-
-            for item in items:
-                parsed = self._parse_item(
-                    item,
-                    root_key=self.LIGHTNOVEL_ROOT[0],
-                    force_completed=completed_only,
-                )
-                if not parsed:
-                    continue
-                if parsed.get("completion_missing"):
-                    meta["completion_missing"] += 1
-                cid = parsed["content_id"]
-                entries_by_id[cid] = self._merge_entries(entries_by_id.get(cid), parsed)
-
-            pagination = data.get("pagination")
-            pagination = pagination if isinstance(pagination, dict) else {}
-            next_page = pagination.get("nextPage")
-            if isinstance(next_page, str) and next_page.strip():
-                url = urljoin(self.RIDI_API_BASE, next_page.strip())
-            else:
-                meta["stopped_reason"] = meta["stopped_reason"] or "no_next_page"
-                url = None
-
-        if meta["stopped_reason"] is None:
-            meta["stopped_reason"] = "completed"
-        meta["unique_contents"] = len(entries_by_id)
-        meta["fetched_count"] = len(entries_by_id)
-        return entries_by_id, meta
+        return await self._fetch_api_category_listing(
+            session,
+            root_key=self.LIGHTNOVEL_ROOT[0],
+            category_id=self.LIGHTNOVEL_ROOT[1],
+            completed_only=completed_only,
+        )

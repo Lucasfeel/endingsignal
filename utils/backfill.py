@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import psycopg2.extras
 
 from database import get_cursor
 from utils.text import normalize_search_text
+
+EXECUTE_VALUES_PAGE_SIZE = 1000
+LOGGER = logging.getLogger(__name__)
 
 STATUS_COMPLETED = "완결"
 STATUS_ONGOING = "연재중"
@@ -143,6 +147,25 @@ def _build_upsert_rows(records: Sequence[BackfillRecord]) -> List[tuple]:
     return rows
 
 
+def _dedupe_records_last_wins(records: Sequence[BackfillRecord]) -> Tuple[List[BackfillRecord], List[str]]:
+    deduped_reversed: List[BackfillRecord] = []
+    duplicate_content_ids: List[str] = []
+    seen_duplicate_ids: Set[str] = set()
+    seen_keys: Set[Tuple[str, str]] = set()
+
+    for record in reversed(records):
+        key = (record.content_id, record.source)
+        if key in seen_keys:
+            if record.content_id not in seen_duplicate_ids:
+                seen_duplicate_ids.add(record.content_id)
+                duplicate_content_ids.append(record.content_id)
+            continue
+        seen_keys.add(key)
+        deduped_reversed.append(record)
+
+    return list(reversed(deduped_reversed)), duplicate_content_ids
+
+
 UPSERT_SQL = """
 INSERT INTO contents (
     content_id,
@@ -206,10 +229,24 @@ class BackfillUpserter:
             return
         batch = self._buffer
         self._buffer = []
+        deduped_batch, duplicate_content_ids = _dedupe_records_last_wins(batch)
+        duplicates_dropped = len(batch) - len(deduped_batch)
+        if duplicates_dropped > 0:
+            LOGGER.warning(
+                "Dropped duplicate keys in backfill batch before upsert: "
+                "duplicates_dropped=%s original_batch_size=%s deduped_batch_size=%s duplicate_content_ids=%s",
+                duplicates_dropped,
+                len(batch),
+                len(deduped_batch),
+                duplicate_content_ids[:5],
+            )
         if self.dry_run:
             return
 
-        rows = _build_upsert_rows(batch)
+        rows = _build_upsert_rows(deduped_batch)
+        if not rows:
+            return
+
         cursor = get_cursor(self.conn)
         try:
             results = psycopg2.extras.execute_values(
@@ -217,7 +254,7 @@ class BackfillUpserter:
                 UPSERT_SQL,
                 rows,
                 template=None,
-                page_size=len(rows),
+                page_size=min(len(rows), EXECUTE_VALUES_PAGE_SIZE),
                 fetch=True,
             )
             inserted = sum(1 for row in results if row and bool(row[0]))
@@ -226,6 +263,7 @@ class BackfillUpserter:
             self.stats.updated_count += updated
             self.conn.commit()
         except Exception:
+            self._buffer = batch + self._buffer
             self.conn.rollback()
             raise
         finally:

@@ -122,7 +122,15 @@ Setup:
 
 ```bash
 pip install -r requirements-backfill.txt
-python -m playwright install chromium
+python -m playwright install --with-deps chromium
+```
+
+Build/run in a dedicated backfill container (recommended for KakaoPage):
+
+```bash
+docker build -f Dockerfile.backfill -t endingsignal-backfill:latest .
+docker run --rm -e DATABASE_URL=postgresql://... endingsignal-backfill:latest \
+  python scripts/backfill_novels_once.py --sources kakao_page --reset-state
 ```
 
 Dry runs:
@@ -136,12 +144,20 @@ Real run:
 
 ```bash
 python scripts/backfill_novels_once.py --sources naver_series,kakao_page
+python scripts/backfill_novels_once.py --sources naver_series --reset-state
+python scripts/backfill_novels_once.py --sources naver_series --rewind-pages 20
 ```
 
 Notes:
 - The backfill writes only to `contents` (batched upsert on `(content_id, source)`).
+- DB batching dedupes duplicate `(content_id, source)` keys within a single batch (last record wins) to avoid PostgreSQL `ON CONFLICT` multi-hit errors.
 - It does not run daily crawlers and does not emit CDC events.
 - Resume state is stored under `.backfill_state/` by default (`--state-dir` configurable).
+- `--reset-state` clears state files for the selected sources before the run starts, which is useful for deliberate full reruns.
+- `--rewind-pages N` rewinds Naver Series mode state by `N` pages (minimum page `1`) before run start, useful to recover small missing ranges after a failed flush.
+- Naver Series pagination includes guards to stop if pages are repeatedly identical or produce no new ids to avoid runaway loops on repeated responses.
+  - `NAVER_SERIES_BACKFILL_NO_NEW_PAGES_THRESHOLD` (default: `3`)
+  - `NAVER_SERIES_BACKFILL_REPEAT_PAGE_THRESHOLD` (default: `2`)
 - Optional cookie env for age-gated KakaoPage pages:
   - `KAKAOPAGE_COOKIE_HEADER`
   - `KAKAOPAGE_COOKIES_JSON`

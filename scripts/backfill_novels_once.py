@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -34,7 +35,13 @@ from services.naver_series_parser import (
     STATUS_ONGOING,
     parse_naver_series_list,
 )
-from utils.backfill import BackfillUpserter, coerce_status, dedupe_strings, merge_genres
+from utils.backfill import (
+    STATUS_COMPLETED as BACKFILL_STATUS_COMPLETED,
+    BackfillUpserter,
+    coerce_status,
+    dedupe_strings,
+    merge_genres,
+)
 
 LOGGER = logging.getLogger("backfill_novels_once")
 
@@ -105,6 +112,53 @@ def _parse_sources(raw_sources: str) -> List[str]:
 
 def _state_file_path(state_dir: Path, source: str) -> Path:
     return state_dir / f"{source}.json"
+
+
+def _reset_state_files(state_dir: Path, sources: List[str]) -> None:
+    for source in sources:
+        state_path = _state_file_path(state_dir, source)
+        if not state_path.exists():
+            continue
+        try:
+            state_path.unlink()
+            LOGGER.info("Removed state file for source=%s path=%s", source, state_path)
+        except Exception:
+            LOGGER.warning(
+                "Failed to remove state file for source=%s path=%s",
+                source,
+                state_path,
+                exc_info=True,
+            )
+
+
+def _rewind_naver_state(state: Dict[str, Any], rewind_pages: int) -> bool:
+    if rewind_pages <= 0:
+        return False
+
+    changed = False
+    modes_state = state.setdefault("modes", {})
+    for mode_name in ("ongoing", "completed"):
+        mode_state = modes_state.setdefault(mode_name, {"next_page": 1, "done": False})
+        try:
+            next_page = int(mode_state.get("next_page", 1) or 1)
+        except (TypeError, ValueError):
+            next_page = 1
+        next_page = max(1, next_page)
+        rewound_page = max(1, next_page - rewind_pages)
+        was_done = bool(mode_state.get("done"))
+        if rewound_page != next_page or was_done:
+            mode_state["next_page"] = rewound_page
+            mode_state["done"] = False
+            changed = True
+            LOGGER.info(
+                "Rewound Naver state mode=%s next_page=%s->%s done=%s rewind_pages=%s",
+                mode_name,
+                next_page,
+                rewound_page,
+                was_done,
+                rewind_pages,
+            )
+    return changed
 
 
 def _load_state(state_dir: Path, source: str, default: Dict[str, Any]) -> Dict[str, Any]:
@@ -234,6 +288,30 @@ def _cookies_from_env_for_playwright() -> List[Dict[str, Any]]:
     return cookies
 
 
+def _raise_kakao_playwright_launch_error(exc: Exception) -> None:
+    raw_message = str(exc)
+    lowered = raw_message.lower()
+
+    missing_lib_error = (
+        "libglib-2.0.so.0" in lowered
+        or "error while loading shared libraries" in lowered
+        or "exitcode=127" in lowered
+    )
+    missing_browser_error = (
+        "executable doesn't exist" in lowered
+        or "please run the following command to download new browsers" in lowered
+    )
+
+    if not (missing_lib_error or missing_browser_error):
+        return
+
+    raise RuntimeError(
+        "Playwright Chromium launch failed for KakaoPage backfill. "
+        "Use the dedicated backfill image (`Dockerfile.backfill`) or install browser deps in this runtime with "
+        "`python -m playwright install --with-deps chromium`."
+    ) from exc
+
+
 def _build_kakao_tab_url(url: str, *, is_complete: bool) -> str:
     return _append_query(url, is_complete=str(bool(is_complete)).lower())
 
@@ -261,8 +339,10 @@ async def run_naver_series_backfill(
     max_pages: Optional[int],
     max_items: Optional[int],
     state_dir: Path,
+    rewind_pages: int,
+    summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
-    summary = SourceSummary(source=SOURCE_NAVER_SERIES)
+    summary = summary or SourceSummary(source=SOURCE_NAVER_SERIES)
     state = _load_state(
         state_dir,
         SOURCE_NAVER_SERIES,
@@ -273,12 +353,21 @@ async def run_naver_series_backfill(
             }
         },
     )
+    if _rewind_naver_state(state, rewind_pages):
+        _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
+
     modes = [
         ("ongoing", NAVER_LIST_URL_ONGOING, False),
         ("completed", NAVER_LIST_URL_COMPLETED, True),
     ]
 
     headers = _build_headers(referer="https://series.naver.com/novel")
+    no_new_pages_threshold = _clean_int_limit(
+        os.getenv("NAVER_SERIES_BACKFILL_NO_NEW_PAGES_THRESHOLD")
+    ) or 3
+    repeat_page_threshold = _clean_int_limit(
+        os.getenv("NAVER_SERIES_BACKFILL_REPEAT_PAGE_THRESHOLD")
+    ) or 2
 
     for mode_name, base_url, is_finished_page in modes:
         mode_state = state.setdefault("modes", {}).setdefault(
@@ -288,8 +377,17 @@ async def run_naver_series_backfill(
             LOGGER.info("Naver mode=%s already marked done in state file; skipping.", mode_name)
             continue
 
-        page = int(mode_state.get("next_page", 1) or 1)
+        try:
+            page = int(mode_state.get("next_page", 1) or 1)
+        except (TypeError, ValueError):
+            page = 1
+        page = max(1, page)
         pages_processed = 0
+        seen_ids: Set[str] = set()
+        consecutive_no_new_pages = 0
+        repeated_page_run = 0
+        previous_page_signature: Optional[str] = None
+
         while True:
             if max_items is not None and summary.parsed_count >= max_items:
                 LOGGER.info("Naver reached max_items=%s; stopping.", max_items)
@@ -302,9 +400,9 @@ async def run_naver_series_backfill(
             LOGGER.info("Naver fetch mode=%s page=%s url=%s", mode_name, page, page_url)
             try:
                 html = await _fetch_text_with_retry(session, page_url, headers=headers)
-            except Exception as exc:
+            except Exception:
                 summary.error_count += 1
-                LOGGER.error("Naver fetch error mode=%s page=%s: %s", mode_name, page, exc)
+                LOGGER.error("Naver fetch error mode=%s page=%s", mode_name, page, exc_info=True)
                 break
 
             parsed_items = parse_naver_series_list(
@@ -320,6 +418,54 @@ async def run_naver_series_backfill(
                 LOGGER.info("Naver mode=%s page=%s produced 0 items; marking done.", mode_name, page)
                 break
 
+            page_ids: List[str] = []
+            for item in parsed_items:
+                content_id = str(item.get("content_id") or "").strip()
+                if content_id:
+                    page_ids.append(content_id)
+
+            new_ids_count = sum(1 for content_id in page_ids if content_id not in seen_ids)
+            seen_ids.update(page_ids)
+
+            if new_ids_count == 0:
+                consecutive_no_new_pages += 1
+            else:
+                consecutive_no_new_pages = 0
+
+            page_signature: Optional[str] = None
+            if page_ids:
+                page_signature = hashlib.sha1(",".join(sorted(page_ids)).encode("utf-8")).hexdigest()
+            if page_signature and page_signature == previous_page_signature:
+                repeated_page_run += 1
+            else:
+                repeated_page_run = 1 if page_signature else 0
+            previous_page_signature = page_signature
+
+            if consecutive_no_new_pages >= no_new_pages_threshold:
+                mode_state["done"] = True
+                mode_state["next_page"] = page
+                _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
+                LOGGER.warning(
+                    "Naver stopping mode=%s page=%s due to no-new pages threshold=%s (consecutive_no_new_pages=%s).",
+                    mode_name,
+                    page,
+                    no_new_pages_threshold,
+                    consecutive_no_new_pages,
+                )
+                break
+            if repeated_page_run >= repeat_page_threshold:
+                mode_state["done"] = True
+                mode_state["next_page"] = page
+                _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
+                LOGGER.warning(
+                    "Naver stopping mode=%s page=%s due to repeat-page threshold=%s (repeat_page_run=%s).",
+                    mode_name,
+                    page,
+                    repeat_page_threshold,
+                    repeated_page_run,
+                )
+                break
+
             for item in parsed_items:
                 if max_items is not None and summary.parsed_count >= max_items:
                     break
@@ -328,7 +474,10 @@ async def run_naver_series_backfill(
                     "source": SOURCE_NAVER_SERIES,
                     "title": item.get("title"),
                     "authors": item.get("authors", []),
-                    "status": coerce_status(item.get("status") or (STATUS_ONGOING if not is_finished_page else "완결")),
+                    "status": coerce_status(
+                        item.get("status")
+                        or (STATUS_ONGOING if not is_finished_page else BACKFILL_STATUS_COMPLETED)
+                    ),
                     "content_url": item.get("content_url")
                     or NAVER_SERIES_DETAIL_URL.format(product_no=item.get("content_id")),
                     "genres": item.get("genres") or [DEFAULT_NOVEL_GENRE],
@@ -356,10 +505,6 @@ async def run_naver_series_backfill(
         if max_items is not None and summary.parsed_count >= max_items:
             break
 
-    upserter.close()
-    summary.inserted_count = upserter.stats.inserted_count
-    summary.updated_count = upserter.stats.updated_count
-    summary.skipped_count += upserter.stats.skipped_count
     return summary
 
 
@@ -502,8 +647,9 @@ async def run_kakaopage_backfill(
     dry_run: bool,
     max_items: Optional[int],
     state_dir: Path,
+    summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
-    summary = SourceSummary(source=SOURCE_KAKAOPAGE)
+    summary = summary or SourceSummary(source=SOURCE_KAKAOPAGE)
     state = _load_state(
         state_dir,
         SOURCE_KAKAOPAGE,
@@ -516,12 +662,23 @@ async def run_kakaopage_backfill(
         raise RuntimeError(
             "Playwright is required for KakaoPage backfill. "
             "Install with `pip install -r requirements-backfill.txt` and "
-            "`python -m playwright install chromium`."
+            "`python -m playwright install --with-deps chromium`."
         ) from exc
 
     cookies = _cookies_from_env_for_playwright()
+    cookie_header = _kakao_cookie_header()
+    if not cookies and not cookie_header:
+        LOGGER.warning(
+            "No KakaoPage cookies were provided. If discovery/detail pages are age- or login-gated, "
+            "set KAKAOPAGE_COOKIE_HEADER or KAKAOPAGE_COOKIES_JSON."
+        )
+
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
+        try:
+            browser = await playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            _raise_kakao_playwright_launch_error(exc)
+            raise
         context = await browser.new_context()
         if cookies:
             try:
@@ -544,6 +701,11 @@ async def run_kakaopage_backfill(
     discovered_map = state.get("discovered", {})
     if not isinstance(discovered_map, dict):
         discovered_map = {}
+    if not discovered_map and not cookies and not cookie_header:
+        LOGGER.warning(
+            "Kakao discovery returned 0 ids without cookies. KakaoPage likely requires authenticated/age-verified "
+            "cookies for this environment. Provide KAKAOPAGE_COOKIE_HEADER or KAKAOPAGE_COOKIES_JSON."
+        )
     detail_done_list = state.get("detail_done", [])
     if not isinstance(detail_done_list, list):
         detail_done_list = []
@@ -553,7 +715,6 @@ async def run_kakaopage_backfill(
     if max_items is not None:
         ids_to_process = ids_to_process[:max_items]
 
-    cookie_header = _kakao_cookie_header()
     headers = _build_headers(referer="https://page.kakao.com/landing/genre/11", cookie_header=cookie_header)
 
     timeout = aiohttp.ClientTimeout(
@@ -627,10 +788,6 @@ async def run_kakaopage_backfill(
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
                 detail_done_dirty = False
 
-    upserter.close()
-    summary.inserted_count = upserter.stats.inserted_count
-    summary.updated_count = upserter.stats.updated_count
-    summary.skipped_count += upserter.stats.skipped_count
     if skipped_missing_author:
         LOGGER.warning("Kakao skipped %s items due to missing authors.", skipped_missing_author)
     return summary
@@ -652,20 +809,34 @@ def _make_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="Parse and summarize only; do not write to DB.")
     parser.add_argument("--max-pages", type=int, default=None, help="Max pages per Naver mode.")
+    parser.add_argument(
+        "--rewind-pages",
+        type=int,
+        default=0,
+        help="For Naver Series only: rewind each mode's next_page by N before running (min page is 1).",
+    )
     parser.add_argument("--max-items", type=int, default=None, help="Global hard limit across selected sources.")
     parser.add_argument("--db-batch-size", type=int, default=500, help="Batch size for DB upsert commits.")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR).")
     parser.add_argument("--state-dir", default=".backfill_state/", help="State directory for resumable runs.")
+    parser.add_argument(
+        "--reset-state",
+        action="store_true",
+        help="Delete state files for requested sources before starting.",
+    )
     return parser
 
 
 async def _async_main(args: argparse.Namespace) -> int:
     requested_sources = _parse_sources(args.sources)
     max_pages = _clean_int_limit(args.max_pages)
+    rewind_pages = max(0, int(args.rewind_pages or 0))
     max_items = _clean_int_limit(args.max_items)
     batch_size = _clean_int_limit(args.db_batch_size) or 500
     state_dir = Path(args.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
+    if args.reset_state:
+        _reset_state_files(state_dir, requested_sources)
 
     timeout = aiohttp.ClientTimeout(
         total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
@@ -689,29 +860,42 @@ async def _async_main(args: argparse.Namespace) -> int:
                     LOGGER.info("Global max_items reached before source=%s", source)
                     break
 
+                summary = SourceSummary(source=source)
                 upserter = BackfillUpserter(conn, batch_size=batch_size, dry_run=args.dry_run)
                 try:
                     if source == SOURCE_NAVER_SERIES:
-                        summary = await run_naver_series_backfill(
+                        await run_naver_series_backfill(
                             session=session,
                             upserter=upserter,
                             dry_run=args.dry_run,
                             max_pages=max_pages,
                             max_items=remaining,
                             state_dir=state_dir,
+                            rewind_pages=rewind_pages,
+                            summary=summary,
                         )
                     elif source == SOURCE_KAKAOPAGE:
-                        summary = await run_kakaopage_backfill(
+                        await run_kakaopage_backfill(
                             upserter=upserter,
                             dry_run=args.dry_run,
                             max_items=remaining,
                             state_dir=state_dir,
+                            summary=summary,
                         )
                     else:
                         raise ValueError(f"Unsupported source={source}")
-                except Exception as exc:
-                    LOGGER.error("Backfill failed for source=%s: %s", source, exc)
-                    summary = SourceSummary(source=source, error_count=1)
+                except Exception:
+                    summary.error_count += 1
+                    LOGGER.error("Backfill failed for source=%s", source, exc_info=True)
+                finally:
+                    try:
+                        upserter.close()
+                    except Exception:
+                        summary.error_count += 1
+                        LOGGER.error("Backfill upserter close failed for source=%s", source, exc_info=True)
+                    summary.inserted_count = upserter.stats.inserted_count
+                    summary.updated_count = upserter.stats.updated_count
+                    summary.skipped_count += upserter.stats.skipped_count
 
                 summaries.append(summary)
                 total_processed += summary.parsed_count
