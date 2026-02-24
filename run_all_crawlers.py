@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import traceback
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -38,6 +39,19 @@ FATAL_KAKAO_ERROR_SIGNATURES = (
     "SUSPICIOUS_EMPTY_RESULT",
     "suspicious empty result",
 )
+FINAL_COLLECTION_ORDER = ("kakaowebtoon", "naver_webtoon", "ridi")
+FINAL_COLLECTION_LABELS = {
+    "kakaowebtoon": "카카오웹툰",
+    "naver_webtoon": "네이버웹툰",
+    "ridi": "리디",
+}
+SOURCE_NAME_ALIASES = {
+    "kakaowebtoon": "kakaowebtoon",
+    "kakao_webtoon": "kakaowebtoon",
+    "naver_webtoon": "naver_webtoon",
+    "ridi": "ridi",
+    "laftel": "laftel",
+}
 
 
 def _ensure_unique_sources(crawler_classes):
@@ -155,6 +169,67 @@ def build_rollup_warning_reasons(actual_total_unique, target_total_unique, kakao
         warning_reasons.append("KAKAO_FETCH_FAILED")
 
     return warning_reasons
+
+
+def _safe_non_negative_int(value) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
+def _infer_source_name(result: Dict) -> Optional[str]:
+    source_name = result.get("source_name")
+    if isinstance(source_name, str) and source_name.strip():
+        normalized = source_name.strip().lower()
+        return SOURCE_NAME_ALIASES.get(normalized, normalized)
+
+    summary = result.get("summary")
+    if isinstance(summary, dict):
+        summary_source = summary.get("crawler")
+        if isinstance(summary_source, str) and summary_source.strip():
+            normalized = summary_source.strip().lower()
+            return SOURCE_NAME_ALIASES.get(normalized, normalized)
+
+    crawler_name = result.get("crawler_name")
+    if isinstance(crawler_name, str) and crawler_name.strip():
+        normalized = crawler_name.strip().lower().replace(" ", "_")
+        return SOURCE_NAME_ALIASES.get(normalized, normalized)
+
+    return None
+
+
+def format_final_collection_summary(results: List[dict]) -> str:
+    counts_by_source: Dict[str, int] = {}
+
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        source_name = _infer_source_name(result)
+        if not source_name:
+            continue
+        fetched_count = _safe_non_negative_int(result.get("fetched_count"))
+        counts_by_source[source_name] = counts_by_source.get(source_name, 0) + fetched_count
+
+    ordered_sources: List[str] = []
+    for source_name in FINAL_COLLECTION_ORDER:
+        if source_name in counts_by_source:
+            ordered_sources.append(source_name)
+    for source_name in sorted(counts_by_source.keys()):
+        if source_name not in FINAL_COLLECTION_ORDER:
+            ordered_sources.append(source_name)
+
+    total = sum(counts_by_source.values())
+    if not ordered_sources:
+        return f"총 {total}개 수집"
+
+    segments = [
+        f"{FINAL_COLLECTION_LABELS.get(source_name, source_name)} {counts_by_source[source_name]}개 수집"
+        for source_name in ordered_sources
+    ]
+    segments.append(f"총 {total}개 수집")
+    return ", ".join(segments)
 
 
 async def run_one_crawler(crawler_class):
@@ -483,6 +558,7 @@ async def main():
     if warning:
         print(f"{severity_prefix(rollup_status)}: {warning}", flush=True)
     print(f"Final rollup payload: {json.dumps(rollup, ensure_ascii=False)}", flush=True)
+    print(format_final_collection_summary([result for result in results if isinstance(result, dict)]), flush=True)
 
     completion_report = run_scheduled_completion_cdc()
     publication_report = run_scheduled_publication_cdc()

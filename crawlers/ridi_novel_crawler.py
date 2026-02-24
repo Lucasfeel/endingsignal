@@ -3,7 +3,7 @@ import json
 import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import urlencode, urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -43,6 +43,8 @@ class RidiNovelCrawler(ContentCrawler):
         "runtime",
         "webpack",
     }
+    REQUEST_ERROR_LIMIT = 20
+    DEFAULT_LOG_EVERY_N_PAGES = 10
 
     def __init__(self):
         super().__init__("ridi")
@@ -81,9 +83,135 @@ class RidiNovelCrawler(ContentCrawler):
 
     @staticmethod
     def _sanitize_text(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return ""
+        if isinstance(value, int):
+            return str(value)
         if not isinstance(value, str):
             return ""
         return re.sub(r"\s+", " ", value).strip()
+
+    def _log_every_n_pages(self) -> int:
+        raw = os.getenv("RIDI_LOG_EVERY_N_PAGES")
+        if raw is not None:
+            try:
+                parsed = int(raw)
+                if parsed > 0:
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+        return self.DEFAULT_LOG_EVERY_N_PAGES
+
+    def _should_log_page_progress(self, page_number: int) -> bool:
+        if page_number <= 1:
+            return True
+        every = self._log_every_n_pages()
+        return every > 0 and (page_number % every == 0)
+
+    @staticmethod
+    def _extract_offset_from_url(url: str) -> Optional[int]:
+        try:
+            parsed = urlparse(url)
+            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            raw_offset = query.get("offset")
+            if raw_offset is None:
+                return None
+            offset = int(raw_offset)
+            if offset < 0:
+                return None
+            return offset
+        except Exception:
+            return None
+
+    @staticmethod
+    def _short_message(message: object, *, limit: int = 220) -> str:
+        compact = re.sub(r"\s+", " ", str(message or "")).strip()
+        if len(compact) <= limit:
+            return compact
+        return f"{compact[: max(0, limit - 3)]}..."
+
+    @staticmethod
+    def _append_bounded(values: List[Any], entry: Any, *, limit: int) -> None:
+        values.append(entry)
+        if len(values) > limit:
+            del values[:-limit]
+
+    @staticmethod
+    def _extract_exception_status(exc: Exception) -> Optional[int]:
+        status = getattr(exc, "_ridi_request_status", None)
+        if isinstance(status, int):
+            return status
+        status = getattr(exc, "status", None)
+        if isinstance(status, int):
+            return status
+        return None
+
+    def _annotate_request_exception(
+        self,
+        exc: Exception,
+        *,
+        url: Optional[str],
+        phase: str,
+        status: Optional[int] = None,
+    ) -> None:
+        try:
+            if url:
+                setattr(exc, "_ridi_request_url", str(url))
+            setattr(exc, "_ridi_request_phase", str(phase or "api"))
+            if isinstance(status, int):
+                setattr(exc, "_ridi_request_status", status)
+        except Exception:
+            pass
+
+    def _record_request_error(
+        self,
+        meta: Dict[str, Any],
+        *,
+        phase: str,
+        exc: Exception,
+        url: Optional[str] = None,
+    ) -> None:
+        request_errors = meta.setdefault("request_errors", [])
+        if not isinstance(request_errors, list):
+            request_errors = []
+            meta["request_errors"] = request_errors
+
+        request_url = self._sanitize_text(url or getattr(exc, "_ridi_request_url", ""))
+        request_phase = self._sanitize_text(getattr(exc, "_ridi_request_phase", "")) or phase
+        status = self._extract_exception_status(exc)
+
+        entry: Dict[str, Any] = {
+            "url": request_url or "<unknown>",
+            "phase": request_phase or "api",
+            "exception_type": type(exc).__name__,
+            "message": self._short_message(exc),
+        }
+        if status is not None:
+            entry["status"] = status
+
+        self._append_bounded(request_errors, entry, limit=self.REQUEST_ERROR_LIMIT)
+
+    def _log_api_page_progress(
+        self,
+        *,
+        root_key: str,
+        completed_only: bool,
+        page_number: int,
+        request_url: str,
+        page_items: int,
+        unique_contents: int,
+    ) -> None:
+        if not self._should_log_page_progress(page_number):
+            return
+        offset = self._extract_offset_from_url(request_url)
+        offset_label = offset if offset is not None else "-"
+        print(
+            f"[RIDI][API] root={root_key} completed_only={completed_only} "
+            f"page={page_number} offset={offset_label} items={page_items} unique={unique_contents}",
+            flush=True,
+        )
 
     @classmethod
     def _merge_unique_strings(cls, first: object, second: object) -> List[str]:
@@ -444,23 +572,79 @@ class RidiNovelCrawler(ContentCrawler):
         session: aiohttp.ClientSession,
         url: str,
         params: Optional[Dict[str, Any]] = None,
+        *,
+        phase: str = "api",
     ) -> Dict[str, Any]:
-        async with session.get(url, headers=self._build_headers(), params=params) as response:
-            response.raise_for_status()
-            payload = await response.json(content_type=None)
-            if not isinstance(payload, dict):
-                raise ValueError("RIDI response is not a JSON object")
-            return payload
+        request_url = url
+        try:
+            async with session.get(url, headers=self._build_headers(), params=params) as response:
+                request_url = str(response.url)
+                try:
+                    response.raise_for_status()
+                except Exception as exc:
+                    self._annotate_request_exception(
+                        exc,
+                        url=request_url,
+                        phase=phase,
+                        status=response.status,
+                    )
+                    raise
+
+                try:
+                    payload = await response.json(content_type=None)
+                except Exception as exc:
+                    wrapped = ValueError(f"RIDI_JSON_PARSE_ERROR:{type(exc).__name__}:{exc}")
+                    self._annotate_request_exception(
+                        wrapped,
+                        url=request_url,
+                        phase=phase,
+                        status=response.status,
+                    )
+                    raise wrapped from exc
+                if not isinstance(payload, dict):
+                    wrapped = ValueError("RIDI response is not a JSON object")
+                    self._annotate_request_exception(
+                        wrapped,
+                        url=request_url,
+                        phase=phase,
+                        status=response.status,
+                    )
+                    raise wrapped
+                return payload
+        except Exception as exc:
+            self._annotate_request_exception(exc, url=request_url, phase=phase)
+            raise
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
     )
-    async def _fetch_text(self, session: aiohttp.ClientSession, url: str) -> str:
-        async with session.get(url, headers=self._build_headers()) as response:
-            response.raise_for_status()
-            return await response.text()
+    async def _fetch_text(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        *,
+        phase: str = "next",
+    ) -> str:
+        request_url = url
+        try:
+            async with session.get(url, headers=self._build_headers()) as response:
+                request_url = str(response.url)
+                try:
+                    response.raise_for_status()
+                except Exception as exc:
+                    self._annotate_request_exception(
+                        exc,
+                        url=request_url,
+                        phase=phase,
+                        status=response.status,
+                    )
+                    raise
+                return await response.text()
+        except Exception as exc:
+            self._annotate_request_exception(exc, url=request_url, phase=phase)
+            raise
 
     async def _discover_next_build_id(
         self,
@@ -481,7 +665,7 @@ class RidiNovelCrawler(ContentCrawler):
 
         try:
             url = f"{self.RIDI_WEB_BASE}/category/books/{category_id}"
-            html = await self._fetch_text(active_session, url)
+            html = await self._fetch_text(active_session, url, phase="next")
         finally:
             if owns_session and active_session:
                 await active_session.close()
@@ -585,6 +769,7 @@ class RidiNovelCrawler(ContentCrawler):
             "unique_contents": 0,
             "completion_missing": 0,
             "errors": [],
+            "request_errors": [],
             "stopped_reason": None,
         }
 
@@ -602,9 +787,10 @@ class RidiNovelCrawler(ContentCrawler):
             visited_urls.add(url)
 
             try:
-                payload = await self._fetch_json(session, url)
+                payload = await self._fetch_json(session, url, phase="api")
             except Exception as exc:
                 meta["errors"].append(f"{type(exc).__name__}:{exc}")
+                self._record_request_error(meta, phase="api", exc=exc, url=url)
                 meta["stopped_reason"] = "exception"
                 break
 
@@ -629,6 +815,15 @@ class RidiNovelCrawler(ContentCrawler):
                     meta["completion_missing"] += 1
                 cid = parsed["content_id"]
                 entries_by_id[cid] = self._merge_entries(entries_by_id.get(cid), parsed)
+
+            self._log_api_page_progress(
+                root_key=root_key,
+                completed_only=completed_only,
+                page_number=meta["pages_fetched"],
+                request_url=url,
+                page_items=len(items),
+                unique_contents=len(entries_by_id),
+            )
 
             pagination = data.get("pagination")
             pagination = pagination if isinstance(pagination, dict) else {}
@@ -662,8 +857,9 @@ class RidiNovelCrawler(ContentCrawler):
             completed_only=completed_only,
         )
         try:
-            payload = await self._fetch_json(session, url)
+            payload = await self._fetch_json(session, url, phase="next")
         except aiohttp.ClientResponseError as exc:
+            self._annotate_request_exception(exc, url=url, phase="next", status=exc.status)
             if exc.status == 404 and allow_refresh_retry:
                 await self._get_next_build_id(session, category_id, force_refresh=True)
                 return await self._fetch_webnovel_page_items(
@@ -673,6 +869,9 @@ class RidiNovelCrawler(ContentCrawler):
                     completed_only=completed_only,
                     allow_refresh_retry=False,
                 )
+            raise
+        except Exception as exc:
+            self._annotate_request_exception(exc, url=url, phase="next")
             raise
 
         items, structure_found = self._extract_next_data_items(payload)
@@ -706,6 +905,7 @@ class RidiNovelCrawler(ContentCrawler):
             "unique_contents": 0,
             "completion_missing": 0,
             "errors": [],
+            "request_errors": [],
             "stopped_reason": None,
         }
         max_pages = self._max_pages_per_category()
@@ -723,6 +923,15 @@ class RidiNovelCrawler(ContentCrawler):
                 )
             except Exception as exc:
                 meta["errors"].append(f"{type(exc).__name__}:{exc}")
+                request_url = self._sanitize_text(getattr(exc, "_ridi_request_url", ""))
+                if not request_url and self._next_build_id:
+                    request_url = self._build_webnovel_next_data_url(
+                        self._next_build_id,
+                        category_id,
+                        page,
+                        completed_only=completed_only,
+                    )
+                self._record_request_error(meta, phase="next", exc=exc, url=request_url or None)
                 meta["stopped_reason"] = "exception"
                 break
 
@@ -745,6 +954,13 @@ class RidiNovelCrawler(ContentCrawler):
                     meta["completion_missing"] += 1
                 cid = parsed["content_id"]
                 entries_by_id[cid] = self._merge_entries(entries_by_id.get(cid), parsed)
+
+            if self._should_log_page_progress(meta["pages_fetched"]):
+                print(
+                    f"[RIDI][NEXT] root={root_key} completed_only={completed_only} "
+                    f"page={page} items={len(items)} unique={len(entries_by_id)}",
+                    flush=True,
+                )
 
             page += 1
 
@@ -778,6 +994,20 @@ class RidiNovelCrawler(ContentCrawler):
         )
         if not should_fallback:
             return api_entries, api_meta
+
+        fallback_reasons = []
+        if api_unique_contents <= 0:
+            fallback_reasons.append("api_unique_contents=0")
+        if api_stopped_reason:
+            fallback_reasons.append(f"api_stopped_reason={api_stopped_reason}")
+        if api_errors:
+            fallback_reasons.append(f"api_error={self._short_message(api_errors[0], limit=140)}")
+        reason_text = ", ".join(fallback_reasons) if fallback_reasons else "unknown"
+        print(
+            f"[RIDI] API -> Next.js fallback triggered root={root_key} "
+            f"completed_only={completed_only} reason={reason_text}",
+            flush=True,
+        )
 
         next_data_entries, next_data_meta = await self._fetch_webnovel_listing_from_next_data(
             session,
@@ -825,11 +1055,19 @@ class RidiNovelCrawler(ContentCrawler):
         all_content_today: Dict[str, Dict[str, Any]] = {}
         fetch_meta: Dict[str, Any] = {
             "errors": [],
+            "request_errors": [],
             "health_notes": [],
             "health_warnings": [],
             "category_counts": {},
             "totals": {},
         }
+        webnovel_roots_label = ", ".join(f"{root}({category_id})" for root, category_id in self.WEBNOVEL_ROOTS)
+        lightnovel_root_label = f"{self.LIGHTNOVEL_ROOT[0]}({self.LIGHTNOVEL_ROOT[1]})"
+        print(
+            f"[RIDI] fetch_all_data start roots=[{webnovel_roots_label}, {lightnovel_root_label}] "
+            f"api_listing=enabled next_fallback=enabled",
+            flush=True,
+        )
 
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
             for root_key, category_id in self.WEBNOVEL_ROOTS:
@@ -860,6 +1098,18 @@ class RidiNovelCrawler(ContentCrawler):
                 for label, meta in (("all", all_meta), ("completed", completed_meta)):
                     for error in meta.get("errors", []):
                         fetch_meta["errors"].append(f"{root_key}:{label}:{error}")
+                    for request_error in meta.get("request_errors", []):
+                        if isinstance(request_error, dict):
+                            entry = {
+                                **request_error,
+                                "root_key": root_key,
+                                "listing": label,
+                            }
+                            self._append_bounded(
+                                fetch_meta["request_errors"],
+                                entry,
+                                limit=self.REQUEST_ERROR_LIMIT,
+                            )
                     for api_error in meta.get("api_errors", []):
                         fetch_meta["errors"].append(f"{root_key}:{label}:api:{api_error}")
                     if meta.get("stopped_reason") == "max_pages":
@@ -895,6 +1145,18 @@ class RidiNovelCrawler(ContentCrawler):
             for label, meta in (("all", light_all_meta), ("completed", light_completed_meta)):
                 for error in meta.get("errors", []):
                     fetch_meta["errors"].append(f"{light_root}:{label}:{error}")
+                for request_error in meta.get("request_errors", []):
+                    if isinstance(request_error, dict):
+                        entry = {
+                            **request_error,
+                            "root_key": light_root,
+                            "listing": label,
+                        }
+                        self._append_bounded(
+                            fetch_meta["request_errors"],
+                            entry,
+                            limit=self.REQUEST_ERROR_LIMIT,
+                        )
                 if meta.get("stopped_reason") == "max_pages":
                     fetch_meta["health_warnings"].append(f"MAX_PAGES_REACHED:{light_root}:{label}")
 
@@ -931,6 +1193,7 @@ class RidiNovelCrawler(ContentCrawler):
         hiatus_today,
         finished_today,
     ):
+        print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...", flush=True)
         cursor = get_cursor(conn)
         cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
         db_existing_ids = {str(row["content_id"]) for row in cursor.fetchall()}
@@ -1048,7 +1311,10 @@ class RidiNovelCrawler(ContentCrawler):
                 inserts,
             )
 
+        synced_count = len(updates) + len(inserts)
         cursor.close()
+        print(f"{synced_count}개 웹소설 정보 업데이트 완료.", flush=True)
+        print("DB 동기화 완료.", flush=True)
         return len(inserts)
 
     async def _fetch_lightnovel_listing(

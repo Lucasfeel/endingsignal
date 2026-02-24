@@ -84,6 +84,46 @@ def test_parse_item_completion_variants_for_lightnovel_shapes():
     assert standalone["content_url"] == "https://ridibooks.com/books/1003"
 
 
+def test_parse_item_accepts_numeric_ids_and_prefers_serial_id():
+    crawler = RidiNovelCrawler()
+
+    with_serial = crawler._parse_item(
+        {
+            "book": {
+                "bookId": 12345,
+                "title": "Book Title",
+                "serial": {
+                    "serialId": 67890,
+                    "title": "Serial Title",
+                    "completion": False,
+                },
+            }
+        }
+    )
+    without_serial = crawler._parse_item(
+        {
+            "book": {
+                "bookId": 12345,
+                "title": "Book Title",
+                "serial": {
+                    "serialId": None,
+                    "title": "",
+                    "completion": False,
+                },
+            }
+        }
+    )
+
+    assert with_serial is not None
+    assert with_serial["book_id"] == "12345"
+    assert with_serial["serial_id"] == "67890"
+    assert with_serial["content_id"] == "67890"
+
+    assert without_serial is not None
+    assert without_serial["book_id"] == "12345"
+    assert without_serial["content_id"] == "12345"
+
+
 def test_extract_next_data_items_from_nested_payload():
     crawler = RidiNovelCrawler()
     payload = {

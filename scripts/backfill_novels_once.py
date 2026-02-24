@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +25,7 @@ import config
 from database import create_standalone_connection
 from services.kakaopage_parser import (
     KAKAOPAGE_BASE_URL,
-    STATUS_COMPLETED,
+    KAKAOPAGE_GENRE_ROOT_PATH,
     extract_listing_content_ids,
     extract_tab_links,
     parse_kakaopage_detail,
@@ -58,9 +59,8 @@ NAVER_LIST_URL_COMPLETED = (
     "?OSType=pc&categoryTypeCode=series&genreCode=&orderTypeCode=new&is=&isFinished=true"
 )
 
-KAKAOPAGE_LIST_URL_ONGOING = "https://page.kakao.com/landing/genre/11?is_complete=false"
-KAKAOPAGE_LIST_URL_COMPLETED = "https://page.kakao.com/landing/genre/11?is_complete=true"
-KAKAOPAGE_CONTENT_URL_TEMPLATE = "https://page.kakao.com/content/{content_id}"
+KAKAOPAGE_LIST_URL = f"{KAKAOPAGE_BASE_URL}{KAKAOPAGE_GENRE_ROOT_PATH}"
+KAKAOPAGE_CONTENT_URL_TEMPLATE = f"{KAKAOPAGE_BASE_URL}/content/{{content_id}}"
 
 
 @dataclass
@@ -235,11 +235,9 @@ async def _fetch_text_with_retry(
 
 def _normalize_kakao_discovered_entry(raw_entry: Any) -> Dict[str, Any]:
     if not isinstance(raw_entry, dict):
-        return {"genres": [], "seen_in_completed": False, "seen_in_ongoing": False}
+        return {"genres": []}
     return {
         "genres": dedupe_strings(raw_entry.get("genres", [])),
-        "seen_in_completed": bool(raw_entry.get("seen_in_completed")),
-        "seen_in_ongoing": bool(raw_entry.get("seen_in_ongoing")),
     }
 
 
@@ -312,8 +310,29 @@ def _raise_kakao_playwright_launch_error(exc: Exception) -> None:
     ) from exc
 
 
-def _build_kakao_tab_url(url: str, *, is_complete: bool) -> str:
-    return _append_query(url, is_complete=str(bool(is_complete)).lower())
+def _build_kakao_tab_url(url: str) -> str:
+    parsed = urlparse(url)
+    merged = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    merged.pop("is_complete", None)
+    return urlunparse(parsed._replace(query=urlencode(merged)))
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_MULTISPACE_RE = re.compile(r"\s+")
+
+
+def _extract_html_diagnostics(html: str) -> Dict[str, str]:
+    raw_html = str(html or "")
+    title = ""
+    match = _HTML_TITLE_RE.search(raw_html)
+    if match:
+        title = _MULTISPACE_RE.sub(" ", _HTML_TAG_RE.sub(" ", match.group(1))).strip()
+    text = _MULTISPACE_RE.sub(" ", _HTML_TAG_RE.sub(" ", raw_html)).strip()
+    return {
+        "title": title,
+        "text_snippet": text[:200],
+    }
 
 
 def _record_sample(summary: SourceSummary, record: Dict[str, Any], *, max_samples: int = 5) -> None:
@@ -517,95 +536,109 @@ async def _discover_kakaopage_ids(
     max_items: Optional[int],
 ) -> None:
     discovered = state.setdefault("discovered", {})
-    tabs_done = state.setdefault("tabs_done", {"ongoing": [], "completed": []})
-    if not isinstance(tabs_done, dict):
-        tabs_done = {"ongoing": [], "completed": []}
-        state["tabs_done"] = tabs_done
+    if not isinstance(discovered, dict):
+        discovered = {}
+        state["discovered"] = discovered
 
-    mode_configs = [
-        ("ongoing", KAKAOPAGE_LIST_URL_ONGOING, False),
-        ("completed", KAKAOPAGE_LIST_URL_COMPLETED, True),
-    ]
+    tabs_done_raw = state.setdefault("tabs_done", [])
+    done_set: Set[str] = set()
+    if isinstance(tabs_done_raw, dict):
+        for tab_urls in tabs_done_raw.values():
+            if not isinstance(tab_urls, list):
+                continue
+            done_set.update(str(url) for url in tab_urls if isinstance(url, str))
+    elif isinstance(tabs_done_raw, list):
+        done_set.update(str(url) for url in tabs_done_raw if isinstance(url, str))
+    state["tabs_done"] = sorted(done_set)
+
     stagnant_threshold = int(os.getenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "4"))
     max_scrolls_per_tab = int(os.getenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "120"))
+    queue: List[Dict[str, str]] = [{"name": "all", "url": _build_kakao_tab_url(KAKAOPAGE_LIST_URL)}]
+    queued_urls = {queue[0]["url"]}
 
-    for mode_name, seed_url, is_complete in mode_configs:
-        completed_flag_key = "seen_in_completed" if is_complete else "seen_in_ongoing"
-        done_set = set(tabs_done.get(mode_name, []))
-        queue: List[Dict[str, str]] = [{"name": "전체", "url": _build_kakao_tab_url(seed_url, is_complete=is_complete)}]
-        queued_urls = {queue[0]["url"]}
+    while queue:
+        if max_items is not None and len(discovered) >= max_items:
+            LOGGER.info("Kakao discovery reached max_items=%s", max_items)
+            break
 
-        while queue:
+        tab = queue.pop(0)
+        tab_url = tab["url"]
+        tab_name = tab["name"] or "all"
+        if tab_url in done_set:
+            continue
+
+        LOGGER.info("Kakao discovery open tab=%s url=%s", tab_name, tab_url)
+        try:
+            await page.goto(tab_url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(1200)
+        except Exception as exc:
+            LOGGER.error("Kakao discovery failed to open tab=%s: %s", tab_url, exc)
+            done_set.add(tab_url)
+            state["tabs_done"] = sorted(done_set)
+            _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+            continue
+
+        stagnant_rounds = 0
+        tab_discovered_ids: Set[str] = set()
+        last_html = ""
+        for scroll_idx in range(max_scrolls_per_tab):
+            html = await page.content()
+            last_html = html
+            ids = extract_listing_content_ids(html)
+            previous_count = len(discovered)
+
+            for content_id in ids:
+                entry = _normalize_kakao_discovered_entry(discovered.get(content_id))
+                if tab_name and tab_name != "all":
+                    entry["genres"] = dedupe_strings([*entry["genres"], tab_name])
+                discovered[content_id] = entry
+                tab_discovered_ids.add(content_id)
+
+            new_count = len(discovered) - previous_count
+            tab_links = extract_tab_links(html, base_url=KAKAOPAGE_BASE_URL)
+            for tab_link in tab_links:
+                candidate_url = _build_kakao_tab_url(tab_link["url"])
+                if candidate_url in queued_urls or candidate_url in done_set:
+                    continue
+                queued_urls.add(candidate_url)
+                queue.append({"name": tab_link.get("name") or "tab", "url": candidate_url})
+
+            if new_count <= 0:
+                stagnant_rounds += 1
+            else:
+                stagnant_rounds = 0
+                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+
+            LOGGER.info(
+                "Kakao discovery tab=%s scroll=%s total_ids=%s new_ids=%s stagnant=%s",
+                tab_name,
+                scroll_idx + 1,
+                len(discovered),
+                new_count,
+                stagnant_rounds,
+            )
+
             if max_items is not None and len(discovered) >= max_items:
-                LOGGER.info("Kakao discovery reached max_items=%s", max_items)
+                break
+            if stagnant_rounds >= stagnant_threshold:
                 break
 
-            tab = queue.pop(0)
-            tab_url = tab["url"]
-            tab_name = tab["name"] or "전체"
-            if tab_url in done_set:
-                continue
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(1200)
 
-            LOGGER.info("Kakao discovery open mode=%s tab=%s url=%s", mode_name, tab_name, tab_url)
-            try:
-                await page.goto(tab_url, wait_until="domcontentloaded", timeout=60000)
-                await page.wait_for_timeout(1200)
-            except Exception as exc:
-                LOGGER.error("Kakao discovery failed to open tab=%s: %s", tab_url, exc)
-                done_set.add(tab_url)
-                tabs_done[mode_name] = sorted(done_set)
-                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
-                continue
+        if not tab_discovered_ids:
+            diagnostics = _extract_html_diagnostics(last_html)
+            LOGGER.warning(
+                "Kakao discovery tab yielded 0 content IDs tab=%s url=%s title=%r html_snippet=%r",
+                tab_name,
+                tab_url,
+                diagnostics.get("title"),
+                diagnostics.get("text_snippet"),
+            )
 
-            stagnant_rounds = 0
-            for scroll_idx in range(max_scrolls_per_tab):
-                html = await page.content()
-                ids = extract_listing_content_ids(html)
-                previous_count = len(discovered)
-
-                for content_id in ids:
-                    entry = _normalize_kakao_discovered_entry(discovered.get(content_id))
-                    if tab_name and tab_name != "전체":
-                        entry["genres"] = dedupe_strings([*entry["genres"], tab_name])
-                    entry[completed_flag_key] = True
-                    discovered[content_id] = entry
-
-                new_count = len(discovered) - previous_count
-                tab_links = extract_tab_links(html, base_url=KAKAOPAGE_BASE_URL)
-                for tab_link in tab_links:
-                    candidate_url = _build_kakao_tab_url(tab_link["url"], is_complete=is_complete)
-                    if candidate_url in queued_urls or candidate_url in done_set:
-                        continue
-                    queued_urls.add(candidate_url)
-                    queue.append({"name": tab_link.get("name") or "탭", "url": candidate_url})
-
-                if new_count <= 0:
-                    stagnant_rounds += 1
-                else:
-                    stagnant_rounds = 0
-                    _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
-
-                LOGGER.info(
-                    "Kakao discovery mode=%s tab=%s scroll=%s total_ids=%s new_ids=%s stagnant=%s",
-                    mode_name,
-                    tab_name,
-                    scroll_idx + 1,
-                    len(discovered),
-                    new_count,
-                    stagnant_rounds,
-                )
-
-                if max_items is not None and len(discovered) >= max_items:
-                    break
-                if stagnant_rounds >= stagnant_threshold:
-                    break
-
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(1200)
-
-            done_set.add(tab_url)
-            tabs_done[mode_name] = sorted(done_set)
-            _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+        done_set.add(tab_url)
+        state["tabs_done"] = sorted(done_set)
+        _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
 
         if max_items is not None and len(discovered) >= max_items:
             break
@@ -626,8 +659,6 @@ async def _fetch_kakao_detail_and_build_record(
         fallback_genres=discovered_entry.get("genres", []),
     )
     status = parsed.get("status") or STATUS_ONGOING
-    if discovered_entry.get("seen_in_completed"):
-        status = STATUS_COMPLETED
     genres = merge_genres(parsed.get("genres"), discovered_entry.get("genres"))
 
     return {
@@ -653,7 +684,7 @@ async def run_kakaopage_backfill(
     state = _load_state(
         state_dir,
         SOURCE_KAKAOPAGE,
-        default={"discovered": {}, "tabs_done": {"ongoing": [], "completed": []}, "detail_done": []},
+        default={"discovered": {}, "tabs_done": [], "detail_done": []},
     )
 
     try:
@@ -701,6 +732,11 @@ async def run_kakaopage_backfill(
     discovered_map = state.get("discovered", {})
     if not isinstance(discovered_map, dict):
         discovered_map = {}
+    if not discovered_map:
+        LOGGER.warning(
+            "Kakao discovery returned 0 ids from listing=%s. Verify page access, SSR HTML shape, and cookies.",
+            KAKAOPAGE_LIST_URL,
+        )
     if not discovered_map and not cookies and not cookie_header:
         LOGGER.warning(
             "Kakao discovery returned 0 ids without cookies. KakaoPage likely requires authenticated/age-verified "
@@ -715,7 +751,7 @@ async def run_kakaopage_backfill(
     if max_items is not None:
         ids_to_process = ids_to_process[:max_items]
 
-    headers = _build_headers(referer="https://page.kakao.com/landing/genre/11", cookie_header=cookie_header)
+    headers = _build_headers(referer=KAKAOPAGE_LIST_URL, cookie_header=cookie_header)
 
     timeout = aiohttp.ClientTimeout(
         total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,

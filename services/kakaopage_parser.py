@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 
 STATUS_COMPLETED = "완결"
 STATUS_ONGOING = "연재중"
-KAKAOPAGE_BASE_URL = "https://page.kakao.com"
+KAKAOPAGE_BASE_URL = "https://bff-page.kakao.com"
 KAKAOPAGE_GENRE_ROOT_PATH = "/landing/genre/11"
 KAKAOPAGE_TITLE_SUFFIX_RE = re.compile(r"\s*-\s*웹소설\s*\|\s*카카오페이지\s*$")
 KAKAOPAGE_TITLE_SUFFIX_FALLBACK_RE = re.compile(r"\s*-\s*카카오페이지\s*$")
