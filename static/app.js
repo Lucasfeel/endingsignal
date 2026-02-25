@@ -49,7 +49,7 @@ const ICONS = {
   webtoon: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;"></span>`,
   novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;"></span>`,
-  my: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a1.1 1.1 0 0 1 1.01.67l1.95 4.27 4.65.55a1.1 1.1 0 0 1 .62 1.92l-3.44 3.1.94 4.58a1.1 1.1 0 0 1-1.62 1.17L12 17.5l-4.1 2.35a1.1 1.1 0 0 1-1.63-1.16l.94-4.58-3.44-3.1a1.1 1.1 0 0 1 .62-1.92l4.66-.55 1.94-4.27A1.1 1.1 0 0 1 12 3.2z"/></svg>`,
+  my: `<svg class="w-6 h-6" style="width:26px;height:26px;" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a1.1 1.1 0 0 1 1.01.67l1.95 4.27 4.65.55a1.1 1.1 0 0 1 .62 1.92l-3.44 3.1.94 4.58a1.1 1.1 0 0 1-1.62 1.17L12 17.5l-4.1 2.35a1.1 1.1 0 0 1-1.63-1.16l.94-4.58-3.44-3.1a1.1 1.1 0 0 1 .62-1.92l4.66-.55 1.94-4.27A1.1 1.1 0 0 1 12 3.2z"/></svg>`,
   me: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a4.6 4.6 0 1 1 0 9.2 4.6 4.6 0 0 1 0-9.2m0 10.9c4.8 0 8.8 2.7 9.7 6.5a.9.9 0 0 1-.9 1.2H3.2a.9.9 0 0 1-.9-1.2c.9-3.8 4.9-6.5 9.7-6.5"/></svg>`,
 };
 
@@ -194,6 +194,24 @@ const UI_STATE_DEFAULTS = {
   },
 };
 
+const WEBTOON_DAY_FILTER_OPTIONS = [
+  { id: 'all', label: 'ALL' },
+  { id: 'mon', label: '\uC6D4' },
+  { id: 'tue', label: '\uD654' },
+  { id: 'wed', label: '\uC218' },
+  { id: 'thu', label: '\uBAA9' },
+  { id: 'fri', label: '\uAE08' },
+  { id: 'sat', label: '\uD1A0' },
+  { id: 'sun', label: '\uC77C' },
+  { id: 'daily', label: '\uB9E4\uC77C' },
+  { id: 'hiatus', label: '\uD734\uC7AC' },
+  { id: 'completed', label: '\uC644\uACB0' },
+];
+const WEBTOON_DAY_FILTER_IDS = WEBTOON_DAY_FILTER_OPTIONS.map((item) => item.id);
+const WEBTOON_DAY_FILTER_ID_SET = new Set(WEBTOON_DAY_FILTER_IDS);
+const WEBTOON_DAY_EXCLUSIVE_IDS = new Set(['all', 'hiatus', 'completed']);
+const DEFAULT_WEBTOON_DAYS = ['all'];
+
 const DEFAULT_NOVEL_GENRE_GROUP = 'all';
 const DEFAULT_NOVEL_IS_COMPLETED = false;
 const NOVEL_GENRE_GROUP_OPTIONS = [
@@ -204,6 +222,7 @@ const NOVEL_GENRE_GROUP_OPTIONS = [
   { id: 'light_novel', label: '\uB77C\uC774\uD2B8\uB178\uBCA8' },
   { id: 'wuxia', label: '\uBB34\uD611' },
   { id: 'bl', label: 'BL' },
+  { id: 'completed', label: '\uC644\uACB0' },
 ];
 const NOVEL_GENRE_GROUP_IDS = NOVEL_GENRE_GROUP_OPTIONS.map((item) => item.id);
 
@@ -515,6 +534,139 @@ const sanitizeFilterValue = (value, allowed, fallback) => {
   return allowed.includes(safeVal) ? safeVal : fallback;
 };
 
+const sortWebtoonDays = (days) => {
+  const order = new Map(WEBTOON_DAY_FILTER_IDS.map((dayId, idx) => [dayId, idx]));
+  return [...days].sort(
+    (a, b) =>
+      (order.get(a) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(b) ?? Number.MAX_SAFE_INTEGER),
+  );
+};
+
+const sanitizeWebtoonDays = (value, fallback = DEFAULT_WEBTOON_DAYS) => {
+  const fallbackDays =
+    Array.isArray(fallback) && fallback.length
+      ? [...fallback]
+      : [...DEFAULT_WEBTOON_DAYS];
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+  const normalized = [];
+  const seen = new Set();
+
+  list.forEach((entry) => {
+    const dayId = String(entry || '')
+      .trim()
+      .toLowerCase();
+    if (!WEBTOON_DAY_FILTER_ID_SET.has(dayId) || seen.has(dayId)) return;
+    seen.add(dayId);
+    normalized.push(dayId);
+  });
+
+  if (!normalized.length) return fallbackDays;
+
+  const exclusiveDay = normalized.find((dayId) =>
+    WEBTOON_DAY_EXCLUSIVE_IDS.has(dayId),
+  );
+  if (exclusiveDay) return [exclusiveDay];
+
+  return sortWebtoonDays(normalized);
+};
+
+const areStringArraysEqual = (left, right) => {
+  const a = Array.isArray(left) ? left : [];
+  const b = Array.isArray(right) ? right : [];
+  if (a.length !== b.length) return false;
+  return a.every((entry, idx) => entry === b[idx]);
+};
+
+const toggleWebtoonDaySelection = (currentValue, dayIdRaw) => {
+  const dayId = String(dayIdRaw || '')
+    .trim()
+    .toLowerCase();
+  if (!WEBTOON_DAY_FILTER_ID_SET.has(dayId)) {
+    return sanitizeWebtoonDays(currentValue, DEFAULT_WEBTOON_DAYS);
+  }
+  if (WEBTOON_DAY_EXCLUSIVE_IDS.has(dayId)) return [dayId];
+
+  const selected = sanitizeWebtoonDays(
+    currentValue,
+    DEFAULT_WEBTOON_DAYS,
+  ).filter((entry) => !WEBTOON_DAY_EXCLUSIVE_IDS.has(entry));
+  const next = new Set(selected);
+  if (next.has(dayId)) next.delete(dayId);
+  else next.add(dayId);
+
+  if (!next.size) return [...DEFAULT_WEBTOON_DAYS];
+  return sortWebtoonDays(Array.from(next));
+};
+
+const getSelectedWebtoonDays = () =>
+  sanitizeWebtoonDays(STATE.filters?.webtoon?.day, DEFAULT_WEBTOON_DAYS);
+
+const isCompletedStatusToken = (statusRaw) => {
+  const status = String(statusRaw || '')
+    .trim()
+    .toLowerCase();
+  return status === '\uC644\uACB0' || status === 'completed';
+};
+
+const dedupeContentsBySourceAndId = (items) => {
+  if (!Array.isArray(items)) return [];
+  const deduped = [];
+  const seen = new Set();
+  items.forEach((item) => {
+    const sourceId = normalizeSourceId(item?.source);
+    const contentId = String(
+      item?.content_id ?? item?.contentId ?? item?.id ?? ''
+    ).trim();
+    const dedupeKey = `${sourceId}:${contentId}`;
+    if (contentId && sourceId) {
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+    }
+    deduped.push(item);
+  });
+  return deduped;
+};
+
+const collectWebtoonOngoingItems = (responsePayload, selectedDaysRaw) => {
+  const selectedDays = sanitizeWebtoonDays(
+    selectedDaysRaw,
+    DEFAULT_WEBTOON_DAYS,
+  );
+  const payloadObj =
+    responsePayload &&
+    typeof responsePayload === 'object' &&
+    !Array.isArray(responsePayload)
+      ? responsePayload
+      : {};
+
+  if (selectedDays.includes('all')) {
+    const merged = [];
+    WEBTOON_DAY_FILTER_IDS.forEach((dayId) => {
+      if (WEBTOON_DAY_EXCLUSIVE_IDS.has(dayId)) return;
+      const bucket = payloadObj?.[dayId];
+      if (Array.isArray(bucket)) merged.push(...bucket);
+    });
+    if (!merged.length && Array.isArray(payloadObj?.contents)) {
+      merged.push(...payloadObj.contents);
+    }
+    return dedupeContentsBySourceAndId(merged);
+  }
+
+  const merged = [];
+  selectedDays.forEach((dayId) => {
+    if (WEBTOON_DAY_EXCLUSIVE_IDS.has(dayId)) return;
+    const bucket = payloadObj?.[dayId];
+    if (Array.isArray(bucket)) merged.push(...bucket);
+  });
+
+  return dedupeContentsBySourceAndId(merged);
+};
+
 const sanitizeNovelGenreGroup = (value, fallback = DEFAULT_NOVEL_GENRE_GROUP) => {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return NOVEL_GENRE_GROUP_IDS.includes(normalized) ? normalized : fallback;
@@ -575,11 +727,7 @@ const UIState = {
           ['ongoing', 'completed'],
           UI_STATE_DEFAULTS.filters.status,
         ),
-        day: sanitizeFilterValue(
-          savedDay,
-          ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
-          UI_STATE_DEFAULTS.filters.day,
-        ),
+        day: sanitizeWebtoonDays(savedDay, DEFAULT_WEBTOON_DAYS),
         novelGenreGroup: sanitizeNovelGenreGroup(
           savedNovelGenreGroup,
           DEFAULT_NOVEL_GENRE_GROUP,
@@ -620,11 +768,15 @@ const UIState = {
       ['ongoing', 'completed'],
       fallbackFilters.status,
     );
-    snapshot.filters.day = sanitizeFilterValue(
-      tabFilters.day,
-      ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
-      fallbackFilters.day,
-    );
+    if (tabId === 'webtoon') {
+      snapshot.filters.day = sanitizeWebtoonDays(tabFilters.day, DEFAULT_WEBTOON_DAYS);
+    } else {
+      snapshot.filters.day = sanitizeFilterValue(
+        tabFilters.day,
+        ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+        fallbackFilters.day,
+      );
+    }
 
     return snapshot;
   },
@@ -664,15 +816,27 @@ const UIState = {
         ['ongoing', 'completed'],
         UI_STATE_DEFAULTS.filters.status,
       );
-      const nextDay = sanitizeFilterValue(
-        incoming.day,
-        ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
-        UI_STATE_DEFAULTS.filters.day,
-      );
+      if (tabId === 'webtoon') {
+        const nextDays = sanitizeWebtoonDays(
+          incoming.day ?? incoming.days,
+          DEFAULT_WEBTOON_DAYS,
+        );
+        changed =
+          changed ||
+          current.status !== nextStatus ||
+          !areStringArraysEqual(current.day, nextDays);
+        STATE.filters[tabId].day = nextDays;
+      } else {
+        const nextDay = sanitizeFilterValue(
+          incoming.day,
+          ['all', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'daily', 'hiatus', 'completed'],
+          UI_STATE_DEFAULTS.filters.day,
+        );
+        changed = changed || current.status !== nextStatus || current.day !== nextDay;
+        STATE.filters[tabId].day = nextDay;
+      }
 
-      changed = changed || current.status !== nextStatus || current.day !== nextDay;
       STATE.filters[tabId].status = nextStatus;
-      STATE.filters[tabId].day = nextDay;
     }
 
     if (STATE.filters?.novel) {
@@ -709,7 +873,7 @@ const UIState = {
     if (typeof snapshot.filters.status === 'string') {
       safeSaveStorage(localStorage, UI_STATE_KEYS.filters.status, snapshot.filters.status);
     }
-    if (typeof snapshot.filters.day === 'string') {
+    if (typeof snapshot.filters.day === 'string' || Array.isArray(snapshot.filters.day)) {
       safeSaveStorage(sessionStorage, UI_STATE_KEYS.filters.day, snapshot.filters.day);
     }
     safeSaveStorage(
@@ -794,7 +958,7 @@ const STATE = {
   lastBrowseTab: 'webtoon',
   renderToken: 0,
   filters: {
-    webtoon: { sources: [], day: 'all' },
+    webtoon: { sources: [], day: [...DEFAULT_WEBTOON_DAYS] },
     novel: {
       sources: [],
       genreGroup: DEFAULT_NOVEL_GENRE_GROUP,
@@ -1487,11 +1651,15 @@ function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
   const shouldShow =
     typeof subscribedOverride === 'boolean' ? subscribedOverride : isAnySubscribedForCard(content);
   const existing = thumb.querySelector('[data-star-badge="true"]');
+  const completedSourceBadge = thumb.querySelector('[data-completed-source-badge="true"]');
 
   if (shouldShow && !existing) {
     thumb.appendChild(createStarBadgeEl());
   } else if (!shouldShow && existing) {
     existing.remove();
+  }
+  if (completedSourceBadge) {
+    completedSourceBadge.classList.toggle('has-star-offset', shouldShow);
   }
 }
 
@@ -2615,14 +2783,16 @@ const getThemePreference = () => {
   }
 };
 
+const getSystemThemePreference = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
+  return window.matchMedia(DARK_MODE_MEDIA_QUERY).matches ? 'dark' : 'light';
+};
+
 const applyThemePreference = (pref) => {
   const root = document.documentElement;
   if (!root) return;
-  if (pref === 'dark' || pref === 'light') {
-    root.dataset.theme = pref;
-    return;
-  }
-  delete root.dataset.theme;
+  const resolved = pref === 'dark' || pref === 'light' ? pref : getSystemThemePreference();
+  root.dataset.theme = resolved;
 };
 
 const isDarkEffective = () => {
@@ -2657,6 +2827,7 @@ function setupThemePreferenceListeners() {
     const media = window.matchMedia(DARK_MODE_MEDIA_QUERY);
     const handleSystemThemeChange = () => {
       if (getThemePreference()) return;
+      applyThemePreference(null);
       updateThemeToggleLabel();
     };
     if (typeof media.addEventListener === 'function') {
@@ -4537,7 +4708,7 @@ function renderL2Filters(tabId) {
   ];
 
   if (tabId === 'webtoon') {
-    items = days;
+    items = WEBTOON_DAY_FILTER_OPTIONS;
   } else if (tabId === 'novel') {
     items = NOVEL_GENRE_GROUP_OPTIONS;
   } else if (tabId === 'ott') {
@@ -4553,8 +4724,8 @@ function renderL2Filters(tabId) {
   }
 
   let activeKey = '';
-  if (tabId === 'webtoon')
-    activeKey = STATE.filters?.[tabId]?.day || 'all';
+  let activeSet = new Set();
+  if (tabId === 'webtoon') activeSet = new Set(getSelectedWebtoonDays());
   if (tabId === 'novel')
     activeKey = sanitizeNovelGenreGroup(
       STATE.filters?.novel?.genreGroup,
@@ -4564,12 +4735,14 @@ function renderL2Filters(tabId) {
 
   items.forEach((item) => {
     const el = document.createElement('button');
-    const isActive = activeKey === item.id;
+    const isActive = tabId === 'webtoon' ? activeSet.has(item.id) : activeKey === item.id;
     el.className = `l2-tab spring-bounce ${isActive ? 'active' : ''}`;
     el.textContent = item.label;
 
     el.onclick = () => {
-      if (tabId === 'webtoon') STATE.filters[tabId].day = item.id;
+      if (tabId === 'webtoon') {
+        STATE.filters[tabId].day = toggleWebtoonDaySelection(STATE.filters[tabId].day, item.id);
+      }
       if (tabId === 'novel') STATE.filters[tabId].genreGroup = item.id;
       if (tabId === 'ott') STATE.filters[tabId].genre = item.id;
 
@@ -4581,32 +4754,6 @@ function renderL2Filters(tabId) {
     UI.l2Filter.appendChild(el);
   });
 
-  if (tabId === 'novel') {
-    const wrap = document.createElement('label');
-    wrap.className = 'l2-checkbox ml-2 inline-flex items-center gap-2 select-none';
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'l2-checkbox-input';
-    checkbox.checked = coerceBooleanFilter(
-      STATE.filters?.novel?.isCompleted,
-      DEFAULT_NOVEL_IS_COMPLETED,
-    );
-    checkbox.setAttribute('aria-label', '\uC644\uACB0');
-    checkbox.onchange = () => {
-      STATE.filters.novel.isCompleted = checkbox.checked;
-      fetchAndRenderContent(tabId);
-      UIState.save();
-    };
-
-    const label = document.createElement('span');
-    label.className = 'l2-checkbox-label';
-    label.textContent = '\uC644\uACB0';
-
-    wrap.appendChild(checkbox);
-    wrap.appendChild(label);
-    UI.l2Filter.appendChild(wrap);
-  }
 }
 
 function syncMySubToggleUI() {
@@ -5229,9 +5376,16 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
 
       if (tabId === 'webtoon' || tabId === 'ott') {
         let statusKey = 'ongoing';
-        const webtoonDay = safeString(STATE.filters?.webtoon?.day || 'all', 'all').toLowerCase();
+        const selectedWebtoonDays = tabId === 'webtoon' ? getSelectedWebtoonDays() : ['all'];
+        const webtoonPrimaryDay =
+          tabId === 'webtoon' && selectedWebtoonDays.length === 1
+            ? selectedWebtoonDays[0]
+            : 'all';
         if (tabId === 'webtoon') {
-          statusKey = webtoonDay === 'completed' || webtoonDay === 'hiatus' ? webtoonDay : 'ongoing';
+          statusKey =
+            webtoonPrimaryDay === 'completed' || webtoonPrimaryDay === 'hiatus'
+              ? webtoonPrimaryDay
+              : 'ongoing';
         } else if (tabId === 'ott') {
           const ottStatusRaw = safeString(
             STATE.filters?.ott?.status || STATE.filters?.ott?.day || 'ongoing',
@@ -5243,7 +5397,10 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         }
 
         const shouldUsePaginatedStatus = statusKey === 'completed' || statusKey === 'hiatus';
-        const shouldUsePaginatedOngoing = USE_BROWSE_PAGINATION_V2 && statusKey === 'ongoing';
+        const shouldUsePaginatedOngoing =
+          USE_BROWSE_PAGINATION_V2 &&
+          statusKey === 'ongoing' &&
+          !(tabId === 'webtoon' && selectedWebtoonDays.length > 1);
         const sourceConfig = getSourceRequestConfig(tabId, {
           preferServerMulti: shouldUsePaginatedStatus || shouldUsePaginatedOngoing,
         });
@@ -5262,7 +5419,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
 
         if (shouldUsePaginatedOngoing) {
           const ongoingBaseQuery =
-            tabId === 'webtoon' ? { type: 'webtoon', day: webtoonDay } : { type: 'ott' };
+            tabId === 'webtoon' ? { type: 'webtoon', day: webtoonPrimaryDay } : { type: 'ott' };
           const pagedResult = await runPaginatedBrowse({
             category: 'ongoing',
             sourceConfig,
@@ -5280,13 +5437,15 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           preferServerMulti: USE_BROWSE_PAGINATION_V2,
         });
         sourceFilter = sourceConfig.filterSources;
+        const selectedGenre = sanitizeNovelGenreGroup(
+          STATE.filters?.novel?.genreGroup,
+          DEFAULT_NOVEL_GENRE_GROUP,
+        );
+        const isCompletedGenre = selectedGenre === 'completed';
         const query = {
-          genre_group: sanitizeNovelGenreGroup(
-            STATE.filters?.novel?.genreGroup,
-            DEFAULT_NOVEL_GENRE_GROUP,
-          ),
+          genre_group: isCompletedGenre ? 'all' : selectedGenre,
         };
-        if (coerceBooleanFilter(STATE.filters?.novel?.isCompleted, DEFAULT_NOVEL_IS_COMPLETED)) {
+        if (isCompletedGenre) {
           query.is_completed = 'true';
         }
 
@@ -5308,17 +5467,13 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         responsePayload = await apiRequest('GET', url, { signal });
 
         if (tabId === 'webtoon') {
-          const day = STATE.filters?.[tabId]?.day || 'all';
+          const selectedDays = getSelectedWebtoonDays();
+          const activeStatusDay = selectedDays.length === 1 ? selectedDays[0] : '';
 
-          if (day !== 'completed' && day !== 'hiatus' && day !== 'all') {
-            data = Array.isArray(responsePayload?.[day]) ? responsePayload[day] : [];
-          } else if (day === 'all') {
-            data = [];
-            Object.values(responsePayload || {}).forEach((arr) => {
-              if (Array.isArray(arr)) data.push(...arr);
-            });
-          } else {
+          if (activeStatusDay === 'completed' || activeStatusDay === 'hiatus') {
             data = Array.isArray(responsePayload?.contents) ? responsePayload.contents : [];
+          } else {
+            data = collectWebtoonOngoingItems(responsePayload, selectedDays);
           }
         } else if (tabId === 'novel') {
           data = Array.isArray(responsePayload?.contents)
@@ -5486,6 +5641,28 @@ const buildPicture = ({
   return picture;
 };
 
+const isContentCompletedForBadge = (content) => {
+  const fs = safeObj(content?.final_state);
+  if (fs?.is_scheduled_completion === true) return false;
+  if (isCompletedStatusToken(fs?.final_status)) return true;
+  if (isCompletedStatusToken(content?.status)) return true;
+  return content?.is_completed === true;
+};
+
+const createCompletedSourceBadgeEl = (content, { offsetForStar = false } = {}) => {
+  const sourceId = normalizeSourceId(content?.source);
+  if (!sourceId) return null;
+
+  const badgeEl = document.createElement('div');
+  badgeEl.className = 'es-completed-source-badge';
+  if (offsetForStar) badgeEl.classList.add('has-star-offset');
+  badgeEl.setAttribute('data-completed-source-badge', 'true');
+  badgeEl.setAttribute('aria-hidden', 'true');
+  badgeEl.innerHTML = getSourceIconMarkup(sourceId, sourceId.toUpperCase());
+  bindSourceLogoFallback(badgeEl);
+  return badgeEl;
+};
+
 function createCard(content, tabId, aspectClass) {
   void aspectClass;
   const el = document.createElement('div');
@@ -5519,6 +5696,7 @@ function createCard(content, tabId, aspectClass) {
         .filter(Boolean)
         .join(', ')
     : safeString(rawAuthors, '');
+  const showStarBadge = isAnySubscribedForCard(content);
 
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, UI_CLASSES.cardThumb);
@@ -5562,6 +5740,13 @@ function createCard(content, tabId, aspectClass) {
     }
   }
 
+  if (isContentCompletedForBadge(content)) {
+    const completedSourceBadgeEl = createCompletedSourceBadgeEl(content, {
+      offsetForStar: showStarBadge,
+    });
+    if (completedSourceBadgeEl) cardContainer.appendChild(completedSourceBadgeEl);
+  }
+
   const textContainer = document.createElement('div');
   setClasses(textContainer, UI_CLASSES.cardTextWrap);
 
@@ -5599,7 +5784,7 @@ function createCard(content, tabId, aspectClass) {
 
   el.onclick = () => openSubscribeModal(content, { returnFocusEl: el });
 
-  syncStarBadgeForCard(el, isAnySubscribedForCard(content));
+  syncStarBadgeForCard(el, showStarBadge);
   return el;
 }
 

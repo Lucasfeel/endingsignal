@@ -7,12 +7,16 @@
     <meta name="color-scheme" content="light dark">
     <script>
       (function () {
+        var resolvedTheme = 'light';
         try {
           var savedTheme = localStorage.getItem('es_theme');
           if (savedTheme === 'dark' || savedTheme === 'light') {
-            document.documentElement.dataset.theme = savedTheme;
+            resolvedTheme = savedTheme;
+          } else if (typeof window.matchMedia === 'function') {
+            resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
           }
         } catch (_err) {}
+        document.documentElement.dataset.theme = resolvedTheme;
       })();
     </script>
     <script src="https://cdn.tailwindcss.com"></script>

@@ -446,6 +446,25 @@ body {
   color: var(--blue-700);
 }
 
+.es-completed-source-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 9;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--es-border);
+  background: var(--es-surface);
+  box-shadow: var(--es-shadow-sm);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.es-completed-source-badge.has-star-offset {
+  right: 34px;
+}
+
 .es-badge-base {
   border: 1px solid transparent;
 }
