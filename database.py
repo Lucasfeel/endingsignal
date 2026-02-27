@@ -1484,6 +1484,14 @@ def setup_database_standalone():
         cursor.execute(
             """
             UPDATE subscriptions
+            SET wants_completion = TRUE,
+                wants_publication = FALSE
+            WHERE wants_publication = TRUE;
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE subscriptions
             SET wants_completion = TRUE
             WHERE wants_completion = FALSE AND wants_publication = FALSE;
             """

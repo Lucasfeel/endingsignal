@@ -21,8 +21,6 @@ def _parse_alert_type(payload) -> Optional[str]:
         return 'completion'
     if value == 'completion':
         return 'completion'
-    if value in ('publish', 'publication'):
-        return 'publication'
     return None
 
 
@@ -132,8 +130,8 @@ def subscribe():
     cursor = get_cursor(conn)
     user_id = g.current_user.get('id')
     user_email = g.current_user.get('email')
-    wants_completion = alert_type == 'completion'
-    wants_publication = alert_type == 'publication'
+    wants_completion = True
+    wants_publication = False
 
     try:
         if not _content_exists(cursor, content_id, source):
@@ -147,8 +145,8 @@ def subscribe():
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id, content_id, source)
             DO UPDATE SET
-                wants_completion = subscriptions.wants_completion OR EXCLUDED.wants_completion,
-                wants_publication = subscriptions.wants_publication OR EXCLUDED.wants_publication,
+                wants_completion = TRUE,
+                wants_publication = FALSE,
                 email = COALESCE(subscriptions.email, EXCLUDED.email)
             RETURNING wants_completion, wants_publication
             """,
@@ -195,48 +193,15 @@ def unsubscribe():
     try:
         cursor.execute(
             """
-            UPDATE subscriptions
-            SET wants_completion = CASE
-                    WHEN %s = 'completion' THEN FALSE
-                    ELSE wants_completion
-                END,
-                wants_publication = CASE
-                    WHEN %s = 'publication' THEN FALSE
-                    ELSE wants_publication
-                END
+            DELETE FROM subscriptions
             WHERE user_id = %s AND content_id = %s AND source = %s
-            RETURNING wants_completion, wants_publication
+            RETURNING 1
             """,
-            (alert_type, alert_type, user_id, str(content_id), source),
+            (user_id, str(content_id), source),
         )
-        updated_flags = cursor.fetchone()
-        if not updated_flags:
-            conn.commit()
-            return jsonify({'success': True, 'subscription': None}), 200
-
-        wants_completion = bool(updated_flags[0])
-        wants_publication = bool(updated_flags[1])
-        if not wants_completion and not wants_publication:
-            cursor.execute(
-                """
-                DELETE FROM subscriptions
-                WHERE user_id = %s AND content_id = %s AND source = %s
-                """,
-                (user_id, str(content_id), source),
-            )
-            conn.commit()
-            return jsonify({'success': True, 'subscription': None}), 200
-
+        cursor.fetchone()
         conn.commit()
-        return jsonify(
-            {
-                'success': True,
-                'subscription': {
-                    'wants_completion': wants_completion,
-                    'wants_publication': wants_publication,
-                },
-            }
-        ), 200
+        return jsonify({'success': True, 'subscription': None}), 200
     except psycopg2.Error:
         conn.rollback()
         return _error_response(500, 'DB_ERROR', '데이터베이스 오류가 발생했습니다.')

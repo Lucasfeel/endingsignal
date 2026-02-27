@@ -999,7 +999,6 @@ const STATE = {
 
   // subscriptions
   subscriptionsSet: new Set(),
-  publicationSubscriptionsSet: new Set(),
   pendingSubOps: new Set(),
   mySubscriptions: [],
   subscriptionsLoadedAt: null,
@@ -1214,7 +1213,6 @@ const UI = {
   l2Filter: document.getElementById('l2FilterContainer'),
   filtersWrapper: document.getElementById('filtersWrapper'),
   subscribeModal: document.getElementById('subscribeModal'),
-  subscribePublicationButton: document.getElementById('subscribePublicationButton'),
   subscribeCompletionButton: document.getElementById('subscribeCompletionButton'),
   subscribeStateLine: document.getElementById('subscribeStateLine'),
   subscribeStateDot: document.getElementById('subscribeStateDot'),
@@ -1981,7 +1979,6 @@ function logout({ silent = false } = {}) {
   STATE.subscriptionsNeedFreshHintAt = 0;
 
   STATE.subscriptionsSet = new Set();
-  STATE.publicationSubscriptionsSet = new Set();
   STATE.mySubscriptions = [];
   STATE.subscriptionsLoadedAt = null;
 
@@ -2244,28 +2241,12 @@ const getContentType = (content) => {
   return '';
 };
 
-const supportsPublicationUI = (content) => {
-  const ct = getContentType(content);
-  return ct === 'ott' || ct === 'series';
-};
-
 const isCompletionSubscribed = (content) => {
   const key = subKey(content);
   return key ? STATE.subscriptionsSet.has(key) : false;
 };
 
-const isPublicationSubscribed = (content) => {
-  const key = subKey(content);
-  return key ? STATE.publicationSubscriptionsSet.has(key) : false;
-};
-
-const isAnySubscribedForCard = (content) => {
-  const ct = getContentType(content);
-  if (ct === 'ott' || ct === 'series') {
-    return isCompletionSubscribed(content) || isPublicationSubscribed(content);
-  }
-  return isCompletionSubscribed(content);
-};
+const isAnySubscribedForCard = (content) => isCompletionSubscribed(content);
 
 const setsEqual = (a, b) => {
   if (a === b) return true;
@@ -2299,7 +2280,6 @@ async function loadSubscriptions(opts = {}) {
       STATE.subscriptionsAbortController = null;
     }
     STATE.subscriptionsSet = new Set();
-    STATE.publicationSubscriptionsSet = new Set();
     STATE.mySubscriptions = [];
     STATE.subscriptionsLoadedAt = null;
     STATE.subscriptionsLoadPromise = null;
@@ -2345,23 +2325,16 @@ async function loadSubscriptions(opts = {}) {
       if (getAccessToken() !== tokenSnapshot) return normalized;
 
       const completionSet = new Set();
-      const publicationSet = new Set();
       normalized.forEach((item) => {
         const key = buildSubscriptionKey(item);
         if (!key) return;
         if (item.subscription?.wants_completion) completionSet.add(key);
-        if (item.subscription?.wants_publication) publicationSet.add(key);
       });
 
       const completionChanged = !setsEqual(STATE.subscriptionsSet, completionSet);
-      const publicationChanged = !setsEqual(
-        STATE.publicationSubscriptionsSet,
-        publicationSet
-      );
-      const shouldSync = completionChanged || publicationChanged;
+      const shouldSync = completionChanged;
 
       STATE.subscriptionsSet = completionSet;
-      STATE.publicationSubscriptionsSet = publicationSet;
       STATE.mySubscriptions = normalized;
       STATE.subscriptionsLoadedAt = Date.now();
       if (shouldSync) {
@@ -2424,7 +2397,7 @@ async function retryModalSubscriptionLoad(content) {
   }
 }
 
-async function subscribeContent(content, alertType = 'completion') {
+async function subscribeContent(content) {
   const token = getAccessToken();
   if (!token) throw { httpStatus: 401, message: '로그인이 필요합니다.' };
 
@@ -2435,7 +2408,7 @@ async function subscribeContent(content, alertType = 'completion') {
 
   try {
     const res = await apiRequest('POST', '/api/me/subscriptions', {
-      body: { content_id: contentId, contentId, source, alert_type: alertType },
+      body: { content_id: contentId, contentId, source, alert_type: 'completion' },
       token,
     });
 
@@ -2448,7 +2421,7 @@ async function subscribeContent(content, alertType = 'completion') {
   }
 }
 
-async function unsubscribeContent(content, alertType = 'completion') {
+async function unsubscribeContent(content) {
   const token = getAccessToken();
   if (!token) throw { httpStatus: 401, message: '로그인이 필요합니다.' };
 
@@ -2459,7 +2432,7 @@ async function unsubscribeContent(content, alertType = 'completion') {
 
   try {
     const res = await apiRequest('DELETE', '/api/me/subscriptions', {
-      body: { content_id: contentId, contentId, source, alert_type: alertType },
+      body: { content_id: contentId, contentId, source, alert_type: 'completion' },
       token,
     });
 
@@ -2529,14 +2502,10 @@ function applyServerSubscriptionFlags(content, flags) {
 
   if (!flags) {
     STATE.subscriptionsSet.delete(key);
-    STATE.publicationSubscriptionsSet.delete(key);
   } else {
     const wantsCompletion = Boolean(flags.wants_completion);
-    const wantsPublication = Boolean(flags.wants_publication);
     if (wantsCompletion) STATE.subscriptionsSet.add(key);
     else STATE.subscriptionsSet.delete(key);
-    if (wantsPublication) STATE.publicationSubscriptionsSet.add(key);
-    else STATE.publicationSubscriptionsSet.delete(key);
   }
 
   syncSubscribeModalUI(content);
@@ -2552,15 +2521,10 @@ function syncSubscribeModalUI(content) {
   if (!modalKey || !incomingKey || modalKey !== incomingKey) return;
 
   const modalState = STATE.subscribeModalState || { isLoading: false, loadFailed: false };
-  const publicationSupported = supportsPublicationUI(content);
   const completionSubscribed =
     !modalState.isLoading && !modalState.loadFailed ? isCompletionSubscribed(content) : null;
-  const publicationSubscribed =
-    publicationSupported && !modalState.isLoading && !modalState.loadFailed
-      ? isPublicationSubscribed(content)
-      : null;
   const showLoadingState = modalState.isLoading;
-  const showSubscribedState = completionSubscribed === true || publicationSubscribed === true;
+  const showSubscribedState = completionSubscribed === true;
   const shouldShowStateLine = showLoadingState || !modalState.loadFailed;
 
   if (UI.subscribeStateLine) {
@@ -2570,10 +2534,6 @@ function syncSubscribeModalUI(content) {
   if (UI.subscribeStateText) {
     if (showLoadingState) {
       UI.subscribeStateText.textContent = '불러오는 중';
-    } else if (completionSubscribed && publicationSubscribed) {
-      UI.subscribeStateText.textContent = '공개/완결 알림 구독 중';
-    } else if (publicationSubscribed) {
-      UI.subscribeStateText.textContent = '공개 알림 구독 중';
     } else if (completionSubscribed) {
       UI.subscribeStateText.textContent = '완결 알림 구독 중';
     } else {
@@ -2602,23 +2562,7 @@ function syncSubscribeModalUI(content) {
     btn.classList.toggle('is-active', isSubscribed === true);
   };
 
-  if (UI.subscribePublicationButton) {
-    UI.subscribePublicationButton.classList.toggle('hidden', !publicationSupported);
-    const publicationLabel = modalState.isLoading
-      ? '불러오는 중'
-      : modalState.loadFailed
-        ? '다시 시도'
-        : publicationSubscribed
-          ? '공개 해제'
-          : '공개 구독';
-    setButtonState(UI.subscribePublicationButton, {
-      label: publicationLabel,
-      isSubscribed: publicationSubscribed,
-    });
-  }
-
   if (UI.subscribeCompletionButton) {
-    UI.subscribeCompletionButton.classList.toggle('w-full', !publicationSupported);
     const completionLabel = modalState.isLoading
       ? '불러오는 중'
       : modalState.loadFailed
@@ -2632,7 +2576,6 @@ function syncSubscribeModalUI(content) {
     });
   }
 }
-
 function syncMySubListInPlace() {
   if (!STATE.isMySubOpen) return;
   const root = document.getElementById('mySubscriptionsList') || UI.contentGrid;
@@ -2671,88 +2614,6 @@ const formatDateKST = (isoString) => {
     console.warn('Failed to format date', isoString, e);
     return isoString;
   }
-};
-
-const parseKstNaiveToDate = (publicAtStr) => {
-  const raw = safeString(publicAtStr, '').trim();
-  if (!raw) return null;
-  const normalized = raw.replace('T', ' ').trim();
-  const match =
-    /^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
-      normalized
-    );
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4] || 0);
-  const minute = Number(match[5] || 0);
-  const second = Number(match[6] || 0);
-  const date = new Date(year, month - 1, day, hour, minute, second);
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
-};
-
-const formatPublicAtShort = (publicAtStr, { includeTime = true } = {}) => {
-  const date = parseKstNaiveToDate(publicAtStr);
-  if (!date) return '';
-  const pad = (val) => String(val).padStart(2, '0');
-  const y = date.getFullYear();
-  const m = pad(date.getMonth() + 1);
-  const d = pad(date.getDate());
-  if (!includeTime) return `${y}-${m}-${d}`;
-  const hh = pad(date.getHours());
-  const mm = pad(date.getMinutes());
-  return `${y}-${m}-${d} ${hh}:${mm}`;
-};
-
-const getPublicationPublicAt = (item) =>
-  safeString(
-    item?.publication?.public_at ||
-      item?.publication_at ||
-      item?.publication?.publicAt ||
-      item?.publicationAt,
-    ''
-  );
-
-const buildPublicationStatusText = (item) => {
-  const publicAt = getPublicationPublicAt(item);
-  const date = parseKstNaiveToDate(publicAt);
-  if (!date) return '공개일 미정';
-  const now = new Date();
-  if (date.getTime() > now.getTime()) {
-    const formatted = formatPublicAtShort(publicAt, { includeTime: true });
-    return formatted ? `공개 예정 · ${formatted}` : '공개일 미정';
-  }
-  const formatted = formatPublicAtShort(publicAt, { includeTime: false });
-  return formatted ? `공개됨 · ${formatted}` : '공개일 미정';
-};
-
-const sortPublicationItems = (items) => {
-  const list = Array.isArray(items) ? [...items] : [];
-  list.sort((a, b) => {
-    const aDate = parseKstNaiveToDate(getPublicationPublicAt(a));
-    const bDate = parseKstNaiveToDate(getPublicationPublicAt(b));
-    const aHas = Boolean(aDate);
-    const bHas = Boolean(bDate);
-
-    if (aHas && bHas) {
-      const diff = aDate.getTime() - bDate.getTime();
-      if (diff !== 0) return diff;
-    } else if (aHas !== bHas) {
-      return aHas ? -1 : 1;
-    }
-
-    const aTitle = safeString(a?.title, '');
-    const bTitle = safeString(b?.title, '');
-    const titleDiff = aTitle.localeCompare(bTitle, 'ko-KR');
-    if (titleDiff !== 0) return titleDiff;
-
-    const aId = String(a?.content_id ?? a?.contentId ?? a?.id ?? '');
-    const bId = String(b?.content_id ?? b?.contentId ?? b?.id ?? '');
-    return aId.localeCompare(bId, 'ko-KR');
-  });
-  return list;
 };
 
 function ensureEnhancedThemeAssets() {
@@ -4763,15 +4624,11 @@ function renderL2Filters(tabId) {
 }
 
 function syncMySubToggleUI() {
-  const mode = STATE.filters?.my?.viewMode || 'completion';
+  const rawMode = STATE.filters?.my?.viewMode || 'completion';
+  const mode = rawMode === 'completed' ? 'completed' : 'completion';
 
   if (UI.toggleIndicator) {
-    const x =
-      mode === 'publication'
-        ? 'translateX(0%)'
-        : mode === 'completion'
-          ? 'translateX(100%)'
-          : 'translateX(200%)';
+    const x = mode === 'completed' ? 'translateX(100%)' : 'translateX(0%)';
     UI.toggleIndicator.style.transform = x;
   }
 
@@ -4786,7 +4643,7 @@ function syncMySubToggleUI() {
 }
 
 function updateMySubTab(mode) {
-  STATE.filters.my.viewMode = mode;
+  STATE.filters.my.viewMode = mode === 'completed' ? 'completed' : 'completion';
   syncMySubToggleUI();
   fetchAndRenderContent('my');
 }
@@ -5261,7 +5118,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         return { stale: true };
       }
 
-      const mode = STATE.filters?.my?.viewMode || 'completion';
+      const mode = STATE.filters?.my?.viewMode === 'completed' ? 'completed' : 'completion';
 
       data = (subs || []).filter((item) => {
         const sub = item?.subscription || {};
@@ -5269,41 +5126,14 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         const isScheduled = fs?.is_scheduled_completion === true;
         const isCompleted = fs?.final_status === '완결' && !isScheduled;
 
-        if (mode === 'publication') {
-          if (sub.wants_publication !== true) return false;
-          if (!supportsPublicationUI(item)) return false;
-          return true;
-        }
-
         if (sub.wants_completion !== true) return false;
 
         if (mode === 'completed') return isCompleted;
         return !isCompleted;
       });
 
-      if (mode === 'publication') {
-        data = sortPublicationItems(data);
-      }
-
       if (!data.length) {
-        if (mode === 'publication') {
-          emptyStateConfig = {
-            title: '공개 알림을 구독한 작품이 없습니다',
-            message: '작품 화면에서 공개 알림을 설정해보세요.',
-            actions: [
-              {
-                label: '검색하기',
-                variant: 'primary',
-                onClick: () => openSearchAndFocus(),
-              },
-              {
-                label: 'OTT 보기',
-                variant: 'secondary',
-                onClick: () => updateTab('ott'),
-              },
-            ],
-          };
-        } else if (mode === 'completed') {
+        if (mode === 'completed') {
           emptyStateConfig = {
             title: '완결된 구독 작품이 아직 없습니다',
             message: '구독 중인 작품이 완결되면 여기에 표시됩니다.',
@@ -5714,7 +5544,6 @@ function createCard(content, tabId, aspectClass) {
 
   // Badge logic
   if (tabId === 'my') {
-    const myViewMode = STATE.filters?.my?.viewMode || 'completion';
     const fs = safeObj(content?.final_state);
     const isScheduled = fs?.is_scheduled_completion === true;
     const scheduledDate = safeString(fs?.scheduled_completed_at, '');
@@ -5724,28 +5553,25 @@ function createCard(content, tabId, aspectClass) {
 
     const badgeEl = document.createElement('div');
 
-    if (myViewMode !== 'publication') {
-      if (isScheduled) {
-        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-warning'));
-        const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
-        badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
-          formatted
-            ? `<span class="text-[10px] text-black leading-none">${formatted}</span>`
-            : ''
-        }`;
-        badgeRow.appendChild(badgeEl);
-      } else if (isCompleted) {
-        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-success'));
-        badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
-        badgeRow.appendChild(badgeEl);
-      } else if (isHiatus) {
-        setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-neutral'));
-        badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">휴재</span>`;
-        badgeRow.appendChild(badgeEl);
-      }
+    if (isScheduled) {
+      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-warning'));
+      const formatted = scheduledDate ? formatDateKST(scheduledDate) : '';
+      badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결 예정</span>${
+        formatted
+          ? `<span class="text-[10px] text-black leading-none">${formatted}</span>`
+          : ''
+      }`;
+      badgeRow.appendChild(badgeEl);
+    } else if (isCompleted) {
+      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-success'));
+      badgeEl.innerHTML = `<span class="text-[10px] font-black text-black leading-none">완결</span>`;
+      badgeRow.appendChild(badgeEl);
+    } else if (isHiatus) {
+      setClasses(badgeEl, cx(UI_CLASSES.badgeBase, 'gap-1 es-badge-neutral'));
+      badgeEl.innerHTML = `<span class="text-[10px] font-black leading-none">휴재</span>`;
+      badgeRow.appendChild(badgeEl);
     }
   }
-
   if (isContentCompletedForBadge(content)) {
     const completedSourceBadgeEl = createCompletedSourceBadgeEl(content, {
       offsetForStar: showStarBadge,
@@ -5767,16 +5593,6 @@ function createCard(content, tabId, aspectClass) {
   textContainer.appendChild(titleEl);
   textContainer.appendChild(authorEl);
 
-  if (tabId === 'my') {
-    const myViewMode = STATE.filters?.my?.viewMode || 'completion';
-    if (myViewMode === 'publication') {
-      const publicationText = buildPublicationStatusText(content);
-      const publicationEl = document.createElement('div');
-      setClasses(publicationEl, 'mt-1 text-xs es-muted');
-      publicationEl.textContent = publicationText;
-      textContainer.appendChild(publicationEl);
-    }
-  }
   cardContainer.appendChild(textContainer);
   el.appendChild(cardContainer);
 
@@ -5946,9 +5762,7 @@ function openSubscribeModal(content, opts = {}) {
     linkContainer.classList.add('hidden');
   }
   if (modalEl) {
-    const initialFocusEl = supportsPublicationUI(content)
-      ? UI.subscribePublicationButton || UI.subscribeCompletionButton
-      : UI.subscribeCompletionButton;
+    const initialFocusEl = UI.subscribeCompletionButton;
     openModal(modalEl, {
       initialFocusEl: initialFocusEl || modalEl,
       returnFocusEl,
@@ -6003,7 +5817,7 @@ function closeSubscribeModal({ fromPopstate = false, overlayId = null, skipHisto
   ensureScrollLockConsistency();
 }
 
-window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
+window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
   const modalState = STATE.subscribeModalState || {};
@@ -6016,48 +5830,27 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
   }
 
   if (!requireAuthOrPrompt('subscription-toggle-modal')) return;
-  const normalizedType =
-    String(alertType || '').toLowerCase() === 'publication' ? 'publication' : 'completion';
-  if (normalizedType === 'publication' && !supportsPublicationUI(content)) return;
 
-  const btn =
-    normalizedType === 'publication'
-      ? UI.subscribePublicationButton
-      : UI.subscribeCompletionButton;
+  const btn = UI.subscribeCompletionButton;
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
-  const currently =
-    normalizedType === 'publication'
-      ? isPublicationSubscribed(content)
-      : isCompletionSubscribed(content);
+  const currently = isCompletionSubscribed(content);
   if (UI.subscribeInlineError) UI.subscribeInlineError.textContent = '';
 
   STATE.subscribeToggleInFlight = true;
   const activeLabel = currently ? '해제하는 중…' : '구독하는 중…';
-  if (UI.subscribePublicationButton) {
-    UI.subscribePublicationButton.disabled = true;
-    UI.subscribePublicationButton.classList.add(...disabledClasses);
-    if (btn === UI.subscribePublicationButton) {
-      UI.subscribePublicationButton.textContent = activeLabel;
-    }
-  }
   if (UI.subscribeCompletionButton) {
     UI.subscribeCompletionButton.disabled = true;
     UI.subscribeCompletionButton.classList.add(...disabledClasses);
-    if (btn === UI.subscribeCompletionButton) {
+    if (btn) {
       UI.subscribeCompletionButton.textContent = activeLabel;
     }
   }
 
   try {
-    const res = currently
-      ? await unsubscribeContent(content, normalizedType)
-      : await subscribeContent(content, normalizedType);
+    const res = currently ? await unsubscribeContent(content) : await subscribeContent(content);
     const flags = res?.subscription ?? null;
-    const isOn =
-      normalizedType === 'publication'
-        ? Boolean(flags?.wants_publication)
-        : Boolean(flags?.wants_completion);
-    const label = normalizedType === 'publication' ? '공개 알림' : '완결 알림';
+    const isOn = Boolean(flags?.wants_completion);
+    const label = '완결 알림';
     showToast(isOn ? `${label}을 구독했습니다.` : `${label}을 해제했습니다.`, {
       type: 'success',
     });
@@ -6082,10 +5875,6 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
     }
   } finally {
     STATE.subscribeToggleInFlight = false;
-    if (UI.subscribePublicationButton) {
-      UI.subscribePublicationButton.disabled = false;
-      UI.subscribePublicationButton.classList.remove(...disabledClasses);
-    }
     if (UI.subscribeCompletionButton) {
       UI.subscribeCompletionButton.disabled = false;
       UI.subscribeCompletionButton.classList.remove(...disabledClasses);
@@ -6093,7 +5882,6 @@ window.toggleSubscriptionFromModal = async function (alertType = 'completion') {
     if (content) syncSubscribeModalUI(content);
   }
 };
-
 /* =========================
    Expose required globals
    ========================= */
