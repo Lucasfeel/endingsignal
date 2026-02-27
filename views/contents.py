@@ -429,11 +429,15 @@ def search_contents():
     try:
         query = request.args.get('q', '').strip()
         normalized_query = normalize_search_text(query)
-        content_type = request.args.get('type', 'webtoon')
-        source = request.args.get('source', 'all')
+        raw_content_type = request.args.get('type', 'all')
+        content_type = str(raw_content_type).strip().lower() if raw_content_type is not None else 'all'
+        raw_source = request.args.get('source', 'all')
+        source = str(raw_source).strip() if raw_source is not None else 'all'
         allowed_types = {'webtoon', 'novel', 'ott', 'series'}
         if not content_type or content_type == 'all' or content_type not in allowed_types:
             content_type = None
+        if not source:
+            source = 'all'
 
         if not normalized_query:
             return jsonify([])
@@ -446,10 +450,16 @@ def search_contents():
         conn = get_db()
         cursor = get_cursor(conn)
 
-        # The normalized columns are precomputed and indexed with pg_trgm to keep
-        # whitespace-insensitive searches fast without per-row text manipulation.
-        title_expr = "COALESCE(normalized_title, '')"
-        author_expr = "COALESCE(normalized_authors, '')"
+        # Prefer normalized columns for indexed search, but fall back to on-the-fly
+        # normalization so rows inserted without normalized_* values still match.
+        title_expr = (
+            "COALESCE(NULLIF(normalized_title, ''), "
+            "regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g'))"
+        )
+        author_expr = (
+            "COALESCE(NULLIF(normalized_authors, ''), "
+            "regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g'))"
+        )
         like_param = f"%{normalized_query}%"
 
         def compute_thresholds(length):
@@ -465,9 +475,8 @@ def search_contents():
 
         where_clauses = [
             "COALESCE(is_deleted, FALSE) = FALSE",
-            f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))",
         ]
-        params = [like_param, like_param]
+        params = []
 
         if content_type:
             where_clauses.insert(0, "content_type = %s")
@@ -480,9 +489,22 @@ def search_contents():
         if thresholds:
             title_threshold, author_threshold = thresholds
             where_clauses.append(
-                f"(similarity({title_expr}, %s) >= %s OR similarity({author_expr}, %s) >= %s)"
+                f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s) OR "
+                f"(similarity({title_expr}, %s) >= %s OR similarity({author_expr}, %s) >= %s))"
             )
-            params.extend([normalized_query, title_threshold, normalized_query, author_threshold])
+            params.extend(
+                [
+                    like_param,
+                    like_param,
+                    normalized_query,
+                    title_threshold,
+                    normalized_query,
+                    author_threshold,
+                ]
+            )
+        else:
+            where_clauses.append(f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))")
+            params.extend([like_param, like_param])
 
         search_limit = _get_search_limit()
         search_query = f"""
