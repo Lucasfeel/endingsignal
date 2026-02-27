@@ -847,6 +847,8 @@ body {
 
 #contentGridContainer {
   gap: 10px;
+  align-items: start;
+  align-content: start;
 }
 
 #contentCountIndicator {

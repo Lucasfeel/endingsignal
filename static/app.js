@@ -2932,7 +2932,13 @@ const MAX_RECENTLY_SEARCHED_CONTENTS = 12;
 const HOME_RECOMMENDATIONS_LIMIT = 12;
 const POPULAR_GRID_LIMIT = 9;
 const KAKAO_THUMB_STYLE_ID = 'kakao-thumb-styles';
-const GRID_LAYOUT_CLASS_TOKENS = ['grid', 'grid-cols-3', 'gap-2'];
+const GRID_LAYOUT_CLASS_TOKENS = [
+  'grid',
+  'grid-cols-3',
+  'gap-2',
+  'items-start',
+  'content-start',
+];
 const HOME_LAYOUT_CLASS_TOKENS = ['flex', 'flex-col', 'gap-6'];
 
 function ensureKakaoThumbStyles() {
