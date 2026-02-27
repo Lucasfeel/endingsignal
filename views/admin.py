@@ -490,6 +490,9 @@ def create_admin_content():
     title = _normalize_input_text(data.get('title'))
     type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
     source_id = _parse_positive_int(data.get('sourceId') or data.get('source_id'))
+    author_name = _normalize_input_text(
+        data.get('authorName') or data.get('author_name') or data.get('author')
+    )
     content_url_input = data.get('contentUrl')
     if content_url_input is None:
         content_url_input = data.get('content_url')
@@ -563,10 +566,13 @@ def create_admin_content():
                     'admin_id': g.current_user.get('id'),
                 }
             }
+            common_payload = {}
             if content_url:
-                manual_meta_payload['common'] = {
-                    'content_url': content_url,
-                }
+                common_payload['content_url'] = content_url
+            if author_name:
+                common_payload['authors'] = author_name
+            if common_payload:
+                manual_meta_payload['common'] = common_payload
             manual_meta = json.dumps(
                 manual_meta_payload,
                 ensure_ascii=False,

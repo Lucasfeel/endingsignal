@@ -5663,10 +5663,65 @@ const createCompletedSourceBadgeEl = (content, { offsetForStar = false } = {}) =
   return badgeEl;
 };
 
+const CARD_VISUAL_TYPES = new Set(['webtoon', 'novel', 'ott', 'series']);
+
+const resolveCardVisualType = (content, tabId) => {
+  const explicitType = safeString(
+    content?.content_type || content?.contentType || content?.type,
+    '',
+  ).toLowerCase();
+  if (CARD_VISUAL_TYPES.has(explicitType)) return explicitType;
+
+  const inferredType = safeString(getContentType(content), '').toLowerCase();
+  if (CARD_VISUAL_TYPES.has(inferredType)) return inferredType;
+
+  const tabType = safeString(tabId, '').toLowerCase();
+  if (CARD_VISUAL_TYPES.has(tabType)) return tabType;
+  return 'webtoon';
+};
+
+const resolveCardAspectClass = (content, tabId, fallbackAspectClass) => {
+  const fallback = safeString(fallbackAspectClass, '').trim();
+  const visualType = resolveCardVisualType(content, tabId);
+  const byType = getAspectByType(visualType);
+  return byType || fallback || 'aspect-[3/4]';
+};
+
+const resolveCardAspectRatioValue = (content, tabId) => {
+  const visualType = resolveCardVisualType(content, tabId);
+  if (visualType === 'novel') return '1 / 1.4';
+  if (visualType === 'ott' || visualType === 'series') return '2 / 3';
+  return '3 / 4';
+};
+
+const resolveCardThumbnail = (content, meta) => {
+  const common = safeObj(meta?.common);
+  const fallbackUrl = safeString(
+    common.thumbnail_url ||
+      common.thumbnail ||
+      content?.normalized_thumbnail ||
+      content?.thumbnail_url ||
+      content?.thumbnail,
+    '',
+  ).trim();
+  const webp = safeString(
+    common.thumbnail_webp || content?.normalized_thumbnail_webp || content?.thumbnail_webp,
+    '',
+  ).trim();
+  const fallbackType = safeString(common.thumbnail_mime_type, '').trim();
+
+  return {
+    webp: webp || null,
+    fallbackUrl: fallbackUrl || '',
+    fallbackType: fallbackType || '',
+  };
+};
+
 function createCard(content, tabId, aspectClass) {
-  void aspectClass;
   const el = document.createElement('div');
   setClasses(el, UI_CLASSES.cardRoot);
+  const resolvedAspectClass = resolveCardAspectClass(content, tabId, aspectClass);
+  const resolvedAspectRatio = resolveCardAspectRatioValue(content, tabId);
   const subscriptionKey = buildSubscriptionKey(content);
   const contentId = content?.content_id ?? content?.contentId ?? content?.id;
   const source = content?.source;
@@ -5679,7 +5734,7 @@ function createCard(content, tabId, aspectClass) {
   if (source) {
     el.setAttribute('data-source', String(source));
   }
-  const contentType = getContentType({ ...content, type: tabId });
+  const contentType = safeString(getContentType(content), '') || resolveCardVisualType(content, tabId);
   if (contentType) {
     el.setAttribute('data-content-type', contentType);
   }
@@ -5699,8 +5754,30 @@ function createCard(content, tabId, aspectClass) {
   const showStarBadge = isAnySubscribedForCard(content);
 
   const cardContainer = document.createElement('div');
-  setClasses(cardContainer, UI_CLASSES.cardThumb);
+  setClasses(cardContainer, cx(UI_CLASSES.cardThumb, 'w-full', resolvedAspectClass));
+  cardContainer.style.aspectRatio = resolvedAspectRatio;
   cardContainer.setAttribute('data-card-thumb', 'true');
+
+  const thumbnail = resolveCardThumbnail(content, meta);
+  const thumbnailEl = buildPicture({
+    webp: thumbnail.webp,
+    fallbackUrl: thumbnail.fallbackUrl,
+    fallbackType: thumbnail.fallbackType || undefined,
+    imgClass: UI_CLASSES.cardImage,
+    noReferrer: Boolean(thumbnail.fallbackUrl) && /^https?:\/\//i.test(thumbnail.fallbackUrl),
+    altText: content?.title || '',
+  });
+  thumbnailEl.style.position = 'absolute';
+  thumbnailEl.style.inset = '0';
+  thumbnailEl.style.width = '100%';
+  thumbnailEl.style.height = '100%';
+  thumbnailEl.style.display = 'block';
+  cardContainer.appendChild(thumbnailEl);
+
+  const gradientEl = document.createElement('div');
+  setClasses(gradientEl, UI_CLASSES.cardGradient);
+  cardContainer.appendChild(gradientEl);
+
   const badgeRow = document.createElement('div');
   setClasses(badgeRow, UI_CLASSES.cardBadgeRow);
   badgeRow.setAttribute('data-card-badge-row', 'true');
@@ -5771,8 +5848,8 @@ function createCard(content, tabId, aspectClass) {
       textContainer.appendChild(publicationEl);
     }
   }
-  cardContainer.appendChild(textContainer);
   el.appendChild(cardContainer);
+  el.appendChild(textContainer);
 
   el.addEventListener('keydown', (evt) => {
     if (evt.key === 'Enter' || evt.key === ' ') {

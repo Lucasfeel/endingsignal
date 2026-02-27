@@ -523,6 +523,9 @@
     if (Array.isArray(authors)) {
       return authors.filter(Boolean).join(', ');
     }
+    if (typeof authors === 'string' && authors.trim()) {
+      return authors.trim();
+    }
     if (typeof meta?.common?.author === 'string') {
       return meta.common.author;
     }
@@ -948,8 +951,10 @@
 
   const resetAddContentForm = ({ clearHint = true } = {}) => {
     const titleInput = document.getElementById('addContentTitle');
+    const authorInput = document.getElementById('addContentAuthor');
     const urlInput = document.getElementById('addContentUrl');
     if (titleInput) titleInput.value = '';
+    if (authorInput) authorInput.value = '';
     if (urlInput) urlInput.value = '';
     STATE.addContent.selectedTypeId = '';
     STATE.addContent.selectedSourceId = '';
@@ -1103,6 +1108,7 @@
     if (event?.preventDefault) event.preventDefault();
 
     const title = document.getElementById('addContentTitle')?.value?.trim() || '';
+    const authorName = document.getElementById('addContentAuthor')?.value?.trim() || '';
     const contentUrl = document.getElementById('addContentUrl')?.value?.trim() || '';
     const typeId = String(STATE.addContent.selectedTypeId || '');
     const sourceId = String(STATE.addContent.selectedSourceId || '');
@@ -1134,6 +1140,9 @@
         };
         if (contentUrl) {
           requestBody.contentUrl = contentUrl;
+        }
+        if (authorName) {
+          requestBody.authorName = authorName;
         }
         const payload = await apiRequest('POST', '/api/admin/contents', {
           token: STATE.token,

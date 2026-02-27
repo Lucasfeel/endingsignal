@@ -383,6 +383,78 @@ def test_create_admin_content_saves_content_url_in_meta(monkeypatch, client, aut
     assert meta["common"]["content_url"] == "https://example.com/webtoon/123"
 
 
+def test_create_admin_content_saves_author_name_in_meta(monkeypatch, client, auth_headers):
+    class FakeUuid:
+        hex = "manualauthorid"
+
+    monkeypatch.setattr(admin_view, "uuid4", lambda: FakeUuid())
+
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (11,),
+                "fetchone": {
+                    "source_id": 11,
+                    "source_name": "네이버웹툰",
+                    "type_id": 1,
+                    "type_name": "웹툰",
+                },
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("naver_webtoon", "webtoon", "작가명 포함 웹툰"),
+                "fetchone": None,
+            },
+            {
+                "contains": "INSERT INTO contents",
+                "fetchone": {
+                    "content_id": "manual:manualauthorid",
+                    "source": "naver_webtoon",
+                    "content_type": "webtoon",
+                    "title": "작가명 포함 웹툰",
+                    "status": "연재중",
+                    "meta": {
+                        "manual_registration": {"source_id": 11},
+                        "common": {"authors": "홍길동"},
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+        ],
+    )
+
+    response = client.post(
+        "/api/admin/contents",
+        json={
+            "title": "작가명 포함 웹툰",
+            "typeId": 1,
+            "sourceId": 11,
+            "authorName": "홍길동",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 201
+    assert payload["success"] is True
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 3
+
+    insert_call = cursor.executed[2]
+    insert_params = insert_call["params"]
+    assert insert_params[0] == "manual:manualauthorid"
+    assert insert_params[1] == "naver_webtoon"
+    assert insert_params[2] == "webtoon"
+    assert insert_params[3] == "작가명 포함 웹툰"
+    meta = json.loads(insert_params[5])
+    assert meta["common"]["authors"] == "홍길동"
+
+
 def test_create_admin_content_rejects_source_type_mismatch(monkeypatch, client, auth_headers):
     conn, cursor = _patch_db(
         monkeypatch,
