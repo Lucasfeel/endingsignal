@@ -49,7 +49,7 @@ const ICONS = {
   webtoon: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;mask:url('/static/webtoon_bubble_24_currentColor.svg') center/contain no-repeat;"></span>`,
   novel: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;mask:url('/static/webnovel_leaf_24_white.svg') center/contain no-repeat;"></span>`,
   ott: `<span aria-hidden="true" style="display:block;width:24px;height:24px;background-color:currentColor;-webkit-mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;mask:url('/static/ott_youtube_like_filled.svg') center/145% auto no-repeat;"></span>`,
-  my: `<svg class="w-6 h-6" style="width:26px;height:26px;" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a1.1 1.1 0 0 1 1.01.67l1.95 4.27 4.65.55a1.1 1.1 0 0 1 .62 1.92l-3.44 3.1.94 4.58a1.1 1.1 0 0 1-1.62 1.17L12 17.5l-4.1 2.35a1.1 1.1 0 0 1-1.63-1.16l.94-4.58-3.44-3.1a1.1 1.1 0 0 1 .62-1.92l4.66-.55 1.94-4.27A1.1 1.1 0 0 1 12 3.2z"/></svg>`,
+  my: `<svg class="w-full h-full" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a1.1 1.1 0 0 1 1.01.67l1.95 4.27 4.65.55a1.1 1.1 0 0 1 .62 1.92l-3.44 3.1.94 4.58a1.1 1.1 0 0 1-1.62 1.17L12 17.5l-4.1 2.35a1.1 1.1 0 0 1-1.63-1.16l.94-4.58-3.44-3.1a1.1 1.1 0 0 1 .62-1.92l4.66-.55 1.94-4.27A1.1 1.1 0 0 1 12 3.2z"/></svg>`,
   me: `<svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3.2a4.6 4.6 0 1 1 0 9.2 4.6 4.6 0 0 1 0-9.2m0 10.9c4.8 0 8.8 2.7 9.7 6.5a.9.9 0 0 1-.9 1.2H3.2a.9.9 0 0 1-.9-1.2c.9-3.8 4.9-6.5 9.7-6.5"/></svg>`,
 };
 
@@ -91,8 +91,6 @@ const UI_CLASSES = {
   sectionSubtle: 'text-sm es-muted transition-colors',
 
   // Card overlays/badges
-  starBadge:
-    'es-star-badge absolute top-2 right-2 z-10 flex items-center justify-center h-[24px] px-2 rounded-full text-xs font-semibold pointer-events-none select-none',
   badgeBase: 'es-badge-base z-10 inline-flex px-2 py-1 rounded-lg items-center',
   affordOverlay:
     'absolute inset-0 z-[5] pointer-events-none opacity-0 transition-opacity duration-150 es-afford-overlay group-hover:opacity-100',
@@ -212,19 +210,30 @@ const WEBTOON_DAY_FILTER_ID_SET = new Set(WEBTOON_DAY_FILTER_IDS);
 const WEBTOON_DAY_EXCLUSIVE_IDS = new Set(['all', 'hiatus', 'completed']);
 const DEFAULT_WEBTOON_DAYS = ['all'];
 
-const DEFAULT_NOVEL_GENRE_GROUP = 'all';
+const EXCLUSIVE_MULTI_ALL_ID = 'all';
+const DEFAULT_NOVEL_GENRE_GROUPS = [EXCLUSIVE_MULTI_ALL_ID];
 const DEFAULT_NOVEL_IS_COMPLETED = false;
 const NOVEL_GENRE_GROUP_OPTIONS = [
-  { id: 'all', label: '\uC804\uCCB4' },
+  { id: EXCLUSIVE_MULTI_ALL_ID, label: '\uC804\uCCB4' },
   { id: 'fantasy', label: '\uD310\uD0C0\uC9C0' },
   { id: 'romance', label: '\uB85C\uB9E8\uC2A4' },
   { id: 'romance_fantasy', label: '\uB85C\uD310' },
   { id: 'light_novel', label: '\uB77C\uC774\uD2B8\uB178\uBCA8' },
   { id: 'wuxia', label: '\uBB34\uD611' },
   { id: 'bl', label: 'BL' },
-  { id: 'completed', label: '\uC644\uACB0' },
 ];
 const NOVEL_GENRE_GROUP_IDS = NOVEL_GENRE_GROUP_OPTIONS.map((item) => item.id);
+const NOVEL_COMPLETED_FILTER_OPTION = { id: 'completed', label: '\uC644\uACB0' };
+
+const OTT_GENRE_OPTIONS = [
+  { id: EXCLUSIVE_MULTI_ALL_ID, label: 'ALL' },
+  { id: 'drama', label: '\uB4DC\uB77C\uB9C8' },
+  { id: 'anime', label: '\uC560\uB2C8\uBA54\uC774\uC158' },
+  { id: 'variety', label: '\uC608\uB2A5' },
+  { id: 'docu', label: '\uB2E4\uD050\uBA58\uD130\uB9AC' },
+];
+const OTT_GENRE_IDS = OTT_GENRE_OPTIONS.map((item) => item.id);
+const DEFAULT_OTT_GENRES = [EXCLUSIVE_MULTI_ALL_ID];
 
 const SOURCE_ID_ALIASES = {
   disney: 'disney_plus',
@@ -667,9 +676,126 @@ const collectWebtoonOngoingItems = (responsePayload, selectedDaysRaw) => {
   return dedupeContentsBySourceAndId(merged);
 };
 
-const sanitizeNovelGenreGroup = (value, fallback = DEFAULT_NOVEL_GENRE_GROUP) => {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  return NOVEL_GENRE_GROUP_IDS.includes(normalized) ? normalized : fallback;
+const normalizeExclusiveMultiSelect = (
+  value,
+  { allowedIds, fallback = [EXCLUSIVE_MULTI_ALL_ID], exclusiveId = EXCLUSIVE_MULTI_ALL_ID } = {},
+) => {
+  const allowedList = Array.isArray(allowedIds) ? allowedIds : [];
+  const allowedSet = new Set(allowedList);
+  const toTokens = (raw) => {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw !== 'string') return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (
+      (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+      (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    ) {
+      try {
+        return toTokens(JSON.parse(trimmed));
+      } catch {
+        return trimmed.split(',');
+      }
+    }
+    return trimmed.split(',');
+  };
+
+  const normalizeTokens = (raw) => {
+    const seen = new Set();
+    toTokens(raw).forEach((entry) => {
+      const normalized = String(entry || '')
+        .trim()
+        .toLowerCase();
+      if (!allowedSet.has(normalized)) return;
+      seen.add(normalized);
+    });
+    if (seen.has(exclusiveId)) return [exclusiveId];
+    const nonExclusive = allowedList.filter((id) => id !== exclusiveId && seen.has(id));
+    if (nonExclusive.length) return nonExclusive;
+    return allowedSet.has(exclusiveId) ? [exclusiveId] : [];
+  };
+
+  const fallbackList = Array.isArray(fallback) && fallback.length ? fallback : [exclusiveId];
+  const fallbackNormalized = normalizeTokens(fallbackList);
+  const defaultNormalized = fallbackNormalized.length
+    ? fallbackNormalized
+    : allowedSet.has(exclusiveId)
+      ? [exclusiveId]
+      : [];
+  const ordered = normalizeTokens(value);
+
+  if (ordered.length) return ordered;
+  return defaultNormalized;
+};
+
+const sanitizeNovelGenreGroups = (value, fallback = DEFAULT_NOVEL_GENRE_GROUPS) =>
+  normalizeExclusiveMultiSelect(value, {
+    allowedIds: NOVEL_GENRE_GROUP_IDS,
+    fallback,
+    exclusiveId: EXCLUSIVE_MULTI_ALL_ID,
+  });
+
+const sanitizeOttGenres = (value, fallback = DEFAULT_OTT_GENRES) =>
+  normalizeExclusiveMultiSelect(value, {
+    allowedIds: OTT_GENRE_IDS,
+    fallback,
+    exclusiveId: EXCLUSIVE_MULTI_ALL_ID,
+  });
+
+const toggleExclusiveMultiSelect = (
+  targetId,
+  currentValue,
+  { allowedIds, exclusiveId = EXCLUSIVE_MULTI_ALL_ID } = {},
+) => {
+  const normalizedTarget = String(targetId || '')
+    .trim()
+    .toLowerCase();
+  const allowedList = Array.isArray(allowedIds) ? allowedIds : [];
+  if (!allowedList.includes(normalizedTarget)) {
+    return normalizeExclusiveMultiSelect(currentValue, {
+      allowedIds: allowedList,
+      fallback: [exclusiveId],
+      exclusiveId,
+    });
+  }
+  if (normalizedTarget === exclusiveId) return [exclusiveId];
+
+  const current = normalizeExclusiveMultiSelect(currentValue, {
+    allowedIds: allowedList,
+    fallback: [exclusiveId],
+    exclusiveId,
+  }).filter((entry) => entry !== exclusiveId);
+  const next = new Set(current);
+  if (next.has(normalizedTarget)) next.delete(normalizedTarget);
+  else next.add(normalizedTarget);
+  if (!next.size) return [exclusiveId];
+  return allowedList.filter((id) => id !== exclusiveId && next.has(id));
+};
+
+const parseLegacyNovelGenreSelection = (value) => {
+  const rawTokens = (() => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (
+      (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+      (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // fall through to comma split
+      }
+    }
+    return trimmed.split(',');
+  })();
+  const hasCompletedToken = rawTokens.some(
+    (entry) => String(entry || '').trim().toLowerCase() === 'completed',
+  );
+  const genreGroups = sanitizeNovelGenreGroups(rawTokens, DEFAULT_NOVEL_GENRE_GROUPS);
+  return { genreGroups, hasCompletedToken };
 };
 
 const coerceBooleanFilter = (value, fallback = false) => {
@@ -718,6 +844,10 @@ const UIState = {
     );
     const migratedSources =
       savedSources !== null && savedSources !== undefined ? savedSources : savedSource;
+    const legacyNovelSelection = parseLegacyNovelGenreSelection(savedNovelGenreGroup);
+    const nextNovelIsCompleted =
+      coerceBooleanFilter(savedNovelIsCompleted, DEFAULT_NOVEL_IS_COMPLETED) ||
+      legacyNovelSelection.hasCompletedToken;
 
     return {
       filters: {
@@ -728,14 +858,9 @@ const UIState = {
           UI_STATE_DEFAULTS.filters.status,
         ),
         day: sanitizeWebtoonDays(savedDay, DEFAULT_WEBTOON_DAYS),
-        novelGenreGroup: sanitizeNovelGenreGroup(
-          savedNovelGenreGroup,
-          DEFAULT_NOVEL_GENRE_GROUP,
-        ),
-        novelIsCompleted: coerceBooleanFilter(
-          savedNovelIsCompleted,
-          DEFAULT_NOVEL_IS_COMPLETED,
-        ),
+        novelGenreGroup: legacyNovelSelection.genreGroups,
+        novelGenreGroups: legacyNovelSelection.genreGroups,
+        novelIsCompleted: nextNovelIsCompleted,
       },
     };
   },
@@ -745,13 +870,15 @@ const UIState = {
     const fallbackFilters = UI_STATE_DEFAULTS.filters;
     const tabFilters = STATE.filters?.[tabId] || {};
     const allowedSources = getAllowedSourcesForTab(tabId);
+    const novelGenreGroups = sanitizeNovelGenreGroups(
+      STATE.filters?.novel?.genreGroups,
+      DEFAULT_NOVEL_GENRE_GROUPS,
+    );
     const snapshot = {
       filters: {
         sources: sanitizeSourcesArray(tabFilters.sources, allowedSources),
-        novelGenreGroup: sanitizeNovelGenreGroup(
-          STATE.filters?.novel?.genreGroup,
-          DEFAULT_NOVEL_GENRE_GROUP,
-        ),
+        novelGenreGroup: novelGenreGroups,
+        novelGenreGroups,
         novelIsCompleted: coerceBooleanFilter(
           STATE.filters?.novel?.isCompleted,
           DEFAULT_NOVEL_IS_COMPLETED,
@@ -794,9 +921,12 @@ const UIState = {
     STATE.filters[tabId].sources = nextSources;
 
     if (tabId === 'novel') {
-      const nextGenreGroup = sanitizeNovelGenreGroup(
-        incoming.novelGenreGroup ?? incoming.genreGroup,
-        DEFAULT_NOVEL_GENRE_GROUP,
+      const nextGenreGroups = sanitizeNovelGenreGroups(
+        incoming.novelGenreGroups ??
+          incoming.novelGenreGroup ??
+          incoming.genreGroups ??
+          incoming.genreGroup,
+        DEFAULT_NOVEL_GENRE_GROUPS,
       );
       const nextIsCompleted = coerceBooleanFilter(
         incoming.novelIsCompleted ?? incoming.isCompleted,
@@ -805,10 +935,10 @@ const UIState = {
 
       changed =
         changed ||
-        current.genreGroup !== nextGenreGroup ||
+        !areStringArraysEqual(current.genreGroups, nextGenreGroups) ||
         current.isCompleted !== nextIsCompleted;
 
-      STATE.filters[tabId].genreGroup = nextGenreGroup;
+      STATE.filters[tabId].genreGroups = nextGenreGroups;
       STATE.filters[tabId].isCompleted = nextIsCompleted;
     } else {
       const nextStatus = sanitizeFilterValue(
@@ -840,9 +970,13 @@ const UIState = {
     }
 
     if (STATE.filters?.novel) {
-      STATE.filters.novel.genreGroup = sanitizeNovelGenreGroup(
-        incoming.novelGenreGroup ?? incoming.genreGroup ?? STATE.filters.novel.genreGroup,
-        DEFAULT_NOVEL_GENRE_GROUP,
+      STATE.filters.novel.genreGroups = sanitizeNovelGenreGroups(
+        incoming.novelGenreGroups ??
+          incoming.novelGenreGroup ??
+          incoming.genreGroups ??
+          incoming.genreGroup ??
+          STATE.filters.novel.genreGroups,
+        DEFAULT_NOVEL_GENRE_GROUPS,
       );
       STATE.filters.novel.isCompleted = coerceBooleanFilter(
         incoming.novelIsCompleted ?? incoming.isCompleted ?? STATE.filters.novel.isCompleted,
@@ -879,7 +1013,7 @@ const UIState = {
     safeSaveStorage(
       localStorage,
       UI_STATE_KEYS.filters.novelGenreGroup,
-      sanitizeNovelGenreGroup(STATE.filters?.novel?.genreGroup, DEFAULT_NOVEL_GENRE_GROUP),
+      sanitizeNovelGenreGroups(STATE.filters?.novel?.genreGroups, DEFAULT_NOVEL_GENRE_GROUPS),
     );
     safeSaveStorage(
       localStorage,
@@ -961,10 +1095,10 @@ const STATE = {
     webtoon: { sources: [], day: [...DEFAULT_WEBTOON_DAYS] },
     novel: {
       sources: [],
-      genreGroup: DEFAULT_NOVEL_GENRE_GROUP,
+      genreGroups: [...DEFAULT_NOVEL_GENRE_GROUPS],
       isCompleted: DEFAULT_NOVEL_IS_COMPLETED,
     },
-    ott: { sources: [], genre: 'all' },
+    ott: { sources: [], genres: [...DEFAULT_OTT_GENRES] },
     my: { viewMode: 'completion' },
   },
   search: {
@@ -1624,51 +1758,17 @@ function closeModal(modalEl) {
 }
 
 function createStarBadgeEl() {
-  const badgeEl = document.createElement('div');
-  setClasses(badgeEl, UI_CLASSES.starBadge);
-  badgeEl.setAttribute('aria-hidden', 'true');
-  badgeEl.setAttribute('data-star-badge', 'true');
-  badgeEl.textContent = '★';
-  return badgeEl;
+  return null;
 }
 
 function syncStarBadgeForCard(cardEl, subscribedOverride = null) {
+  void subscribedOverride;
   if (!cardEl) return;
-
-  const thumb = cardEl.querySelector('[data-card-thumb="true"]');
-  if (!thumb) return;
-
-  const contentId = cardEl.getAttribute('data-content-id');
-  const source = cardEl.getAttribute('data-source');
-  const contentType = cardEl.getAttribute('data-content-type');
-  const content = {
-    content_id: contentId,
-    source,
-    content_type: contentType,
-  };
-  const shouldShow =
-    typeof subscribedOverride === 'boolean' ? subscribedOverride : isAnySubscribedForCard(content);
-  const existing = thumb.querySelector('[data-star-badge="true"]');
-  const completedSourceBadge = thumb.querySelector('[data-completed-source-badge="true"]');
-
-  if (shouldShow && !existing) {
-    thumb.appendChild(createStarBadgeEl());
-  } else if (!shouldShow && existing) {
-    existing.remove();
-  }
-  if (completedSourceBadge) {
-    completedSourceBadge.classList.toggle('has-star-offset', shouldShow);
-  }
+  cardEl.querySelectorAll('[data-star-badge="true"]').forEach((node) => node.remove());
 }
 
 function syncAllRenderedStarBadges() {
-  document.querySelectorAll('[data-content-id][data-source]').forEach((cardEl) => {
-    const contentId = cardEl.getAttribute('data-content-id');
-    const source = cardEl.getAttribute('data-source');
-    const contentType = cardEl.getAttribute('data-content-type');
-    const content = { content_id: contentId, source, content_type: contentType };
-    syncStarBadgeForCard(cardEl, isAnySubscribedForCard(content));
-  });
+  document.querySelectorAll('[data-star-badge="true"]').forEach((node) => node.remove());
 }
 
 document.addEventListener(
@@ -4417,9 +4517,10 @@ function renderBottomNav() {
     else btn.removeAttribute('aria-current');
 
     const iconClass = isActive ? 'scale-105' : 'scale-100 opacity-90';
+    const iconSizeClass = tab.id === 'my' ? 'h-7 w-7' : 'h-6 w-6';
 
     btn.innerHTML = `
-      <div class="h-6 w-6 mb-0.5 flex items-center justify-center transform transition-transform duration-200 ${iconClass}">
+      <div class="${iconSizeClass} mb-0.5 flex items-center justify-center transform transition-transform duration-200 ${iconClass}">
         ${tab.icon}
       </div>
       <span class="text-[10px] leading-[1.15] ${isActive ? 'font-semibold' : 'font-medium'}">${tab.label}</span>
@@ -4560,49 +4661,33 @@ function renderL2Filters(tabId) {
   UI.l2Filter.innerHTML = '';
   let items = [];
 
-  const days = [
-    { id: 'all', label: 'ALL' },
-    { id: 'mon', label: '월' },
-    { id: 'tue', label: '화' },
-    { id: 'wed', label: '수' },
-    { id: 'thu', label: '목' },
-    { id: 'fri', label: '금' },
-    { id: 'sat', label: '토' },
-    { id: 'sun', label: '일' },
-    { id: 'daily', label: '매일' },
-    { id: 'hiatus', label: '휴재' },
-    { id: 'completed', label: '완결' },
-  ];
-
   if (tabId === 'webtoon') {
     items = WEBTOON_DAY_FILTER_OPTIONS;
   } else if (tabId === 'novel') {
-    items = NOVEL_GENRE_GROUP_OPTIONS;
+    items = [...NOVEL_GENRE_GROUP_OPTIONS, NOVEL_COMPLETED_FILTER_OPTION];
   } else if (tabId === 'ott') {
-    items = [
-      { id: 'all', label: 'ALL' },
-      { id: 'drama', label: '드라마' },
-      { id: 'anime', label: '애니메이션' },
-      { id: 'variety', label: '예능' },
-      { id: 'docu', label: '다큐멘터리' },
-    ];
+    items = OTT_GENRE_OPTIONS;
   } else {
     return;
   }
 
-  let activeKey = '';
   let activeSet = new Set();
   if (tabId === 'webtoon') activeSet = new Set(getSelectedWebtoonDays());
-  if (tabId === 'novel')
-    activeKey = sanitizeNovelGenreGroup(
-      STATE.filters?.novel?.genreGroup,
-      DEFAULT_NOVEL_GENRE_GROUP,
+  if (tabId === 'novel') {
+    const selectedNovelGenres = sanitizeNovelGenreGroups(
+      STATE.filters?.novel?.genreGroups,
+      DEFAULT_NOVEL_GENRE_GROUPS,
     );
-  if (tabId === 'ott') activeKey = STATE.filters?.[tabId]?.genre || 'all';
+    activeSet = new Set(selectedNovelGenres);
+    if (STATE.filters?.novel?.isCompleted) activeSet.add('completed');
+  }
+  if (tabId === 'ott') {
+    activeSet = new Set(sanitizeOttGenres(STATE.filters?.ott?.genres, DEFAULT_OTT_GENRES));
+  }
 
   items.forEach((item) => {
     const el = document.createElement('button');
-    const isActive = tabId === 'webtoon' ? activeSet.has(item.id) : activeKey === item.id;
+    const isActive = activeSet.has(item.id);
     el.className = `l2-tab spring-bounce ${isActive ? 'active' : ''}`;
     el.textContent = item.label;
 
@@ -4610,8 +4695,24 @@ function renderL2Filters(tabId) {
       if (tabId === 'webtoon') {
         STATE.filters[tabId].day = toggleWebtoonDaySelection(STATE.filters[tabId].day, item.id);
       }
-      if (tabId === 'novel') STATE.filters[tabId].genreGroup = item.id;
-      if (tabId === 'ott') STATE.filters[tabId].genre = item.id;
+      if (tabId === 'novel') {
+        if (item.id === 'completed') {
+          STATE.filters[tabId].isCompleted = !Boolean(STATE.filters?.[tabId]?.isCompleted);
+        } else {
+          STATE.filters[tabId].genreGroups = toggleExclusiveMultiSelect(
+            item.id,
+            STATE.filters?.[tabId]?.genreGroups,
+            { allowedIds: NOVEL_GENRE_GROUP_IDS, exclusiveId: EXCLUSIVE_MULTI_ALL_ID },
+          );
+        }
+      }
+      if (tabId === 'ott') {
+        STATE.filters[tabId].genres = toggleExclusiveMultiSelect(
+          item.id,
+          STATE.filters?.[tabId]?.genres,
+          { allowedIds: OTT_GENRE_IDS, exclusiveId: EXCLUSIVE_MULTI_ALL_ID },
+        );
+      }
 
       renderL2Filters(tabId);
       fetchAndRenderContent(tabId);
@@ -4620,7 +4721,6 @@ function renderL2Filters(tabId) {
 
     UI.l2Filter.appendChild(el);
   });
-
 }
 
 function syncMySubToggleUI() {
@@ -4713,17 +4813,19 @@ const extractOttGenreTokens = (content) => {
   return Array.from(tokenSet);
 };
 
-const filterOttItemsByGenre = (items, genreFilter) => {
+const filterOttItemsByGenres = (items, genreFilters) => {
   if (!Array.isArray(items)) return [];
-  const target = safeString(genreFilter || 'all', 'all').trim().toLowerCase();
-  if (!target || target === 'all') return items;
+  const selectedGenres = sanitizeOttGenres(genreFilters, DEFAULT_OTT_GENRES);
+  if (!selectedGenres.length || selectedGenres.includes(EXCLUSIVE_MULTI_ALL_ID)) return items;
 
   let sawGenreMetadata = false;
   const filtered = items.filter((item) => {
     const genres = extractOttGenreTokens(item);
     if (!genres.length) return true;
     sawGenreMetadata = true;
-    return genres.some((genre) => genre.includes(target) || target.includes(genre));
+    return genres.some((genre) => {
+      return selectedGenres.some((selected) => genre.includes(selected) || selected.includes(genre));
+    });
   });
 
   return sawGenreMetadata ? filtered : items;
@@ -4931,7 +5033,10 @@ async function loadNextPage(category, { signal } = {}) {
       : [];
     let filteredIncoming = filterItemsBySources(incoming, pg.filterSources);
     if (pg.tabId === 'ott') {
-      filteredIncoming = filterOttItemsByGenre(filteredIncoming, STATE.filters?.ott?.genre || 'all');
+      filteredIncoming = filterOttItemsByGenres(
+        filteredIncoming,
+        STATE.filters?.ott?.genres || DEFAULT_OTT_GENRES,
+      );
     }
 
     const next = json?.next_cursor ?? null;
@@ -4968,7 +5073,10 @@ async function loadNextPage(category, { signal } = {}) {
     const reachedEndByCount = returnedCount < responsePageSize;
 
     const hasOttGenreFilter =
-      pg.tabId === 'ott' && safeString(STATE.filters?.ott?.genre || 'all', 'all') !== 'all';
+      pg.tabId === 'ott' &&
+      !sanitizeOttGenres(STATE.filters?.ott?.genres, DEFAULT_OTT_GENRES).includes(
+        EXCLUSIVE_MULTI_ALL_ID,
+      );
     const allowEmptyPageStop = !pg.filterSources?.length && !hasOttGenreFilter;
     if (noNewItems && allowEmptyPageStop) {
       console.warn('No new items returned; marking pagination as done to avoid stalls');
@@ -5273,15 +5381,16 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           preferServerMulti: USE_BROWSE_PAGINATION_V2,
         });
         sourceFilter = sourceConfig.filterSources;
-        const selectedGenre = sanitizeNovelGenreGroup(
-          STATE.filters?.novel?.genreGroup,
-          DEFAULT_NOVEL_GENRE_GROUP,
+        const selectedGenreGroups = sanitizeNovelGenreGroups(
+          STATE.filters?.novel?.genreGroups,
+          DEFAULT_NOVEL_GENRE_GROUPS,
         );
-        const isCompletedGenre = selectedGenre === 'completed';
         const query = {
-          genre_group: isCompletedGenre ? 'all' : selectedGenre,
+          genre_group: selectedGenreGroups.includes(EXCLUSIVE_MULTI_ALL_ID)
+            ? EXCLUSIVE_MULTI_ALL_ID
+            : selectedGenreGroups.join(','),
         };
-        if (isCompletedGenre) {
+        if (coerceBooleanFilter(STATE.filters?.novel?.isCompleted, DEFAULT_NOVEL_IS_COMPLETED)) {
           query.is_completed = 'true';
         }
 
@@ -5332,7 +5441,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         data = filterItemsBySources(data, sourceFilter);
       }
       if (tabId === 'ott') {
-        data = filterOttItemsByGenre(data, STATE.filters?.ott?.genre || 'all');
+        data = filterOttItemsByGenres(data, STATE.filters?.ott?.genres || DEFAULT_OTT_GENRES);
       }
     }
 
@@ -5485,17 +5594,11 @@ const isContentCompletedForBadge = (content) => {
   return content?.is_completed === true;
 };
 
-const createCompletedSourceBadgeEl = (content, { offsetForStar = false } = {}) => {
-  const sourceId = normalizeSourceId(content?.source);
-  if (!sourceId) return null;
-
-  const badgeEl = document.createElement('div');
-  badgeEl.className = 'es-completed-source-badge';
-  if (offsetForStar) badgeEl.classList.add('has-star-offset');
-  badgeEl.setAttribute('data-completed-source-badge', 'true');
+const createCompletionBellBadgeEl = () => {
+  const badgeEl = document.createElement('span');
+  badgeEl.className = 'es-completion-bell-badge';
   badgeEl.setAttribute('aria-hidden', 'true');
-  badgeEl.innerHTML = getSourceIconMarkup(sourceId, sourceId.toUpperCase());
-  bindSourceLogoFallback(badgeEl);
+  badgeEl.innerHTML = '<img src="/static/brand_logo.svg" alt="" loading="lazy" decoding="async" />';
   return badgeEl;
 };
 
@@ -5532,7 +5635,7 @@ function createCard(content, tabId, aspectClass) {
         .filter(Boolean)
         .join(', ')
     : safeString(rawAuthors, '');
-  const showStarBadge = isAnySubscribedForCard(content);
+  const showCompletionBell = isContentCompletedForBadge(content);
 
   const cardContainer = document.createElement('div');
   setClasses(cardContainer, UI_CLASSES.cardThumb);
@@ -5572,15 +5675,12 @@ function createCard(content, tabId, aspectClass) {
       badgeRow.appendChild(badgeEl);
     }
   }
-  if (isContentCompletedForBadge(content)) {
-    const completedSourceBadgeEl = createCompletedSourceBadgeEl(content, {
-      offsetForStar: showStarBadge,
-    });
-    if (completedSourceBadgeEl) cardContainer.appendChild(completedSourceBadgeEl);
-  }
-
   const textContainer = document.createElement('div');
   setClasses(textContainer, UI_CLASSES.cardTextWrap);
+  if (showCompletionBell) {
+    textContainer.classList.add('has-top-right-mark');
+    textContainer.appendChild(createCompletionBellBadgeEl());
+  }
 
   const titleEl = document.createElement('h3');
   setClasses(titleEl, UI_CLASSES.cardTitle);
@@ -5605,8 +5705,6 @@ function createCard(content, tabId, aspectClass) {
   });
 
   el.onclick = () => openSubscribeModal(content, { returnFocusEl: el });
-
-  syncStarBadgeForCard(el, showStarBadge);
   return el;
 }
 

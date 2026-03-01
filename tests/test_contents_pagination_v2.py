@@ -141,6 +141,174 @@ def test_novels_v2_genre_group_filtering_kept(monkeypatch, client):
     assert len(fake_cursor.executed) == 1
 
 
+def test_novels_v2_supports_comma_separated_multi_genres(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "fantasy-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            ),
+            _row(
+                "romance-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+            ),
+            _row(
+                "wuxia-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uBB34\uD611"]}},
+            ),
+        ]],
+    )
+
+    response = client.get("/api/contents/novels_v2?genre_group=fantasy,romance&per_page=10")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1", "romance-1"}
+    assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
+    assert payload["filters"]["genre_group"] == "ALL"
+    assert len(fake_cursor.executed) == 1
+
+
+def test_novels_v2_supports_repeated_multi_genre_params(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "fantasy-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            ),
+            _row(
+                "romance-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+            ),
+            _row(
+                "wuxia-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uBB34\uD611"]}},
+            ),
+        ]],
+    )
+
+    response = client.get("/api/contents/novels_v2?genre_group=fantasy&genre_group=romance&per_page=10")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1", "romance-1"}
+    assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
+    assert len(fake_cursor.executed) == 1
+
+
+def test_novels_v2_legacy_alias_supports_multi_genres(monkeypatch, client):
+    _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "fantasy-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            ),
+            _row(
+                "romance-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+            ),
+        ]],
+    )
+
+    response = client.get("/api/contents/novels_v2?genreGroup=fantasy,romance&per_page=10")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1", "romance-1"}
+    assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
+
+
+def test_novels_v2_ignores_unknown_tokens_when_valid_exists(monkeypatch, client):
+    _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "fantasy-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            ),
+            _row(
+                "romance-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+            ),
+        ]],
+    )
+
+    response = client.get("/api/contents/novels_v2?genre_group=fantasy,unknown&per_page=10")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1"}
+    assert payload["filters"]["genre_groups"] == ["FANTASY"]
+    assert payload["filters"]["genre_group"] == "FANTASY"
+
+
+def test_novels_v2_completed_filter_combines_with_multi_genres(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "fantasy-completed",
+                source="ridi",
+                status=contents_view.STATUS_COMPLETED,
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            ),
+            _row(
+                "romance-completed",
+                source="ridi",
+                status=contents_view.STATUS_COMPLETED,
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+            ),
+            _row(
+                "wuxia-completed",
+                source="ridi",
+                status=contents_view.STATUS_COMPLETED,
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uBB34\uD611"]}},
+            ),
+        ]],
+    )
+
+    response = client.get("/api/contents/novels_v2?genre_group=fantasy,romance&is_completed=true&per_page=10")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-completed", "romance-completed"}
+
+    query, params = fake_cursor.executed[0]
+    assert "status = %s" in query
+    assert contents_view.STATUS_COMPLETED in params
+
+
 def test_novels_v2_returns_next_cursor_when_page_is_full(monkeypatch, client):
     fake_cursor = _stub_db(
         monkeypatch,

@@ -132,3 +132,92 @@ def test_novel_genre_group_does_not_hide_all_when_genre_metadata_missing(monkeyp
     assert response.status_code == 200
     ids = {item["content_id"] for item in payload["contents"]}
     assert ids == {"no-genre-1", "no-genre-2"}
+
+
+def test_novel_genre_group_supports_comma_separated_multi_select(monkeypatch, client):
+    rows = [
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
+        _row("wuxia-1", meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
+    ]
+    _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genre_group=fantasy,romance")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1", "romance-1"}
+    assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
+    assert payload["filters"]["genre_group"] == "ALL"
+
+
+def test_novel_genre_group_supports_repeated_params_multi_select(monkeypatch, client):
+    rows = [
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
+        _row("wuxia-1", meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
+    ]
+    _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genre_group=fantasy&genre_group=romance")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1", "romance-1"}
+    assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
+
+
+def test_novel_genre_group_legacy_alias_supports_multi_select(monkeypatch, client):
+    rows = [
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
+        _row("wuxia-1", meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
+    ]
+    _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genreGroup=fantasy,romance")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1", "romance-1"}
+    assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
+
+
+def test_novel_genre_group_ignores_unknown_tokens_when_valid_exists(monkeypatch, client):
+    rows = [
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
+    ]
+    _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genre_group=fantasy,unknown")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-1"}
+    assert payload["filters"]["genre_groups"] == ["FANTASY"]
+    assert payload["filters"]["genre_group"] == "FANTASY"
+
+
+def test_novel_completed_filter_combines_with_multi_genres(monkeypatch, client):
+    rows = [
+        _row("fantasy-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("romance-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
+        _row("wuxia-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
+    ]
+    fake_cursor = _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genre_group=fantasy,romance&is_completed=true")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"fantasy-completed", "romance-completed"}
+
+    query, params = fake_cursor.executed[0]
+    assert "status = %s" in query
+    assert contents_view.STATUS_COMPLETED in params

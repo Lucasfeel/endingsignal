@@ -112,6 +112,35 @@ def _resolve_genre_group(raw_value):
     return GENRE_GROUP_ALIAS_MAP.get(normalized, "ALL")
 
 
+def _resolve_genre_groups(raw_values=None):
+    entries = _coerce_genre_values(raw_values)
+    if not entries:
+        return ["ALL"]
+
+    resolved = []
+    seen = set()
+    for entry in entries:
+        group = _resolve_genre_group(entry)
+        if group == "ALL":
+            normalized = _normalize_genre_token(entry)
+            if normalized in {"all", _normalize_genre_token("\uC804\uCCB4")}:
+                return ["ALL"]
+            continue
+        if group in seen:
+            continue
+        seen.add(group)
+        resolved.append(group)
+
+    return resolved if resolved else ["ALL"]
+
+
+def _select_compat_genre_group(genre_groups):
+    groups = list(genre_groups or [])
+    if not groups:
+        return "ALL"
+    return groups[0] if len(groups) == 1 else "ALL"
+
+
 def _coerce_genre_values(raw_value):
     if raw_value is None:
         return []
@@ -168,15 +197,18 @@ def _extract_internal_genres(meta):
     return merged
 
 
-def _filter_novel_rows_by_genre_group(rows, genre_group):
-    if genre_group == "ALL":
+def _filter_novel_rows_by_genre_groups(rows, genre_groups):
+    groups = list(genre_groups or [])
+    if not groups or "ALL" in groups:
         return rows
 
-    target_tokens = [
-        _normalize_genre_token(token)
-        for token in GENRE_GROUP_MAPPING.get(genre_group, [])
-        if _normalize_genre_token(token)
-    ]
+    target_token_set = set()
+    for genre_group in groups:
+        for token in GENRE_GROUP_MAPPING.get(genre_group, []):
+            normalized_token = _normalize_genre_token(token)
+            if normalized_token:
+                target_token_set.add(normalized_token)
+    target_tokens = list(target_token_set)
     if not target_tokens:
         return rows
 
@@ -198,6 +230,10 @@ def _filter_novel_rows_by_genre_group(rows, genre_group):
 
     # If upstream rows do not have genre metadata yet, keep current visibility.
     return filtered if saw_genre_metadata else rows
+
+
+def _filter_novel_rows_by_genre_group(rows, genre_group):
+    return _filter_novel_rows_by_genre_groups(rows, [genre_group])
 
 
 def normalize_meta(value):
@@ -625,10 +661,10 @@ def get_novel_contents():
     cursor = None
     try:
         source = request.args.get('source', 'all')
-        raw_genre_group = request.args.get('genre_group')
-        if raw_genre_group is None:
-            raw_genre_group = request.args.get('genreGroup')
-        genre_group = _resolve_genre_group(raw_genre_group)
+        raw_genre_groups = request.args.getlist('genre_group')
+        raw_genre_groups.extend(request.args.getlist('genreGroup'))
+        genre_groups = _resolve_genre_groups(raw_genre_groups)
+        genre_group = _select_compat_genre_group(genre_groups)
 
         raw_is_completed = request.args.get('is_completed')
         if raw_is_completed is None:
@@ -667,12 +703,13 @@ def get_novel_contents():
             coerced['meta'] = normalize_meta(coerced.get('meta'))
             results.append(coerced)
 
-        filtered = _filter_novel_rows_by_genre_group(results, genre_group)
+        filtered = _filter_novel_rows_by_genre_groups(results, genre_groups)
 
         return jsonify({
             'contents': filtered,
             'filters': {
                 'genre_group': genre_group,
+                'genre_groups': genre_groups,
                 'is_completed': is_completed,
             },
         })
@@ -878,10 +915,10 @@ def get_novel_contents_v2():
     try:
         source_filter = _parse_sources_args()
 
-        raw_genre_group = request.args.get("genre_group")
-        if raw_genre_group is None:
-            raw_genre_group = request.args.get("genreGroup")
-        genre_group = _resolve_genre_group(raw_genre_group)
+        raw_genre_groups = request.args.getlist("genre_group")
+        raw_genre_groups.extend(request.args.getlist("genreGroup"))
+        genre_groups = _resolve_genre_groups(raw_genre_groups)
+        genre_group = _select_compat_genre_group(genre_groups)
 
         raw_is_completed = request.args.get("is_completed")
         if raw_is_completed is None:
@@ -925,7 +962,7 @@ def get_novel_contents_v2():
         results = []
         next_cursor = None
 
-        if genre_group == "ALL":
+        if "ALL" in genre_groups:
             query, params = _build_base_query(
                 per_page,
                 cursor_title,
@@ -979,7 +1016,7 @@ def get_novel_contents_v2():
                 scan_source = last_scanned_row.get("source")
                 scan_content_id = last_scanned_row.get("content_id")
 
-                matched_rows = _filter_novel_rows_by_genre_group(normalized_rows, genre_group)
+                matched_rows = _filter_novel_rows_by_genre_groups(normalized_rows, genre_groups)
                 if matched_rows:
                     remaining = per_page - len(results)
                     results.extend(matched_rows[:remaining])
@@ -1005,14 +1042,16 @@ def get_novel_contents_v2():
             "returned": len(results),
             "filters": {
                 "genre_group": genre_group,
+                "genre_groups": genre_groups,
                 "is_completed": is_completed,
             },
         }
 
         current_app.logger.info(
-            "[contents.novels_v2] source_mode=%s genre_group=%s is_completed=%s per_page=%s cursor=%s returned=%s next_cursor=%s",
+            "[contents.novels_v2] source_mode=%s genre_group=%s genre_groups=%s is_completed=%s per_page=%s cursor=%s returned=%s next_cursor=%s",
             source_filter.get("mode"),
             genre_group,
+            ",".join(genre_groups),
             is_completed,
             per_page,
             bool(raw_cursor),
