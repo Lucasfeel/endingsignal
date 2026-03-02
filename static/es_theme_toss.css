@@ -299,9 +299,9 @@ body {
 }
 
 .es-btn[data-subscribed='1'] {
-  border-color: var(--es-success-border);
-  background: var(--es-success-surface);
-  color: var(--es-success-text);
+  border-color: var(--es-success);
+  background: var(--es-success);
+  color: #0f3b21;
 }
 
 .es-icon-btn {
@@ -1084,15 +1084,15 @@ body.es-admin-page {
 }
 
 .es-admin-page [class*='border-emerald-'] {
-  border-color: var(--es-success-border) !important;
+  border-color: var(--es-success) !important;
 }
 
 .es-admin-page [class*='bg-emerald-'] {
-  background: var(--es-success-surface) !important;
+  background: var(--es-success) !important;
 }
 
 .es-admin-page [class*='text-emerald-'] {
-  color: var(--es-success-text) !important;
+  color: #0f3b21 !important;
 }
 
 .es-admin-page [class*='border-red-'] {
