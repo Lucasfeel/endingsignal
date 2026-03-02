@@ -304,6 +304,36 @@ def _parse_positive_int(value):
     return parsed if parsed > 0 else None
 
 
+def _parse_source_ids_payload(data):
+    parsed_source_ids = []
+
+    def _append_source_id(raw_value):
+        source_id = _parse_positive_int(raw_value)
+        if source_id is None or source_id in parsed_source_ids:
+            return
+        parsed_source_ids.append(source_id)
+
+    raw_sources = data.get('sources')
+    if isinstance(raw_sources, list):
+        for entry in raw_sources:
+            if isinstance(entry, dict):
+                _append_source_id(
+                    entry.get('sourceId') or entry.get('source_id') or entry.get('id')
+                )
+            else:
+                _append_source_id(entry)
+
+    raw_source_ids = data.get('sourceIds')
+    if raw_source_ids is None:
+        raw_source_ids = data.get('source_ids')
+    if isinstance(raw_source_ids, list):
+        for entry in raw_source_ids:
+            _append_source_id(entry)
+
+    _append_source_id(data.get('sourceId') or data.get('source_id'))
+    return parsed_source_ids
+
+
 def _serialize_content_type_option(row):
     return {
         'id': row['id'],
@@ -489,7 +519,7 @@ def create_admin_content():
     data = request.get_json() or {}
     title = _normalize_input_text(data.get('title'))
     type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
-    source_id = _parse_positive_int(data.get('sourceId') or data.get('source_id'))
+    source_ids = _parse_source_ids_payload(data)
     author_name = _normalize_input_text(
         data.get('authorName') or data.get('author_name') or data.get('author')
     )
@@ -502,16 +532,17 @@ def create_admin_content():
         return _error_response(400, 'INVALID_REQUEST', 'title is required')
     if type_id is None:
         return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
-    if source_id is None:
-        return _error_response(400, 'INVALID_REQUEST', 'sourceId is required')
+    if not source_ids:
+        return _error_response(400, 'INVALID_REQUEST', 'sourceId/sourceIds/sources is required')
     if not is_valid_content_url:
         return _error_response(400, 'INVALID_REQUEST', 'contentUrl must be a valid http(s) URL')
 
     conn = get_db()
     try:
         with managed_cursor(conn) as cursor:
+            source_placeholders = ', '.join(['%s'] * len(source_ids))
             cursor.execute(
-                """
+                f"""
                 SELECT
                     s.id AS source_id,
                     s.name AS source_name,
@@ -520,34 +551,68 @@ def create_admin_content():
                 FROM content_sources s
                 JOIN content_types t
                   ON t.id = s.type_id
-                WHERE s.id = %s
+                WHERE s.id IN ({source_placeholders})
                 """,
-                (source_id,),
+                tuple(source_ids),
             )
-            source_row = cursor.fetchone()
-            if source_row is None:
+            source_rows = cursor.fetchall()
+            source_row_by_id = {
+                int(_get_row_value(row, 'source_id') or 0): row for row in source_rows
+            }
+            if len(source_row_by_id) != len(source_ids):
                 return _error_response(400, 'INVALID_SOURCE_ID', 'sourceId does not exist')
 
-            source_type_id = int(_get_row_value(source_row, 'type_id') or 0)
-            if source_type_id != type_id:
-                return _error_response(400, 'SOURCE_TYPE_MISMATCH', 'sourceId does not belong to typeId')
+            ordered_source_rows = []
+            for requested_source_id in source_ids:
+                row = source_row_by_id.get(int(requested_source_id))
+                if row is None:
+                    return _error_response(400, 'INVALID_SOURCE_ID', 'sourceId does not exist')
+                source_type_id = int(_get_row_value(row, 'type_id') or 0)
+                if source_type_id != type_id:
+                    return _error_response(
+                        400,
+                        'SOURCE_TYPE_MISMATCH',
+                        'sourceId does not belong to typeId',
+                    )
+                ordered_source_rows.append(row)
 
-            type_name = _get_row_value(source_row, 'type_name')
-            source_name = _get_row_value(source_row, 'source_name')
+            first_source_row = ordered_source_rows[0]
+            source_type_id = int(_get_row_value(first_source_row, 'type_id') or 0)
+            type_name = _get_row_value(first_source_row, 'type_name')
             content_type_value = MANUAL_CONTENT_TYPE_MAP.get(type_name, type_name)
-            content_source_value = MANUAL_CONTENT_SOURCE_MAP.get(source_name, source_name)
+
+            normalized_sources = []
+            seen_content_sources = set()
+            for source_row in ordered_source_rows:
+                source_name = _get_row_value(source_row, 'source_name')
+                content_source_value = MANUAL_CONTENT_SOURCE_MAP.get(source_name, source_name)
+                if content_source_value in seen_content_sources:
+                    continue
+                seen_content_sources.add(content_source_value)
+                normalized_sources.append(
+                    {
+                        'id': int(_get_row_value(source_row, 'source_id') or 0),
+                        'type_id': source_type_id,
+                        'name': source_name,
+                        'value': content_source_value,
+                    }
+                )
+
+            duplicate_source_placeholders = ', '.join(['%s'] * len(normalized_sources))
+            duplicate_params = [entry['value'] for entry in normalized_sources]
+            duplicate_params.extend([content_type_value, title])
 
             cursor.execute(
-                """
-                SELECT 1
+                f"""
+                SELECT source
                 FROM contents
-                WHERE source = %s
+                WHERE source IN ({duplicate_source_placeholders})
                   AND content_type = %s
                   AND LOWER(TRIM(title)) = LOWER(TRIM(%s))
                   AND COALESCE(is_deleted, FALSE) = FALSE
                 LIMIT 1
                 """,
-                (content_source_value, content_type_value, title),
+                tuple(duplicate_params),
             )
             if cursor.fetchone() is not None:
                 return _error_response(
@@ -557,66 +622,80 @@ def create_admin_content():
                 )
 
             manual_content_id = f"manual:{uuid4().hex}"
-            manual_meta_payload = {
-                'manual_registration': {
-                    'type_id': source_type_id,
-                    'type_name': type_name,
-                    'source_id': int(_get_row_value(source_row, 'source_id') or 0),
-                    'source_name': source_name,
-                    'admin_id': g.current_user.get('id'),
-                }
-            }
             common_payload = {}
             if content_url:
                 common_payload['content_url'] = content_url
             if author_name:
                 common_payload['authors'] = author_name
-            if common_payload:
-                manual_meta_payload['common'] = common_payload
-            manual_meta = json.dumps(
-                manual_meta_payload,
-                ensure_ascii=False,
-            )
 
-            cursor.execute(
-                """
-                INSERT INTO contents (
-                    content_id,
-                    source,
-                    content_type,
-                    title,
-                    status,
-                    meta
+            created_rows = []
+            for source_entry in normalized_sources:
+                manual_meta_payload = {
+                    'manual_registration': {
+                        'type_id': source_type_id,
+                        'type_name': type_name,
+                        'source_id': source_entry['id'],
+                        'source_name': source_entry['name'],
+                        'admin_id': g.current_user.get('id'),
+                    }
+                }
+                if common_payload:
+                    manual_meta_payload['common'] = common_payload
+                manual_meta = json.dumps(
+                    manual_meta_payload,
+                    ensure_ascii=False,
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-                RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
-                """,
-                (
-                    manual_content_id,
-                    content_source_value,
-                    content_type_value,
-                    title,
-                    '연재중',
-                    manual_meta,
-                ),
-            )
-            created_row = cursor.fetchone()
+
+                cursor.execute(
+                    """
+                    INSERT INTO contents (
+                        content_id,
+                        source,
+                        content_type,
+                        title,
+                        status,
+                        meta
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                    RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
+                    """,
+                    (
+                        manual_content_id,
+                        source_entry['value'],
+                        content_type_value,
+                        title,
+                        '연재중',
+                        manual_meta,
+                    ),
+                )
+                created_rows.append(cursor.fetchone())
 
         conn.commit()
+        serialized_sources = [
+            {
+                'id': entry['id'],
+                'type_id': entry['type_id'],
+                'name': entry['name'],
+            }
+            for entry in normalized_sources
+        ]
+        serialized_contents = [_serialize_content_row(row) for row in created_rows]
+        primary_source = serialized_sources[0]
+        primary_content = serialized_contents[0]
         return (
             jsonify(
                 {
                     'success': True,
-                    'content': _serialize_content_row(created_row),
+                    'content': primary_content,
+                    'contents': serialized_contents,
                     'content_type': {
                         'id': source_type_id,
                         'name': type_name,
                     },
-                    'content_source': {
-                        'id': int(_get_row_value(source_row, 'source_id') or 0),
-                        'type_id': source_type_id,
-                        'name': source_name,
-                    },
+                    'content_source': primary_source,
+                    'content_sources': serialized_sources,
+                    'sourceIds': [entry['id'] for entry in serialized_sources],
+                    'sources': serialized_sources,
                 }
             ),
             201,

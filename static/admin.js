@@ -157,8 +157,19 @@
     addContent: {
       types: [],
       sourcesByTypeId: new Map(),
-      selectedTypeId: '',
-      selectedSourceId: '',
+      forms: {
+        addContent: {
+          selectedTypeId: '',
+          selectedSourceIds: [''],
+          sourceErrors: [''],
+        },
+        manageCreate: {
+          selectedTypeId: '',
+          selectedSourceIds: [''],
+          sourceErrors: [''],
+        },
+      },
+      modalTargetFormKey: 'addContent',
     },
     deleted: {
       items: [],
@@ -805,72 +816,185 @@
     });
   };
 
-  const setAddContentHint = (text = '') => {
-    const hintEl = document.getElementById('addContentFormHint');
+  const CONTENT_FORM_CONFIGS = {
+    addContent: {
+      formId: 'addContentForm',
+      titleInputId: 'addContentTitle',
+      authorInputId: 'addContentAuthor',
+      urlInputId: 'addContentUrl',
+      typeSelectId: 'addContentTypeSelect',
+      sourcesContainerId: 'addContentSourcesContainer',
+      addSourceRowBtnId: 'addContentAddSourceRowBtn',
+      openTypeModalBtnId: 'addTypeOpenBtn',
+      openSourceModalBtnId: 'addSourceOpenBtn',
+      resetBtnId: 'addContentResetBtn',
+      submitBtnId: 'addContentSubmitBtn',
+      hintId: 'addContentFormHint',
+    },
+    manageCreate: {
+      formId: 'manageCreateContentForm',
+      titleInputId: 'manageCreateContentTitle',
+      authorInputId: 'manageCreateContentAuthor',
+      urlInputId: 'manageCreateContentUrl',
+      typeSelectId: 'manageCreateContentTypeSelect',
+      sourcesContainerId: 'manageCreateSourcesContainer',
+      addSourceRowBtnId: 'manageCreateAddSourceRowBtn',
+      openTypeModalBtnId: 'manageCreateTypeOpenBtn',
+      openSourceModalBtnId: 'manageCreateSourceOpenBtn',
+      resetBtnId: 'manageCreateContentResetBtn',
+      submitBtnId: 'manageCreateContentSubmitBtn',
+      hintId: 'manageCreateContentFormHint',
+    },
+  };
+  const CONTENT_FORM_KEYS = Object.keys(CONTENT_FORM_CONFIGS);
+
+  const getContentFormConfig = (formKey) => CONTENT_FORM_CONFIGS[formKey] || null;
+
+  const getContentFormState = (formKey) => STATE.addContent.forms?.[formKey] || null;
+
+  const normalizeSelectedSourceIds = (sourceIds) => {
+    if (!Array.isArray(sourceIds) || sourceIds.length === 0) return [''];
+    return sourceIds.map((value) => String(value || '').trim());
+  };
+
+  const setContentFormHint = (formKey, text = '') => {
+    const config = getContentFormConfig(formKey);
+    if (!config) return;
+    const hintEl = document.getElementById(config.hintId);
     if (!hintEl) return;
     hintEl.textContent = text || '';
   };
 
-  const getSelectedAddContentType = () =>
-    STATE.addContent.types.find(
-      (entry) => String(entry.id) === String(STATE.addContent.selectedTypeId),
-    ) || null;
-
-  const renderAddContentSourceOptions = () => {
-    const sourceSelect = document.getElementById('addContentSourceSelect');
-    const addSourceBtn = document.getElementById('addSourceOpenBtn');
-    if (!sourceSelect) return;
-
-    const selectedTypeId = String(STATE.addContent.selectedTypeId || '');
-    sourceSelect.innerHTML = '';
-
-    if (!selectedTypeId) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = '타입을 먼저 선택하세요';
-      sourceSelect.appendChild(option);
-      sourceSelect.disabled = true;
-      setButtonDisabled(addSourceBtn, true);
-      return;
-    }
-
-    const sources = STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [];
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = sources.length ? '소스 선택' : '등록된 소스 없음';
-    sourceSelect.appendChild(placeholder);
-
-    sources.forEach((entry) => {
-      const option = document.createElement('option');
-      option.value = String(entry.id);
-      option.textContent = entry.name || String(entry.id);
-      sourceSelect.appendChild(option);
-    });
-
-    const selectedSourceId = String(STATE.addContent.selectedSourceId || '');
-    const selectedExists = sources.some((entry) => String(entry.id) === selectedSourceId);
-    if (selectedExists) {
-      sourceSelect.value = selectedSourceId;
-    } else {
-      sourceSelect.value = '';
-      STATE.addContent.selectedSourceId = '';
-    }
-
-    sourceSelect.disabled = false;
-    setButtonDisabled(addSourceBtn, false);
+  const getSelectedContentType = (formKey) => {
+    const formState = getContentFormState(formKey);
+    if (!formState) return null;
+    return (
+      STATE.addContent.types.find(
+        (entry) => String(entry.id) === String(formState.selectedTypeId || ''),
+      ) || null
+    );
   };
 
-  const renderAddContentTypeOptions = () => {
-    const typeSelect = document.getElementById('addContentTypeSelect');
+  const setContentFormSourceErrors = (formKey, errors = []) => {
+    const formState = getContentFormState(formKey);
+    if (!formState) return;
+    const normalized = normalizeSelectedSourceIds(formState.selectedSourceIds);
+    formState.sourceErrors = normalized.map((_, index) => String(errors[index] || ''));
+  };
+
+  const renderContentFormSourceRows = (formKey) => {
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState) return;
+
+    const container = document.getElementById(config.sourcesContainerId);
+    const sourceCatalogBtn = document.getElementById(config.openSourceModalBtnId);
+    if (!container) return;
+
+    const selectedTypeId = String(formState.selectedTypeId || '');
+    const sourceRows = normalizeSelectedSourceIds(formState.selectedSourceIds);
+    formState.selectedSourceIds = sourceRows;
+    setContentFormSourceErrors(formKey, formState.sourceErrors);
+
+    const sources = selectedTypeId ? STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [] : [];
+    container.innerHTML = '';
+
+    sourceRows.forEach((sourceId, index) => {
+      const rowWrap = document.createElement('div');
+      rowWrap.className = 'space-y-1';
+
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2';
+
+      const select = document.createElement('select');
+      select.className =
+        'w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30';
+      select.disabled = !selectedTypeId;
+
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = selectedTypeId
+        ? sources.length
+          ? '소스 선택'
+          : '등록된 소스 없음'
+        : '타입을 먼저 선택하세요';
+      select.appendChild(placeholder);
+
+      sources.forEach((entry) => {
+        const option = document.createElement('option');
+        option.value = String(entry.id);
+        option.textContent = entry.name || String(entry.id);
+        select.appendChild(option);
+      });
+
+      const selectedExists = sources.some((entry) => String(entry.id) === sourceId);
+      select.value = selectedExists ? sourceId : '';
+      if (sourceId && !selectedExists) {
+        formState.selectedSourceIds[index] = '';
+      }
+
+      select.addEventListener('change', () => {
+        formState.selectedSourceIds[index] = select.value || '';
+        if (Array.isArray(formState.sourceErrors)) {
+          formState.sourceErrors[index] = '';
+        }
+        renderContentFormSourceRows(formKey);
+      });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className =
+        'h-10 w-10 shrink-0 rounded-xl border border-white/20 bg-white/5 text-base text-white/80 transition hover:border-white/40';
+      removeBtn.setAttribute('aria-label', '소스 입력 제거');
+      removeBtn.textContent = '×';
+      const canRemove = sourceRows.length > 1;
+      setButtonDisabled(removeBtn, !canRemove);
+      removeBtn.addEventListener('click', () => {
+        if (formState.selectedSourceIds.length <= 1) {
+          showToast('소스는 최소 1개 이상 필요합니다.', { type: 'error' });
+          return;
+        }
+        formState.selectedSourceIds.splice(index, 1);
+        if (Array.isArray(formState.sourceErrors)) {
+          formState.sourceErrors.splice(index, 1);
+        }
+        renderContentFormSourceRows(formKey);
+      });
+
+      row.appendChild(select);
+      row.appendChild(removeBtn);
+      rowWrap.appendChild(row);
+
+      const errorText = Array.isArray(formState.sourceErrors) ? formState.sourceErrors[index] : '';
+      if (errorText) {
+        const errorEl = document.createElement('p');
+        errorEl.className = 'text-[11px] text-red-300';
+        errorEl.textContent = errorText;
+        rowWrap.appendChild(errorEl);
+      }
+
+      container.appendChild(rowWrap);
+    });
+
+    setButtonDisabled(sourceCatalogBtn, !selectedTypeId);
+  };
+
+  const renderContentFormTypeOptions = (formKey) => {
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState) return;
+
+    const typeSelect = document.getElementById(config.typeSelectId);
     if (!typeSelect) return;
 
-    const selectedTypeId = String(STATE.addContent.selectedTypeId || '');
+    const selectedTypeId = String(formState.selectedTypeId || '');
     const selectedTypeExists = STATE.addContent.types.some(
       (entry) => String(entry.id) === selectedTypeId,
     );
     if (!selectedTypeExists) {
-      STATE.addContent.selectedTypeId = '';
-      STATE.addContent.selectedSourceId = '';
+      formState.selectedTypeId = '';
+      formState.selectedSourceIds = [''];
+      formState.sourceErrors = [''];
     }
 
     typeSelect.innerHTML = '';
@@ -886,26 +1010,19 @@
       typeSelect.appendChild(option);
     });
 
-    if (STATE.addContent.selectedTypeId) {
-      typeSelect.value = String(STATE.addContent.selectedTypeId);
-    } else {
-      typeSelect.value = '';
-    }
-
-    renderAddContentSourceOptions();
+    typeSelect.value = formState.selectedTypeId ? String(formState.selectedTypeId) : '';
+    renderContentFormSourceRows(formKey);
   };
 
-  const loadContentSourcesByType = async (
-    typeId,
-    { selectSourceId = null, silent = false } = {},
-  ) => {
+  const renderAllContentForms = () => {
+    CONTENT_FORM_KEYS.forEach((formKey) => {
+      renderContentFormTypeOptions(formKey);
+    });
+  };
+
+  const loadContentSourcesByType = async (typeId, { silent = false } = {}) => {
     const normalizedTypeId = String(typeId || '');
-    if (!normalizedTypeId) {
-      STATE.addContent.selectedTypeId = '';
-      STATE.addContent.selectedSourceId = '';
-      renderAddContentSourceOptions();
-      return [];
-    }
+    if (!normalizedTypeId) return [];
 
     try {
       const payload = await apiRequest(
@@ -915,10 +1032,13 @@
       );
       const sources = Array.isArray(payload?.sources) ? payload.sources : [];
       STATE.addContent.sourcesByTypeId.set(normalizedTypeId, sources);
-      if (selectSourceId !== null && selectSourceId !== undefined) {
-        STATE.addContent.selectedSourceId = selectSourceId ? String(selectSourceId) : '';
-      }
-      renderAddContentSourceOptions();
+      CONTENT_FORM_KEYS.forEach((formKey) => {
+        const formState = getContentFormState(formKey);
+        if (!formState) return;
+        if (String(formState.selectedTypeId || '') === normalizedTypeId) {
+          renderContentFormSourceRows(formKey);
+        }
+      });
       return sources;
     } catch (err) {
       if (!silent) {
@@ -928,41 +1048,60 @@
     }
   };
 
-  const loadContentTypes = async ({ selectTypeId = null, selectSourceId = null } = {}) => {
+  const loadContentTypes = async ({ selectedTypeByFormKey = null } = {}) => {
     try {
       const payload = await apiRequest('GET', '/api/admin/content-types', { token: STATE.token });
       STATE.addContent.types = Array.isArray(payload?.types) ? payload.types : [];
-      if (selectTypeId !== null && selectTypeId !== undefined) {
-        STATE.addContent.selectedTypeId = selectTypeId ? String(selectTypeId) : '';
-      }
 
-      renderAddContentTypeOptions();
-
-      if (STATE.addContent.selectedTypeId) {
-        await loadContentSourcesByType(STATE.addContent.selectedTypeId, {
-          selectSourceId,
-          silent: true,
+      if (selectedTypeByFormKey && typeof selectedTypeByFormKey === 'object') {
+        Object.entries(selectedTypeByFormKey).forEach(([formKey, selectedTypeId]) => {
+          const formState = getContentFormState(formKey);
+          if (!formState) return;
+          formState.selectedTypeId = selectedTypeId ? String(selectedTypeId) : '';
+          formState.selectedSourceIds = [''];
+          formState.sourceErrors = [''];
         });
       }
+
+      renderAllContentForms();
+
+      const typeIdsToLoad = new Set();
+      CONTENT_FORM_KEYS.forEach((formKey) => {
+        const formState = getContentFormState(formKey);
+        const selectedTypeId = String(formState?.selectedTypeId || '');
+        if (selectedTypeId) {
+          typeIdsToLoad.add(selectedTypeId);
+        }
+      });
+      await Promise.all(
+        Array.from(typeIdsToLoad).map((typeId) => loadContentSourcesByType(typeId, { silent: true })),
+      );
     } catch (err) {
       showToast(err.message || '타입 목록을 불러오지 못했습니다.', { type: 'error' });
     }
   };
 
-  const resetAddContentForm = ({ clearHint = true } = {}) => {
-    const titleInput = document.getElementById('addContentTitle');
-    const authorInput = document.getElementById('addContentAuthor');
-    const urlInput = document.getElementById('addContentUrl');
+  const resetContentForm = (formKey, { clearHint = true } = {}) => {
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState) return;
+
+    const titleInput = document.getElementById(config.titleInputId);
+    const authorInput = document.getElementById(config.authorInputId);
+    const urlInput = document.getElementById(config.urlInputId);
     if (titleInput) titleInput.value = '';
     if (authorInput) authorInput.value = '';
     if (urlInput) urlInput.value = '';
-    STATE.addContent.selectedTypeId = '';
-    STATE.addContent.selectedSourceId = '';
-    renderAddContentTypeOptions();
-    if (clearHint) setAddContentHint('');
+
+    formState.selectedTypeId = '';
+    formState.selectedSourceIds = [''];
+    formState.sourceErrors = [''];
+    renderContentFormTypeOptions(formKey);
+    if (clearHint) setContentFormHint(formKey, '');
   };
 
-  const openAddTypeModal = () => {
+  const openAddTypeModal = (formKey = 'addContent') => {
+    STATE.addContent.modalTargetFormKey = getContentFormConfig(formKey) ? formKey : 'addContent';
     const modal = document.getElementById('addTypeModal');
     const input = document.getElementById('addTypeNameInput');
     if (!modal) return;
@@ -979,12 +1118,14 @@
     modal.classList.remove('flex');
   };
 
-  const openAddSourceModal = () => {
-    const selectedType = getSelectedAddContentType();
+  const openAddSourceModal = (formKey = 'addContent') => {
+    const targetFormKey = getContentFormConfig(formKey) ? formKey : 'addContent';
+    const selectedType = getSelectedContentType(targetFormKey);
     if (!selectedType) {
       showToast('소스를 추가하려면 먼저 타입을 선택하세요.', { type: 'error' });
       return;
     }
+    STATE.addContent.modalTargetFormKey = targetFormKey;
 
     const modal = document.getElementById('addSourceModal');
     const input = document.getElementById('addSourceNameInput');
@@ -1011,6 +1152,7 @@
   const createContentTypeFromModal = async () => {
     const input = document.getElementById('addTypeNameInput');
     const saveBtn = document.getElementById('addTypeSaveBtn');
+    const targetFormKey = STATE.addContent.modalTargetFormKey || 'addContent';
     const name = input?.value?.trim() || '';
     if (!name) {
       showToast('타입명을 입력해주세요.', { type: 'error' });
@@ -1034,8 +1176,12 @@
         });
         const createdType = payload?.type || null;
         closeAddTypeModal();
-        await loadContentTypes({ selectTypeId: createdType?.id ? String(createdType.id) : null });
-        setAddContentHint(`타입 추가 완료: ${createdType?.name || name}`);
+        await loadContentTypes({
+          selectedTypeByFormKey: {
+            [targetFormKey]: createdType?.id ? String(createdType.id) : '',
+          },
+        });
+        setContentFormHint(targetFormKey, `타입 추가 완료: ${createdType?.name || name}`);
         showToast('타입이 추가되었습니다.', { type: 'success' });
       });
     } catch (err) {
@@ -1043,10 +1189,27 @@
     }
   };
 
+  const assignSourceToForm = (formKey, sourceId) => {
+    const formState = getContentFormState(formKey);
+    const normalizedSourceId = String(sourceId || '');
+    if (!formState || !normalizedSourceId) return;
+
+    formState.selectedSourceIds = normalizeSelectedSourceIds(formState.selectedSourceIds);
+    const emptyIndex = formState.selectedSourceIds.findIndex((entry) => !String(entry || '').trim());
+    if (emptyIndex >= 0) {
+      formState.selectedSourceIds[emptyIndex] = normalizedSourceId;
+    } else {
+      formState.selectedSourceIds.push(normalizedSourceId);
+    }
+    formState.sourceErrors = formState.selectedSourceIds.map(() => '');
+  };
+
   const createContentSourceFromModal = async () => {
     const input = document.getElementById('addSourceNameInput');
     const saveBtn = document.getElementById('addSourceSaveBtn');
-    const selectedTypeId = String(STATE.addContent.selectedTypeId || '');
+    const targetFormKey = STATE.addContent.modalTargetFormKey || 'addContent';
+    const targetFormState = getContentFormState(targetFormKey);
+    const selectedTypeId = String(targetFormState?.selectedTypeId || '');
     const name = input?.value?.trim() || '';
     if (!selectedTypeId) {
       showToast('타입을 먼저 선택하세요.', { type: 'error' });
@@ -1075,11 +1238,12 @@
         });
         const createdSource = payload?.source || null;
         closeAddSourceModal();
-        await loadContentSourcesByType(selectedTypeId, {
-          selectSourceId: createdSource?.id ? String(createdSource.id) : null,
-          silent: true,
-        });
-        setAddContentHint(`소스 추가 완료: ${createdSource?.name || name}`);
+        await loadContentSourcesByType(selectedTypeId, { silent: true });
+        if (createdSource?.id) {
+          assignSourceToForm(targetFormKey, String(createdSource.id));
+        }
+        renderContentFormSourceRows(targetFormKey);
+        setContentFormHint(targetFormKey, `소스 추가 완료: ${createdSource?.name || name}`);
         showToast('소스가 추가되었습니다.', { type: 'success' });
       });
     } catch (err) {
@@ -1087,32 +1251,78 @@
     }
   };
 
-  const handleAddContentTypeChange = async () => {
-    const typeSelect = document.getElementById('addContentTypeSelect');
+  const handleContentFormTypeChange = async (formKey) => {
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState) return;
+
+    const typeSelect = document.getElementById(config.typeSelectId);
     const nextTypeId = typeSelect?.value || '';
-    STATE.addContent.selectedTypeId = nextTypeId;
-    STATE.addContent.selectedSourceId = '';
-    renderAddContentSourceOptions();
+    formState.selectedTypeId = nextTypeId;
+    formState.selectedSourceIds = [''];
+    formState.sourceErrors = [''];
+    renderContentFormSourceRows(formKey);
 
     if (nextTypeId) {
-      await loadContentSourcesByType(nextTypeId, { selectSourceId: '' });
+      await loadContentSourcesByType(nextTypeId, { silent: true });
     }
   };
 
-  const handleAddContentSourceChange = () => {
-    const sourceSelect = document.getElementById('addContentSourceSelect');
-    STATE.addContent.selectedSourceId = sourceSelect?.value || '';
+  const appendContentFormSourceRow = (formKey) => {
+    const formState = getContentFormState(formKey);
+    if (!formState) return;
+    formState.selectedSourceIds = normalizeSelectedSourceIds(formState.selectedSourceIds);
+    formState.selectedSourceIds.push('');
+    formState.sourceErrors = formState.selectedSourceIds.map(() => '');
+    renderContentFormSourceRows(formKey);
   };
 
-  const submitAddContent = async (event) => {
-    if (event?.preventDefault) event.preventDefault();
+  const validateSelectedSourceIds = (formKey) => {
+    const formState = getContentFormState(formKey);
+    if (!formState) return [];
 
-    const title = document.getElementById('addContentTitle')?.value?.trim() || '';
-    const authorName = document.getElementById('addContentAuthor')?.value?.trim() || '';
-    const contentUrl = document.getElementById('addContentUrl')?.value?.trim() || '';
-    const typeId = String(STATE.addContent.selectedTypeId || '');
-    const sourceId = String(STATE.addContent.selectedSourceId || '');
-    const submitBtn = document.getElementById('addContentSubmitBtn');
+    const selectedTypeId = String(formState.selectedTypeId || '');
+    const availableSources = selectedTypeId ? STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [] : [];
+    const allowedSourceIdSet = new Set(availableSources.map((entry) => String(entry.id)));
+    const sourceIds = normalizeSelectedSourceIds(formState.selectedSourceIds);
+    const errors = sourceIds.map(() => '');
+    const seen = new Set();
+
+    sourceIds.forEach((sourceId, index) => {
+      if (!sourceId) {
+        errors[index] = '소스를 선택해주세요.';
+        return;
+      }
+      if (allowedSourceIdSet.size > 0 && !allowedSourceIdSet.has(sourceId)) {
+        errors[index] = '유효한 소스를 선택해주세요.';
+        return;
+      }
+      if (seen.has(sourceId)) {
+        errors[index] = '중복된 소스입니다.';
+        return;
+      }
+      seen.add(sourceId);
+    });
+
+    formState.selectedSourceIds = sourceIds;
+    setContentFormSourceErrors(formKey, errors);
+    renderContentFormSourceRows(formKey);
+    if (errors.some((message) => !!message)) return [];
+    return sourceIds;
+  };
+
+  const submitContentForm = async (formKey, event, { onSuccess = null } = {}) => {
+    if (event?.preventDefault) event.preventDefault();
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState) return;
+
+    const title = document.getElementById(config.titleInputId)?.value?.trim() || '';
+    const authorName = document.getElementById(config.authorInputId)?.value?.trim() || '';
+    const contentUrl = document.getElementById(config.urlInputId)?.value?.trim() || '';
+    const typeId = String(formState.selectedTypeId || '');
+    const submitBtn = document.getElementById(config.submitBtnId);
+    const sourceIds = validateSelectedSourceIds(formKey);
 
     if (!title) {
       showToast('제목을 입력해주세요.', { type: 'error' });
@@ -1122,12 +1332,20 @@
       showToast('타입을 선택해주세요.', { type: 'error' });
       return;
     }
-    if (!sourceId) {
-      showToast('소스를 선택해주세요.', { type: 'error' });
+    if (!sourceIds.length) {
+      showToast('소스 정보를 확인해주세요.', { type: 'error' });
       return;
     }
     if (contentUrl && !isValidHttpUrl(contentUrl)) {
       showToast('http(s) 형식 URL을 입력해주세요.', { type: 'error' });
+      return;
+    }
+
+    const numericSourceIds = sourceIds
+      .map((sourceId) => Number(sourceId))
+      .filter((sourceId) => Number.isInteger(sourceId) && sourceId > 0);
+    if (numericSourceIds.length !== sourceIds.length) {
+      showToast('소스 정보를 확인해주세요.', { type: 'error' });
       return;
     }
 
@@ -1136,26 +1354,65 @@
         const requestBody = {
           title,
           typeId: Number(typeId),
-          sourceId: Number(sourceId),
+          sources: numericSourceIds.map((sourceId) => ({ sourceId })),
+          sourceIds: [...numericSourceIds],
         };
+        if (numericSourceIds.length === 1) {
+          requestBody.sourceId = numericSourceIds[0];
+        }
         if (contentUrl) {
           requestBody.contentUrl = contentUrl;
         }
         if (authorName) {
           requestBody.authorName = authorName;
         }
+
         const payload = await apiRequest('POST', '/api/admin/contents', {
           token: STATE.token,
           body: requestBody,
         });
-        const createdId = payload?.content?.content_id || '-';
-        resetAddContentForm({ clearHint: false });
-        setAddContentHint(`등록 완료: ${createdId}`);
-        showToast('콘텐츠가 추가되었습니다.', { type: 'success' });
+
+        const createdRows = Array.isArray(payload?.contents)
+          ? payload.contents
+          : payload?.content
+            ? [payload.content]
+            : [];
+        const createdCount = createdRows.length || numericSourceIds.length;
+        const createdId = payload?.content?.content_id || createdRows[0]?.content_id || '-';
+        resetContentForm(formKey, { clearHint: false });
+        setContentFormHint(
+          formKey,
+          `등록 완료: ${createdId}${createdCount > 1 ? ` (${createdCount}개 소스)` : ''}`,
+        );
+        showToast(
+          createdCount > 1
+            ? `콘텐츠가 ${createdCount}개 소스로 추가되었습니다.`
+            : '콘텐츠가 추가되었습니다.',
+          { type: 'success' },
+        );
+
+        if (typeof onSuccess === 'function') {
+          await onSuccess(payload);
+        }
       });
     } catch (err) {
       showToast(err.message || '콘텐츠 추가에 실패했습니다.', { type: 'error' });
     }
+  };
+
+  const submitAddContent = async (event) => {
+    await submitContentForm('addContent', event);
+  };
+
+  const submitManageCreateContent = async (event) => {
+    await submitContentForm('manageCreate', event, {
+      onSuccess: async (payload) => {
+        const createdContent = payload?.content;
+        if (createdContent?.content_id && createdContent?.source) {
+          await openLookupInManage(createdContent);
+        }
+      },
+    });
   };
 
   const renderManageResults = () => {
@@ -2856,9 +3113,15 @@
     const addContentForm = document.getElementById('addContentForm');
     const addContentResetBtn = document.getElementById('addContentResetBtn');
     const addContentTypeSelect = document.getElementById('addContentTypeSelect');
-    const addContentSourceSelect = document.getElementById('addContentSourceSelect');
+    const addContentAddSourceRowBtn = document.getElementById('addContentAddSourceRowBtn');
     const addTypeOpenBtn = document.getElementById('addTypeOpenBtn');
     const addSourceOpenBtn = document.getElementById('addSourceOpenBtn');
+    const manageCreateContentForm = document.getElementById('manageCreateContentForm');
+    const manageCreateContentResetBtn = document.getElementById('manageCreateContentResetBtn');
+    const manageCreateTypeSelect = document.getElementById('manageCreateContentTypeSelect');
+    const manageCreateAddSourceRowBtn = document.getElementById('manageCreateAddSourceRowBtn');
+    const manageCreateTypeOpenBtn = document.getElementById('manageCreateTypeOpenBtn');
+    const manageCreateSourceOpenBtn = document.getElementById('manageCreateSourceOpenBtn');
     const addTypeSaveBtn = document.getElementById('addTypeSaveBtn');
     const addTypeCancelBtn = document.getElementById('addTypeCancelBtn');
     const addSourceSaveBtn = document.getElementById('addSourceSaveBtn');
@@ -2919,13 +3182,23 @@
     });
 
     addContentForm?.addEventListener('submit', submitAddContent);
-    addContentResetBtn?.addEventListener('click', () => resetAddContentForm());
+    addContentResetBtn?.addEventListener('click', () => resetContentForm('addContent'));
     addContentTypeSelect?.addEventListener('change', () => {
-      handleAddContentTypeChange();
+      handleContentFormTypeChange('addContent');
     });
-    addContentSourceSelect?.addEventListener('change', handleAddContentSourceChange);
-    addTypeOpenBtn?.addEventListener('click', openAddTypeModal);
-    addSourceOpenBtn?.addEventListener('click', openAddSourceModal);
+    addContentAddSourceRowBtn?.addEventListener('click', () => appendContentFormSourceRow('addContent'));
+    addTypeOpenBtn?.addEventListener('click', () => openAddTypeModal('addContent'));
+    addSourceOpenBtn?.addEventListener('click', () => openAddSourceModal('addContent'));
+    manageCreateContentForm?.addEventListener('submit', submitManageCreateContent);
+    manageCreateContentResetBtn?.addEventListener('click', () => resetContentForm('manageCreate'));
+    manageCreateTypeSelect?.addEventListener('change', () => {
+      handleContentFormTypeChange('manageCreate');
+    });
+    manageCreateAddSourceRowBtn?.addEventListener('click', () =>
+      appendContentFormSourceRow('manageCreate'),
+    );
+    manageCreateTypeOpenBtn?.addEventListener('click', () => openAddTypeModal('manageCreate'));
+    manageCreateSourceOpenBtn?.addEventListener('click', () => openAddSourceModal('manageCreate'));
     addTypeSaveBtn?.addEventListener('click', createContentTypeFromModal);
     addTypeCancelBtn?.addEventListener('click', closeAddTypeModal);
     addSourceSaveBtn?.addEventListener('click', createContentSourceFromModal);

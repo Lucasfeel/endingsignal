@@ -186,24 +186,24 @@
                 </div>
 
                 <div class="space-y-1">
-                  <label for="addContentSourceSelect" class="text-sm text-white/80">소스</label>
-                  <div class="flex items-center gap-2">
-                    <select
-                      id="addContentSourceSelect"
-                      required
-                      disabled
-                      class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+                  <label class="text-sm text-white/80">소스</label>
+                  <div id="addContentSourcesContainer" class="space-y-2"></div>
+                  <div class="flex flex-wrap gap-2 pt-1">
+                    <button
+                      id="addContentAddSourceRowBtn"
+                      type="button"
+                      class="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 transition hover:border-white/40"
                     >
-                      <option value="">타입을 먼저 선택하세요</option>
-                    </select>
+                      + 소스 입력 추가
+                    </button>
                     <button
                       id="addSourceOpenBtn"
                       type="button"
                       disabled
-                      aria-label="소스 추가"
-                      class="h-10 w-10 rounded-xl border border-white/20 bg-white/10 text-lg text-white/90 transition hover:border-white/40"
+                      aria-label="소스 사전 추가"
+                      class="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 transition hover:border-white/40"
                     >
-                      +
+                      소스 사전 추가
                     </button>
                   </div>
                 </div>
@@ -395,6 +395,107 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <div class="lg:col-span-2 rounded-2xl border border-white/10 bg-[var(--bg-card)] p-6">
+            <h2 class="text-lg font-semibold">콘텐츠 추가</h2>
+            <p class="mt-1 text-xs text-white/60">콘텐츠 관리 화면에서 바로 신규 콘텐츠를 등록합니다.</p>
+            <form id="manageCreateContentForm" class="mt-5 space-y-4">
+              <div class="space-y-1">
+                <label for="manageCreateContentTitle" class="text-sm text-white/80">제목</label>
+                <input
+                  id="manageCreateContentTitle"
+                  type="text"
+                  required
+                  placeholder="제목 입력"
+                  class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+                />
+              </div>
+
+              <div class="space-y-1">
+                <label for="manageCreateContentAuthor" class="text-sm text-white/80">작가명 (선택)</label>
+                <input
+                  id="manageCreateContentAuthor"
+                  type="text"
+                  placeholder="작가명 입력"
+                  class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+                />
+              </div>
+
+              <div class="space-y-1">
+                <label for="manageCreateContentUrl" class="text-sm text-white/80">작품 URL (선택)</label>
+                <input
+                  id="manageCreateContentUrl"
+                  type="url"
+                  placeholder="https://example.com/content/123"
+                  class="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+                />
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-2">
+                <div class="space-y-1">
+                  <label for="manageCreateContentTypeSelect" class="text-sm text-white/80">타입</label>
+                  <div class="flex items-center gap-2">
+                    <select
+                      id="manageCreateContentTypeSelect"
+                      required
+                      class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+                    >
+                      <option value="">타입 선택</option>
+                    </select>
+                    <button
+                      id="manageCreateTypeOpenBtn"
+                      type="button"
+                      aria-label="타입 추가"
+                      class="h-10 w-10 rounded-xl border border-white/20 bg-white/10 text-lg text-white/90 transition hover:border-white/40"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-sm text-white/80">소스</label>
+                  <div id="manageCreateSourcesContainer" class="space-y-2"></div>
+                  <div class="flex flex-wrap gap-2 pt-1">
+                    <button
+                      id="manageCreateAddSourceRowBtn"
+                      type="button"
+                      class="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 transition hover:border-white/40"
+                    >
+                      + 소스 입력 추가
+                    </button>
+                    <button
+                      id="manageCreateSourceOpenBtn"
+                      type="button"
+                      disabled
+                      aria-label="소스 사전 추가"
+                      class="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 transition hover:border-white/40"
+                    >
+                      소스 사전 추가
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap justify-end gap-2 pt-2">
+                <button
+                  id="manageCreateContentResetBtn"
+                  type="button"
+                  class="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:border-white/40"
+                >
+                  취소
+                </button>
+                <button
+                  id="manageCreateContentSubmitBtn"
+                  type="submit"
+                  class="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100 transition hover:border-emerald-300/70"
+                >
+                  추가
+                </button>
+              </div>
+              <p id="manageCreateContentFormHint" class="text-xs text-white/50"></p>
+            </form>
           </div>
         </section>
 

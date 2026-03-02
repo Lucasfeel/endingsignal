@@ -264,12 +264,14 @@ def test_create_admin_content_success(monkeypatch, client, auth_headers):
             {
                 "contains": "FROM content_sources s",
                 "params": (11,),
-                "fetchone": {
-                    "source_id": 11,
-                    "source_name": "네이버웹툰",
-                    "type_id": 1,
-                    "type_name": "웹툰",
-                },
+                "fetchall": [
+                    {
+                        "source_id": 11,
+                        "source_name": "네이버웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    }
+                ],
             },
             {
                 "contains": "FROM contents",
@@ -311,6 +313,98 @@ def test_create_admin_content_success(monkeypatch, client, auth_headers):
     assert cursor.step_index == 3
 
 
+def test_create_admin_content_supports_multiple_sources(monkeypatch, client, auth_headers):
+    class FakeUuid:
+        hex = "multisourceid"
+
+    monkeypatch.setattr(admin_view, "uuid4", lambda: FakeUuid())
+
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (11, 12),
+                "fetchall": [
+                    {
+                        "source_id": 11,
+                        "source_name": "네이버웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    },
+                    {
+                        "source_id": 12,
+                        "source_name": "카카오웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    },
+                ],
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("naver_webtoon", "kakao_webtoon", "webtoon", "멀티 소스 웹툰"),
+                "fetchone": None,
+            },
+            {
+                "contains": "INSERT INTO contents",
+                "fetchone": {
+                    "content_id": "manual:multisourceid",
+                    "source": "naver_webtoon",
+                    "content_type": "webtoon",
+                    "title": "멀티 소스 웹툰",
+                    "status": "연재중",
+                    "meta": {"manual_registration": {"source_id": 11}},
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+            {
+                "contains": "INSERT INTO contents",
+                "fetchone": {
+                    "content_id": "manual:multisourceid",
+                    "source": "kakao_webtoon",
+                    "content_type": "webtoon",
+                    "title": "멀티 소스 웹툰",
+                    "status": "연재중",
+                    "meta": {"manual_registration": {"source_id": 12}},
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+        ],
+    )
+
+    response = client.post(
+        "/api/admin/contents",
+        json={
+            "title": "멀티 소스 웹툰",
+            "typeId": 1,
+            "sources": [{"sourceId": 11}, {"sourceId": 12}],
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 201
+    assert payload["success"] is True
+    assert payload["content"]["content_id"] == "manual:multisourceid"
+    assert payload["content"]["source"] == "naver_webtoon"
+    assert [item["source"] for item in payload["contents"]] == ["naver_webtoon", "kakao_webtoon"]
+    assert payload["sourceIds"] == [11, 12]
+    assert [item["id"] for item in payload["sources"]] == [11, 12]
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 4
+
+    first_insert = cursor.executed[2]["params"]
+    second_insert = cursor.executed[3]["params"]
+    assert first_insert[0] == "manual:multisourceid"
+    assert first_insert[1] == "naver_webtoon"
+    assert second_insert[0] == "manual:multisourceid"
+    assert second_insert[1] == "kakao_webtoon"
+
+
 def test_create_admin_content_saves_content_url_in_meta(monkeypatch, client, auth_headers):
     class FakeUuid:
         hex = "manualfixedid"
@@ -324,12 +418,14 @@ def test_create_admin_content_saves_content_url_in_meta(monkeypatch, client, aut
             {
                 "contains": "FROM content_sources s",
                 "params": (11,),
-                "fetchone": {
-                    "source_id": 11,
-                    "source_name": "네이버웹툰",
-                    "type_id": 1,
-                    "type_name": "웹툰",
-                },
+                "fetchall": [
+                    {
+                        "source_id": 11,
+                        "source_name": "네이버웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    }
+                ],
             },
             {
                 "contains": "FROM contents",
@@ -396,12 +492,14 @@ def test_create_admin_content_saves_author_name_in_meta(monkeypatch, client, aut
             {
                 "contains": "FROM content_sources s",
                 "params": (11,),
-                "fetchone": {
-                    "source_id": 11,
-                    "source_name": "네이버웹툰",
-                    "type_id": 1,
-                    "type_name": "웹툰",
-                },
+                "fetchall": [
+                    {
+                        "source_id": 11,
+                        "source_name": "네이버웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    }
+                ],
             },
             {
                 "contains": "FROM contents",
@@ -462,12 +560,14 @@ def test_create_admin_content_rejects_source_type_mismatch(monkeypatch, client, 
             {
                 "contains": "FROM content_sources s",
                 "params": (55,),
-                "fetchone": {
-                    "source_id": 55,
-                    "source_name": "네이버 시리즈",
-                    "type_id": 2,
-                    "type_name": "웹소설",
-                },
+                "fetchall": [
+                    {
+                        "source_id": 55,
+                        "source_name": "네이버 시리즈",
+                        "type_id": 2,
+                        "type_name": "웹소설",
+                    }
+                ],
             }
         ],
     )
@@ -493,12 +593,14 @@ def test_create_admin_content_duplicate_returns_409(monkeypatch, client, auth_he
             {
                 "contains": "FROM content_sources s",
                 "params": (11,),
-                "fetchone": {
-                    "source_id": 11,
-                    "source_name": "네이버웹툰",
-                    "type_id": 1,
-                    "type_name": "웹툰",
-                },
+                "fetchall": [
+                    {
+                        "source_id": 11,
+                        "source_name": "네이버웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    }
+                ],
             },
             {
                 "contains": "FROM contents",
