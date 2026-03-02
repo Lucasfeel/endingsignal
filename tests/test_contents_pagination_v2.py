@@ -98,6 +98,43 @@ def test_ongoing_v2_applies_day_and_cursor_filters(monkeypatch, client):
     assert payload["returned"] == 1
     assert payload["filters"]["type"] == "webtoon"
     assert payload["filters"]["day"] == "mon"
+    assert payload["filters"]["days"] == ["mon"]
+
+
+def test_ongoing_v2_supports_multi_day_csv_filter(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[_row("200", source="naver_webtoon", content_type="webtoon")]],
+    )
+
+    response = client.get("/api/contents/ongoing_v2?type=webtoon&day=mon,tue&per_page=5")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    executed_query, executed_params = fake_cursor.executed[0]
+    assert "(meta->'attributes'->'weekdays') ?| ARRAY[" in executed_query
+    assert "mon" in executed_params
+    assert "tue" in executed_params
+    assert payload["filters"]["day"] == "mon,tue"
+    assert payload["filters"]["days"] == ["mon", "tue"]
+
+
+def test_ongoing_v2_supports_repeated_day_params(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[_row("201", source="naver_webtoon", content_type="webtoon")]],
+    )
+
+    response = client.get("/api/contents/ongoing_v2?type=webtoon&day=mon&day=tue&per_page=5")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    executed_query, executed_params = fake_cursor.executed[0]
+    assert "(meta->'attributes'->'weekdays') ?| ARRAY[" in executed_query
+    day_params = [param for param in executed_params if param in {"mon", "tue"}]
+    assert day_params == ["mon", "tue"]
+    assert payload["filters"]["day"] == "mon,tue"
+    assert payload["filters"]["days"] == ["mon", "tue"]
 
 
 def test_novels_v2_applies_completed_filter(monkeypatch, client):

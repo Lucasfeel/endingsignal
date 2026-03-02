@@ -1139,6 +1139,32 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
             )
             """,
         ),
+        (
+            "backfill contents.normalized_title",
+            """
+            UPDATE contents
+            SET normalized_title = regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')
+            WHERE ctid IN (
+                SELECT ctid
+                FROM contents
+                WHERE normalized_title IS NULL OR normalized_title = ''
+                LIMIT %s
+            )
+            """,
+        ),
+        (
+            "backfill contents.normalized_authors",
+            """
+            UPDATE contents
+            SET normalized_authors = regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')
+            WHERE ctid IN (
+                SELECT ctid
+                FROM contents
+                WHERE normalized_authors IS NULL OR normalized_authors = ''
+                LIMIT %s
+            )
+            """,
+        ),
     ]
 
     for label, batch_sql in updates:
@@ -1938,29 +1964,23 @@ def setup_database_standalone():
             create_index_if_missing(
                 cursor,
                 "public",
+                "idx_contents_active_type_updated_at_desc_id",
+                """
+                CREATE INDEX idx_contents_active_type_updated_at_desc_id
+                ON contents (content_type, updated_at DESC, content_id ASC)
+                WHERE COALESCE(is_deleted, FALSE) = FALSE
+                  AND status IN ('연재중', '휴재');
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
                 "idx_contents_weekdays_gin",
                 """
                 CREATE INDEX idx_contents_weekdays_gin
                 ON contents
                 USING gin ((meta->'attributes'->'weekdays'));
                 """,
-            )
-
-            current_step = "backfill normalized search fields"
-            print("LOG: [DB Setup] Backfilling normalized search fields (idempotent)...")
-            cursor.execute(
-                """
-                UPDATE contents
-                SET normalized_title = regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')
-                WHERE normalized_title IS NULL OR normalized_title = '';
-                """
-            )
-            cursor.execute(
-                """
-                UPDATE contents
-                SET normalized_authors = regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')
-                WHERE normalized_authors IS NULL OR normalized_authors = '';
-                """
             )
 
             print("LOG: [DB Setup] 'pg_trgm' setup complete.")

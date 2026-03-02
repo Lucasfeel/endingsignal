@@ -5325,6 +5325,12 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           tabId === 'webtoon' && selectedWebtoonDays.length === 1
             ? selectedWebtoonDays[0]
             : 'all';
+        const webtoonOngoingDayParam =
+          tabId === 'webtoon'
+            ? selectedWebtoonDays.includes('all')
+              ? 'all'
+              : selectedWebtoonDays.join(',')
+            : 'all';
         if (tabId === 'webtoon') {
           statusKey =
             webtoonPrimaryDay === 'completed' || webtoonPrimaryDay === 'hiatus'
@@ -5341,10 +5347,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         }
 
         const shouldUsePaginatedStatus = statusKey === 'completed' || statusKey === 'hiatus';
-        const shouldUsePaginatedOngoing =
-          USE_BROWSE_PAGINATION_V2 &&
-          statusKey === 'ongoing' &&
-          !(tabId === 'webtoon' && selectedWebtoonDays.length > 1);
+        const shouldUsePaginatedOngoing = USE_BROWSE_PAGINATION_V2 && statusKey === 'ongoing';
         const sourceConfig = getSourceRequestConfig(tabId, {
           preferServerMulti: shouldUsePaginatedStatus || shouldUsePaginatedOngoing,
         });
@@ -5363,7 +5366,9 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
 
         if (shouldUsePaginatedOngoing) {
           const ongoingBaseQuery =
-            tabId === 'webtoon' ? { type: 'webtoon', day: webtoonPrimaryDay } : { type: 'ott' };
+            tabId === 'webtoon'
+              ? { type: 'webtoon', day: webtoonOngoingDayParam }
+              : { type: 'ott' };
           const pagedResult = await runPaginatedBrowse({
             category: 'ongoing',
             sourceConfig,

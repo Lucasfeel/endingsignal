@@ -16,6 +16,7 @@ STATUS_HIATUS = "\uD734\uC7AC"
 STATUS_COMPLETED = "\uC644\uACB0"
 ALLOWED_CONTENT_TYPES = {"webtoon", "novel", "ott", "series"}
 ALLOWED_BROWSE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun", "daily", "all"}
+ALLOWED_BROWSE_DAY_TOKENS = ALLOWED_BROWSE_DAYS - {"all"}
 
 
 def _normalize_genre_token(value):
@@ -365,6 +366,29 @@ def _parse_sources_args():
     }
 
 
+def _parse_browse_days_args():
+    raw_values = []
+    raw_values.extend(request.args.getlist("day"))
+    raw_values.extend(request.args.getlist("days"))
+
+    resolved_days = []
+    seen = set()
+
+    for raw_value in raw_values:
+        for token in str(raw_value).split(","):
+            day = token.strip().lower()
+            if not day:
+                continue
+            if day == "all":
+                return ["all"]
+            if day not in ALLOWED_BROWSE_DAY_TOKENS or day in seen:
+                continue
+            seen.add(day)
+            resolved_days.append(day)
+
+    return resolved_days if resolved_days else ["all"]
+
+
 def _append_source_filter(where_parts, params, source_filter):
     mode = source_filter.get("mode")
     sources = source_filter.get("sources") or []
@@ -486,16 +510,8 @@ def search_contents():
         conn = get_db()
         cursor = get_cursor(conn)
 
-        # Prefer normalized columns for indexed search, but fall back to on-the-fly
-        # normalization so rows inserted without normalized_* values still match.
-        title_expr = (
-            "COALESCE(NULLIF(normalized_title, ''), "
-            "regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g'))"
-        )
-        author_expr = (
-            "COALESCE(NULLIF(normalized_authors, ''), "
-            "regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g'))"
-        )
+        title_expr = "normalized_title"
+        author_expr = "normalized_authors"
         like_param = f"%{normalized_query}%"
 
         def compute_thresholds(length):
@@ -815,10 +831,8 @@ def get_ongoing_contents_v2():
         if content_type not in ALLOWED_CONTENT_TYPES:
             content_type = "webtoon"
 
-        raw_day = request.args.get("day", "all")
-        day = str(raw_day).strip().lower() if raw_day is not None else "all"
-        if day not in ALLOWED_BROWSE_DAYS:
-            day = "all"
+        days = _parse_browse_days_args()
+        day = "all" if days == ["all"] else ",".join(days)
 
         source_filter = _parse_sources_args()
         raw_cursor = request.args.get("cursor")
@@ -843,9 +857,14 @@ def get_ongoing_contents_v2():
         _append_source_filter(where_parts, query_params, source_filter)
         _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
 
-        if content_type in {"webtoon", "novel"} and day != "all":
-            where_parts.append("(meta->'attributes'->'weekdays') ? %s")
-            query_params.append(day)
+        if content_type in {"webtoon", "novel"} and days != ["all"]:
+            if len(days) == 1:
+                where_parts.append("(meta->'attributes'->'weekdays') ? %s")
+                query_params.append(days[0])
+            else:
+                day_placeholders = ", ".join(["%s"] * len(days))
+                where_parts.append(f"(meta->'attributes'->'weekdays') ?| ARRAY[{day_placeholders}]")
+                query_params.extend(days)
 
         cursor.execute(
             f"""
@@ -882,6 +901,7 @@ def get_ongoing_contents_v2():
             "filters": {
                 "type": content_type,
                 "day": day,
+                "days": days,
             },
         }
 

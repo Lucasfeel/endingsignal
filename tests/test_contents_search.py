@@ -33,7 +33,7 @@ def _stub_db(monkeypatch, rows):
     return fake_cursor
 
 
-def test_search_defaults_to_all_types_and_uses_normalized_fallback(monkeypatch, client):
+def test_search_defaults_to_all_types_and_uses_normalized_columns_directly(monkeypatch, client):
     fake_cursor = _stub_db(
         monkeypatch,
         [
@@ -55,8 +55,10 @@ def test_search_defaults_to_all_types_and_uses_normalized_fallback(monkeypatch, 
     query, params = fake_cursor.executed[0]
     assert "content_type = %s" not in query
     assert "source = %s" not in query
-    assert "NULLIF(normalized_title, '')" in query
-    assert "NULLIF(normalized_authors, '')" in query
+    assert "normalized_title" in query
+    assert "normalized_authors" in query
+    assert "NULLIF(normalized_" not in query
+    assert "regexp_replace(" not in query
     assert payload[0]["content_type"] == "novel"
     assert fake_cursor.closed is True
     assert "webtoon" not in tuple(str(value) for value in (params or ()))

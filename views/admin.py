@@ -29,6 +29,7 @@ from services.report_summary_service import (
 )
 from services.daily_notification_report_service import build_daily_notification_text
 from utils.auth import admin_required, login_required
+from utils.text import normalize_search_text
 from utils.time import now_kst_naive, parse_iso_naive_kst
 
 
@@ -537,6 +538,9 @@ def create_admin_content():
     if not is_valid_content_url:
         return _error_response(400, 'INVALID_REQUEST', 'contentUrl must be a valid http(s) URL')
 
+    normalized_title_value = normalize_search_text(title)
+    normalized_authors_value = normalize_search_text(author_name or "")
+
     conn = get_db()
     try:
         with managed_cursor(conn) as cursor:
@@ -654,9 +658,11 @@ def create_admin_content():
                         content_type,
                         title,
                         status,
-                        meta
+                        meta,
+                        normalized_title,
+                        normalized_authors
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                     RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
                     """,
                     (
@@ -666,6 +672,8 @@ def create_admin_content():
                         title,
                         '연재중',
                         manual_meta,
+                        normalized_title_value,
+                        normalized_authors_value,
                     ),
                 )
                 created_rows.append(cursor.fetchone())
@@ -860,24 +868,30 @@ def update_admin_content():
                 meta_payload['manual_registration'] = manual_registration
 
             updated_meta = json.dumps(meta_payload, ensure_ascii=False)
+            set_parts = [
+                "source = %s",
+                "content_type = %s",
+                "meta = %s::jsonb",
+            ]
+            update_params = [
+                content_source_value,
+                content_type_value,
+                updated_meta,
+            ]
+            if has_author_input:
+                set_parts.append("normalized_authors = %s")
+                update_params.append(normalize_search_text(author_name or ""))
+            update_params.extend([content_id, current_source])
 
             cursor.execute(
-                """
+                f"""
                 UPDATE contents
-                SET source = %s,
-                    content_type = %s,
-                    meta = %s::jsonb
+                SET {', '.join(set_parts)}
                 WHERE content_id = %s
                   AND source = %s
                 RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
                 """,
-                (
-                    content_source_value,
-                    content_type_value,
-                    updated_meta,
-                    content_id,
-                    current_source,
-                ),
+                tuple(update_params),
             )
             updated_row = cursor.fetchone()
 
