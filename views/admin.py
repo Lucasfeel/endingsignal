@@ -706,6 +706,261 @@ def create_admin_content():
         raise
 
 
+@admin_bp.route('/api/admin/contents/update', methods=['POST'])
+@login_required
+@admin_required
+def update_admin_content():
+    data = request.get_json() or {}
+    content_id = data.get('content_id') or data.get('contentId')
+    current_source = data.get('source') or data.get('currentSource')
+    type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
+    source_id = _parse_positive_int(data.get('sourceId') or data.get('source_id'))
+
+    has_author_input = any(key in data for key in ('authorName', 'author_name', 'author'))
+    author_input = None
+    if 'authorName' in data:
+        author_input = data.get('authorName')
+    elif 'author_name' in data:
+        author_input = data.get('author_name')
+    elif 'author' in data:
+        author_input = data.get('author')
+    author_name = _normalize_input_text(author_input) if has_author_input else None
+
+    has_content_url_input = 'contentUrl' in data or 'content_url' in data
+    content_url_input = None
+    if 'contentUrl' in data:
+        content_url_input = data.get('contentUrl')
+    elif 'content_url' in data:
+        content_url_input = data.get('content_url')
+    content_url, is_valid_content_url = _parse_optional_http_url(content_url_input)
+
+    if not content_id or not current_source:
+        return _error_response(400, 'INVALID_REQUEST', 'content_id/contentId and source are required')
+    if type_id is None:
+        return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
+    if source_id is None:
+        return _error_response(400, 'INVALID_REQUEST', 'sourceId is required')
+    if has_content_url_input and not is_valid_content_url:
+        return _error_response(400, 'INVALID_REQUEST', 'contentUrl must be a valid http(s) URL')
+
+    conn = get_db()
+    try:
+        with managed_cursor(conn) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    s.id AS source_id,
+                    s.name AS source_name,
+                    t.id AS type_id,
+                    t.name AS type_name
+                FROM content_sources s
+                JOIN content_types t
+                  ON t.id = s.type_id
+                WHERE s.id = %s
+                """,
+                (source_id,),
+            )
+            source_row = cursor.fetchone()
+            if source_row is None:
+                return _error_response(400, 'INVALID_SOURCE_ID', 'sourceId does not exist')
+
+            source_type_id = int(_get_row_value(source_row, 'type_id') or 0)
+            if source_type_id != type_id:
+                return _error_response(400, 'SOURCE_TYPE_MISMATCH', 'sourceId does not belong to typeId')
+
+            type_name = _get_row_value(source_row, 'type_name')
+            source_name = _get_row_value(source_row, 'source_name')
+            content_type_value = MANUAL_CONTENT_TYPE_MAP.get(type_name, type_name)
+            content_source_value = MANUAL_CONTENT_SOURCE_MAP.get(source_name, source_name)
+
+            cursor.execute(
+                """
+                SELECT content_id, source, title, content_type, status, meta
+                FROM contents
+                WHERE content_id = %s
+                  AND source = %s
+                  AND COALESCE(is_deleted, FALSE) = FALSE
+                """,
+                (content_id, current_source),
+            )
+            existing_row = cursor.fetchone()
+            if existing_row is None:
+                return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
+
+            title = _get_row_value(existing_row, 'title')
+
+            cursor.execute(
+                """
+                SELECT 1
+                FROM contents
+                WHERE source = %s
+                  AND content_type = %s
+                  AND LOWER(TRIM(title)) = LOWER(TRIM(%s))
+                  AND COALESCE(is_deleted, FALSE) = FALSE
+                  AND NOT (content_id = %s AND source = %s)
+                LIMIT 1
+                """,
+                (content_source_value, content_type_value, title, content_id, current_source),
+            )
+            if cursor.fetchone() is not None:
+                return _error_response(
+                    409,
+                    'DUPLICATE_CONTENT',
+                    'Content with same title, type, and source already exists',
+                )
+
+            if content_source_value != current_source:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM contents
+                    WHERE content_id = %s
+                      AND source = %s
+                    LIMIT 1
+                    """,
+                    (content_id, content_source_value),
+                )
+                if cursor.fetchone() is not None:
+                    return _error_response(
+                        409,
+                        'DUPLICATE_CONTENT',
+                        'Content with same content_id and source already exists',
+                    )
+
+            meta_payload = _normalize_meta(_get_row_value(existing_row, 'meta'))
+            if not isinstance(meta_payload, dict):
+                meta_payload = {}
+            common_payload = meta_payload.get('common')
+            if not isinstance(common_payload, dict):
+                common_payload = {}
+
+            if has_author_input:
+                if author_name:
+                    common_payload['authors'] = author_name
+                else:
+                    common_payload.pop('authors', None)
+
+            if has_content_url_input:
+                if content_url:
+                    common_payload['content_url'] = content_url
+                else:
+                    common_payload.pop('content_url', None)
+
+            if common_payload:
+                meta_payload['common'] = common_payload
+            else:
+                meta_payload.pop('common', None)
+
+            manual_registration = meta_payload.get('manual_registration')
+            if isinstance(manual_registration, dict):
+                manual_registration['type_id'] = source_type_id
+                manual_registration['type_name'] = type_name
+                manual_registration['source_id'] = int(_get_row_value(source_row, 'source_id') or 0)
+                manual_registration['source_name'] = source_name
+                meta_payload['manual_registration'] = manual_registration
+
+            updated_meta = json.dumps(meta_payload, ensure_ascii=False)
+
+            cursor.execute(
+                """
+                UPDATE contents
+                SET source = %s,
+                    content_type = %s,
+                    meta = %s::jsonb
+                WHERE content_id = %s
+                  AND source = %s
+                RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
+                """,
+                (
+                    content_source_value,
+                    content_type_value,
+                    updated_meta,
+                    content_id,
+                    current_source,
+                ),
+            )
+            updated_row = cursor.fetchone()
+
+            if content_source_value != current_source:
+                cursor.execute(
+                    """
+                    UPDATE admin_content_overrides
+                    SET source = %s
+                    WHERE content_id = %s
+                      AND source = %s
+                    """,
+                    (content_source_value, content_id, current_source),
+                )
+                cursor.execute(
+                    """
+                    UPDATE admin_content_metadata
+                    SET source = %s
+                    WHERE content_id = %s
+                      AND source = %s
+                    """,
+                    (content_source_value, content_id, current_source),
+                )
+                cursor.execute(
+                    """
+                    UPDATE subscriptions
+                    SET source = %s
+                    WHERE content_id = %s
+                      AND source = %s
+                    """,
+                    (content_source_value, content_id, current_source),
+                )
+                cursor.execute(
+                    """
+                    UPDATE cdc_events
+                    SET source = %s
+                    WHERE content_id = %s
+                      AND source = %s
+                    """,
+                    (content_source_value, content_id, current_source),
+                )
+
+        insert_admin_action_log(
+            conn,
+            admin_id=g.current_user['id'],
+            action_type='CONTENT_EDIT',
+            content_id=content_id,
+            source=content_source_value,
+            reason=_normalize_input_text(data.get('reason')),
+            payload={
+                'previous_source': current_source,
+                'new_source': content_source_value,
+                'previous_content_type': _get_row_value(existing_row, 'content_type'),
+                'new_content_type': content_type_value,
+                'updated_author': author_name if has_author_input else None,
+                'updated_content_url': content_url if has_content_url_input else None,
+            },
+        )
+        conn.commit()
+        return jsonify(
+            {
+                'success': True,
+                'content': _serialize_content_row(updated_row),
+                'content_type': {
+                    'id': source_type_id,
+                    'name': type_name,
+                },
+                'content_source': {
+                    'id': int(_get_row_value(source_row, 'source_id') or 0),
+                    'type_id': source_type_id,
+                    'name': source_name,
+                },
+                'previous': {
+                    'content_id': content_id,
+                    'source': current_source,
+                },
+            }
+        )
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
+        raise
+
+
 @admin_bp.route('/api/admin/contents/override', methods=['POST'])
 @login_required
 @admin_required

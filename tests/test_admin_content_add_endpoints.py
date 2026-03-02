@@ -4,6 +4,7 @@ from datetime import datetime
 import pytest
 
 from app import app as flask_app
+import services.admin_audit_service as audit_service
 import utils.auth as auth
 import views.admin as admin_view
 
@@ -654,6 +655,138 @@ def test_create_admin_content_rejects_invalid_content_url(client, auth_headers):
     assert payload["error"]["message"] == "contentUrl must be a valid http(s) URL"
 
 
+def test_update_admin_content_success(monkeypatch, client, auth_headers):
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (12,),
+                "fetchone": {
+                    "source_id": 12,
+                    "source_name": "카카오웹툰",
+                    "type_id": 1,
+                    "type_name": "웹툰",
+                },
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("CID-1", "naver_webtoon"),
+                "fetchone": {
+                    "content_id": "CID-1",
+                    "source": "naver_webtoon",
+                    "title": "수정 대상",
+                    "content_type": "webtoon",
+                    "status": "연재중",
+                    "meta": {
+                        "manual_registration": {
+                            "type_id": 1,
+                            "type_name": "웹툰",
+                            "source_id": 11,
+                            "source_name": "네이버웹툰",
+                        },
+                        "common": {
+                            "authors": "기존 작가",
+                            "content_url": "https://example.com/old",
+                        },
+                    },
+                },
+            },
+            {
+                "contains": "SELECT 1",
+                "params": ("kakao_webtoon", "webtoon", "수정 대상", "CID-1", "naver_webtoon"),
+                "fetchone": None,
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("CID-1", "kakao_webtoon"),
+                "fetchone": None,
+            },
+            {
+                "contains": "UPDATE contents",
+                "fetchone": {
+                    "content_id": "CID-1",
+                    "source": "kakao_webtoon",
+                    "content_type": "webtoon",
+                    "title": "수정 대상",
+                    "status": "연재중",
+                    "meta": {
+                        "manual_registration": {
+                            "type_id": 1,
+                            "type_name": "웹툰",
+                            "source_id": 12,
+                            "source_name": "카카오웹툰",
+                        },
+                        "common": {
+                            "authors": "새 작가",
+                            "content_url": "https://example.com/new",
+                        },
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+            {"contains": "UPDATE admin_content_overrides"},
+            {"contains": "UPDATE admin_content_metadata"},
+            {"contains": "UPDATE subscriptions"},
+            {"contains": "UPDATE cdc_events"},
+            {"contains": "INSERT INTO admin_action_logs"},
+        ],
+    )
+    monkeypatch.setattr(audit_service, "get_cursor", lambda _conn: cursor)
+
+    response = client.post(
+        "/api/admin/contents/update",
+        json={
+            "content_id": "CID-1",
+            "source": "naver_webtoon",
+            "typeId": 1,
+            "sourceId": 12,
+            "authorName": "새 작가",
+            "contentUrl": "https://example.com/new",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["content"]["source"] == "kakao_webtoon"
+    assert payload["content_source"]["id"] == 12
+    assert payload["previous"]["source"] == "naver_webtoon"
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 10
+
+    update_params = cursor.executed[4]["params"]
+    assert update_params[0] == "kakao_webtoon"
+    assert update_params[1] == "webtoon"
+    meta = json.loads(update_params[2])
+    assert meta["manual_registration"]["source_id"] == 12
+    assert meta["common"]["authors"] == "새 작가"
+    assert meta["common"]["content_url"] == "https://example.com/new"
+
+
+def test_update_admin_content_rejects_invalid_content_url(client, auth_headers):
+    response = client.post(
+        "/api/admin/contents/update",
+        json={
+            "content_id": "CID-1",
+            "source": "naver_webtoon",
+            "typeId": 1,
+            "sourceId": 11,
+            "contentUrl": "not-a-url",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 400
+    assert payload["error"]["code"] == "INVALID_REQUEST"
+    assert payload["error"]["message"] == "contentUrl must be a valid http(s) URL"
+
+
 @pytest.mark.parametrize(
     "method,url,json_body",
     [
@@ -662,6 +795,11 @@ def test_create_admin_content_rejects_invalid_content_url(client, auth_headers):
         ("get", "/api/admin/content-sources?typeId=1", None),
         ("post", "/api/admin/content-sources", {"typeId": 1, "name": "테스트"}),
         ("post", "/api/admin/contents", {"title": "x", "typeId": 1, "sourceId": 1}),
+        (
+            "post",
+            "/api/admin/contents/update",
+            {"content_id": "x", "source": "naver_webtoon", "typeId": 1, "sourceId": 1},
+        ),
     ],
 )
 def test_new_admin_endpoints_require_admin_role(

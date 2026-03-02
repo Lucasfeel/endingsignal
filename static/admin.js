@@ -153,6 +153,10 @@
       overridesMap: new Map(),
       publicationsMap: new Map(),
       publicationActionMap: new Map(),
+      edit: {
+        selectedTypeId: '',
+        selectedSourceId: '',
+      },
     },
     addContent: {
       types: [],
@@ -336,6 +340,38 @@
       }
     }
     return {};
+  };
+
+  const MANUAL_CONTENT_TYPE_VALUE_MAP = {
+    웹툰: 'webtoon',
+    웹소설: 'novel',
+    OTT: 'ott',
+  };
+
+  const MANUAL_CONTENT_SOURCE_VALUE_MAP = {
+    네이버웹툰: 'naver_webtoon',
+    카카오웹툰: 'kakao_webtoon',
+    '네이버 시리즈': 'naver_series',
+    '카카오 페이지': 'kakao_page',
+    문피아: 'munpia',
+    리디: 'ridi',
+    넷플릭스: 'netflix',
+    티빙: 'tving',
+    '디즈니 플러스': 'disney_plus',
+    웨이브: 'wavve',
+    라프텔: 'laftel',
+  };
+
+  const normalizeContentTypeValue = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return MANUAL_CONTENT_TYPE_VALUE_MAP[text] || text;
+  };
+
+  const normalizeContentSourceValue = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return MANUAL_CONTENT_SOURCE_VALUE_MAP[text] || text;
   };
 
   const isValidHttpUrl = (value) => {
@@ -1064,6 +1100,8 @@
       }
 
       renderAllContentForms();
+      renderManageEditTypeOptions();
+      renderManageEditSourceOptions();
 
       const typeIdsToLoad = new Set();
       CONTENT_FORM_KEYS.forEach((formKey) => {
@@ -1452,6 +1490,237 @@
     });
   };
 
+  const setManageEditHint = (text = '') => {
+    const hintEl = document.getElementById('manageEditHint');
+    if (!hintEl) return;
+    hintEl.textContent = text || '';
+  };
+
+  const getMetaCommonValue = (item, key) => {
+    const meta = parseMeta(item?.meta);
+    const common = meta?.common;
+    if (!common || typeof common !== 'object') return '';
+    const value = common[key];
+    return typeof value === 'string' ? value : '';
+  };
+
+  const setManageEditControlsDisabled = (disabled) => {
+    const fieldIds = [
+      'manageEditAuthor',
+      'manageEditUrl',
+      'manageEditTypeSelect',
+      'manageEditSourceSelect',
+      'manageEditSaveBtn',
+    ];
+    fieldIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (id === 'manageEditSaveBtn') {
+        setButtonDisabled(el, disabled);
+        return;
+      }
+      el.disabled = !!disabled;
+    });
+  };
+
+  const renderManageEditTypeOptions = () => {
+    const typeSelect = document.getElementById('manageEditTypeSelect');
+    if (!typeSelect) return;
+
+    typeSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '타입 선택';
+    typeSelect.appendChild(placeholder);
+
+    STATE.addContent.types.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = String(entry.id);
+      option.textContent = entry.name || String(entry.id);
+      typeSelect.appendChild(option);
+    });
+
+    const selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
+    const exists = STATE.addContent.types.some((entry) => String(entry.id) === selectedTypeId);
+    typeSelect.value = exists ? selectedTypeId : '';
+    if (!exists) STATE.manage.edit.selectedTypeId = '';
+  };
+
+  const renderManageEditSourceOptions = () => {
+    const sourceSelect = document.getElementById('manageEditSourceSelect');
+    if (!sourceSelect) return;
+
+    const selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
+    sourceSelect.innerHTML = '';
+
+    if (!selectedTypeId) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '타입을 먼저 선택하세요';
+      sourceSelect.appendChild(placeholder);
+      sourceSelect.disabled = true;
+      STATE.manage.edit.selectedSourceId = '';
+      return;
+    }
+
+    const sources = STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [];
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = sources.length ? '소스 선택' : '등록된 소스 없음';
+    sourceSelect.appendChild(placeholder);
+
+    sources.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = String(entry.id);
+      option.textContent = entry.name || String(entry.id);
+      sourceSelect.appendChild(option);
+    });
+
+    const selectedSourceId = String(STATE.manage.edit.selectedSourceId || '');
+    const exists = sources.some((entry) => String(entry.id) === selectedSourceId);
+    sourceSelect.value = exists ? selectedSourceId : '';
+    if (!exists) STATE.manage.edit.selectedSourceId = '';
+    sourceSelect.disabled = false;
+  };
+
+  const populateManageEditForm = (item) => {
+    const titleInput = document.getElementById('manageEditTitle');
+    const authorInput = document.getElementById('manageEditAuthor');
+    const urlInput = document.getElementById('manageEditUrl');
+
+    if (!item) {
+      if (titleInput) titleInput.value = '';
+      if (authorInput) authorInput.value = '';
+      if (urlInput) urlInput.value = '';
+      STATE.manage.edit.selectedTypeId = '';
+      STATE.manage.edit.selectedSourceId = '';
+      renderManageEditTypeOptions();
+      renderManageEditSourceOptions();
+      setManageEditHint('');
+      setManageEditControlsDisabled(true);
+      return;
+    }
+
+    if (titleInput) titleInput.value = item.title || item.normalized_title || item.content_id || '';
+    if (authorInput) authorInput.value = getMetaCommonValue(item, 'authors');
+    if (urlInput) urlInput.value = getMetaCommonValue(item, 'content_url');
+
+    const itemTypeValue = normalizeContentTypeValue(item.content_type);
+    const matchedType = STATE.addContent.types.find(
+      (entry) => normalizeContentTypeValue(entry?.name) === itemTypeValue,
+    );
+    STATE.manage.edit.selectedTypeId = matchedType ? String(matchedType.id) : '';
+    renderManageEditTypeOptions();
+    renderManageEditSourceOptions();
+    setManageEditHint('');
+    setManageEditControlsDisabled(false);
+
+    if (!STATE.manage.edit.selectedTypeId) return;
+
+    const selectedTypeId = STATE.manage.edit.selectedTypeId;
+    loadContentSourcesByType(selectedTypeId, { silent: true }).then(() => {
+      const currentItem = STATE.manage.selected;
+      if (!currentItem) return;
+      if (currentItem.content_id !== item.content_id || currentItem.source !== item.source) return;
+      const sources = STATE.addContent.sourcesByTypeId.get(selectedTypeId) || [];
+      const itemSourceValue = normalizeContentSourceValue(item.source);
+      const matchedSource = sources.find(
+        (entry) => normalizeContentSourceValue(entry?.name) === itemSourceValue,
+      );
+      STATE.manage.edit.selectedSourceId = matchedSource ? String(matchedSource.id) : '';
+      renderManageEditSourceOptions();
+    });
+  };
+
+  const handleManageEditTypeChange = async () => {
+    const typeSelect = document.getElementById('manageEditTypeSelect');
+    STATE.manage.edit.selectedTypeId = typeSelect?.value || '';
+    STATE.manage.edit.selectedSourceId = '';
+    renderManageEditSourceOptions();
+    if (STATE.manage.edit.selectedTypeId) {
+      await loadContentSourcesByType(STATE.manage.edit.selectedTypeId, { silent: true });
+      renderManageEditSourceOptions();
+    }
+  };
+
+  const handleManageEditSourceChange = () => {
+    const sourceSelect = document.getElementById('manageEditSourceSelect');
+    STATE.manage.edit.selectedSourceId = sourceSelect?.value || '';
+  };
+
+  const moveMapKeyIfPresent = (mapObj, oldKey, newKey) => {
+    if (!mapObj || oldKey === newKey) return;
+    if (!mapObj.has(oldKey)) return;
+    const value = mapObj.get(oldKey);
+    mapObj.delete(oldKey);
+    mapObj.set(newKey, value);
+  };
+
+  const saveManageContentInfo = async () => {
+    const item = STATE.manage.selected;
+    if (!item) {
+      showToast('먼저 콘텐츠를 선택해주세요.', { type: 'error' });
+      return;
+    }
+
+    const authorName = document.getElementById('manageEditAuthor')?.value?.trim() || '';
+    const contentUrl = document.getElementById('manageEditUrl')?.value?.trim() || '';
+    const typeId = String(STATE.manage.edit.selectedTypeId || '');
+    const sourceId = String(STATE.manage.edit.selectedSourceId || '');
+
+    if (!typeId) {
+      showToast('타입을 선택해주세요.', { type: 'error' });
+      return;
+    }
+    if (!sourceId) {
+      showToast('소스를 선택해주세요.', { type: 'error' });
+      return;
+    }
+    if (contentUrl && !isValidHttpUrl(contentUrl)) {
+      showToast('http(s) 형식 URL을 입력해주세요.', { type: 'error' });
+      return;
+    }
+
+    const oldKey = getKey(item);
+    try {
+      const payload = await apiRequest('POST', '/api/admin/contents/update', {
+        token: STATE.token,
+        body: {
+          content_id: item.content_id,
+          source: item.source,
+          typeId: Number(typeId),
+          sourceId: Number(sourceId),
+          authorName,
+          contentUrl,
+        },
+      });
+
+      const updated = payload?.content;
+      if (!updated?.content_id || !updated?.source) {
+        showToast('수정 결과를 불러오지 못했습니다.', { type: 'error' });
+        return;
+      }
+
+      const newKey = getKey(updated);
+      STATE.manage.results = STATE.manage.results.map((entry) =>
+        entry?.content_id === item.content_id && entry?.source === item.source ? updated : entry,
+      );
+      STATE.manage.selected = updated;
+
+      moveMapKeyIfPresent(STATE.manage.overridesMap, oldKey, newKey);
+      moveMapKeyIfPresent(STATE.manage.publicationsMap, oldKey, newKey);
+      moveMapKeyIfPresent(STATE.manage.publicationActionMap, oldKey, newKey);
+
+      setManageEditHint('작품 정보가 저장되었습니다.');
+      showToast('작품 정보가 수정되었습니다.', { type: 'success' });
+      renderManageResults();
+      renderSelectedContent();
+      await openLookupInManage(updated);
+    } catch (err) {
+      showToast(err.message || '작품 정보 수정에 실패했습니다.', { type: 'error' });
+    }
+  };
+
   const renderFinalState = (rawItem, override) => {
     const box = document.getElementById('finalStateBox');
     const notice = document.getElementById('scheduledNotice');
@@ -1520,6 +1789,7 @@
       if (overrideReason) overrideReason.value = '';
       if (publicationInput) publicationInput.value = '';
       if (publicationReason) publicationReason.value = '';
+      populateManageEditForm(null);
       renderFinalState(null, null);
       renderPublicationCdcStatus();
       return;
@@ -1558,6 +1828,7 @@
       publicationReason.value = publication?.reason || '';
     }
 
+    populateManageEditForm(item);
     renderFinalState(item, override);
     renderPublicationCdcStatus();
   };
@@ -3110,18 +3381,16 @@
     const detailCopyJsonBtn = document.getElementById('detailCopyJsonBtn');
     const detailCopyIdBtn = document.getElementById('detailCopyIdBtn');
     const detailCopyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
+    const manageEditContentForm = document.getElementById('manageEditContentForm');
+    const manageEditTypeSelect = document.getElementById('manageEditTypeSelect');
+    const manageEditSourceSelect = document.getElementById('manageEditSourceSelect');
+    const manageEditSaveBtn = document.getElementById('manageEditSaveBtn');
     const addContentForm = document.getElementById('addContentForm');
     const addContentResetBtn = document.getElementById('addContentResetBtn');
     const addContentTypeSelect = document.getElementById('addContentTypeSelect');
     const addContentAddSourceRowBtn = document.getElementById('addContentAddSourceRowBtn');
     const addTypeOpenBtn = document.getElementById('addTypeOpenBtn');
     const addSourceOpenBtn = document.getElementById('addSourceOpenBtn');
-    const manageCreateContentForm = document.getElementById('manageCreateContentForm');
-    const manageCreateContentResetBtn = document.getElementById('manageCreateContentResetBtn');
-    const manageCreateTypeSelect = document.getElementById('manageCreateContentTypeSelect');
-    const manageCreateAddSourceRowBtn = document.getElementById('manageCreateAddSourceRowBtn');
-    const manageCreateTypeOpenBtn = document.getElementById('manageCreateTypeOpenBtn');
-    const manageCreateSourceOpenBtn = document.getElementById('manageCreateSourceOpenBtn');
     const addTypeSaveBtn = document.getElementById('addTypeSaveBtn');
     const addTypeCancelBtn = document.getElementById('addTypeCancelBtn');
     const addSourceSaveBtn = document.getElementById('addSourceSaveBtn');
@@ -3189,16 +3458,12 @@
     addContentAddSourceRowBtn?.addEventListener('click', () => appendContentFormSourceRow('addContent'));
     addTypeOpenBtn?.addEventListener('click', () => openAddTypeModal('addContent'));
     addSourceOpenBtn?.addEventListener('click', () => openAddSourceModal('addContent'));
-    manageCreateContentForm?.addEventListener('submit', submitManageCreateContent);
-    manageCreateContentResetBtn?.addEventListener('click', () => resetContentForm('manageCreate'));
-    manageCreateTypeSelect?.addEventListener('change', () => {
-      handleContentFormTypeChange('manageCreate');
+    manageEditContentForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      withLoading(manageEditSaveBtn, '저장 중...', saveManageContentInfo);
     });
-    manageCreateAddSourceRowBtn?.addEventListener('click', () =>
-      appendContentFormSourceRow('manageCreate'),
-    );
-    manageCreateTypeOpenBtn?.addEventListener('click', () => openAddTypeModal('manageCreate'));
-    manageCreateSourceOpenBtn?.addEventListener('click', () => openAddSourceModal('manageCreate'));
+    manageEditTypeSelect?.addEventListener('change', handleManageEditTypeChange);
+    manageEditSourceSelect?.addEventListener('change', handleManageEditSourceChange);
     addTypeSaveBtn?.addEventListener('click', createContentTypeFromModal);
     addTypeCancelBtn?.addEventListener('click', closeAddTypeModal);
     addSourceSaveBtn?.addEventListener('click', createContentSourceFromModal);
@@ -3225,6 +3490,9 @@
         closeAddSourceModal();
       }
     });
+    renderManageEditTypeOptions();
+    renderManageEditSourceOptions();
+    populateManageEditForm(null);
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>
       withLoading(event.currentTarget, '저장 중...', saveOverride),
