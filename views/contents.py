@@ -2,7 +2,9 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from database import get_db, get_cursor
+from utils.perf import jsonify_timed
 from utils.text import normalize_search_text
+from utils.ttl_cache import TTLCache
 import base64
 import json
 import os
@@ -17,6 +19,145 @@ STATUS_COMPLETED = "\uC644\uACB0"
 ALLOWED_CONTENT_TYPES = {"webtoon", "novel", "ott", "series"}
 ALLOWED_BROWSE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun", "daily", "all"}
 ALLOWED_BROWSE_DAY_TOKENS = ALLOWED_BROWSE_DAYS - {"all"}
+META_MODE_FULL = "full"
+META_MODE_LIST = "list"
+DEFAULT_API_CACHE_MAX_ENTRIES = 500
+DEFAULT_API_CACHE_TTL_SECONDS = 30.0
+_API_CACHE = None
+_API_CACHE_MAX_ENTRIES = None
+_META_LIST_PROJECTION_SQL = """
+jsonb_strip_nulls(jsonb_build_object(
+  'common', jsonb_strip_nulls(jsonb_build_object(
+    'authors', meta->'common'->'authors',
+    'content_url', meta->'common'->'content_url',
+    'url', meta->'common'->'url',
+    'thumbnail_url', meta->'common'->'thumbnail_url',
+    'alt_title', meta->'common'->'alt_title',
+    'title_alias', meta->'common'->'title_alias',
+    'genres', meta->'common'->'genres',
+    'genre', meta->'common'->'genre'
+  )),
+  'attributes', jsonb_strip_nulls(jsonb_build_object(
+    'weekdays', meta->'attributes'->'weekdays',
+    'genres', meta->'attributes'->'genres',
+    'genre', meta->'attributes'->'genre',
+    'category', meta->'attributes'->'category',
+    'subgenres', meta->'attributes'->'subgenres',
+    'sub_genres', meta->'attributes'->'sub_genres'
+  )),
+  'genres', meta->'genres',
+  'genre', meta->'genre'
+))
+""".strip()
+
+
+def _read_bool_env(name, default=False):
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _read_int_env(name, default, minimum=1):
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    if parsed < minimum:
+        return default
+    return parsed
+
+
+def _read_float_env_non_negative(name, default):
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    if parsed < 0:
+        return default
+    return parsed
+
+
+def _get_meta_mode():
+    mode = (os.getenv("ES_META_MODE") or META_MODE_FULL).strip().lower()
+    if mode == META_MODE_LIST:
+        return META_MODE_LIST
+    return META_MODE_FULL
+
+
+def _meta_select_expr():
+    if _get_meta_mode() == META_MODE_LIST:
+        return _META_LIST_PROJECTION_SQL
+    return "meta"
+
+
+def _is_api_cache_enabled():
+    return _read_bool_env("ES_API_CACHE_ENABLED", default=False)
+
+
+def _api_cache_ttl_seconds():
+    return _read_float_env_non_negative(
+        "ES_API_CACHE_TTL_SECONDS",
+        DEFAULT_API_CACHE_TTL_SECONDS,
+    )
+
+
+def _get_api_cache():
+    global _API_CACHE, _API_CACHE_MAX_ENTRIES
+    max_entries = _read_int_env(
+        "ES_API_CACHE_MAX_ENTRIES",
+        DEFAULT_API_CACHE_MAX_ENTRIES,
+        minimum=1,
+    )
+    if _API_CACHE is None or _API_CACHE_MAX_ENTRIES != max_entries:
+        _API_CACHE = TTLCache(max_entries=max_entries)
+        _API_CACHE_MAX_ENTRIES = max_entries
+    return _API_CACHE
+
+
+def _build_api_cache_key():
+    query_items = []
+    for key in sorted(request.args.keys()):
+        values = [str(value) for value in request.args.getlist(key)]
+        query_items.append((key, sorted(values)))
+    return json.dumps(
+        {
+            "path": request.path,
+            "query": query_items,
+            "meta_mode": _get_meta_mode(),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _cache_lookup(cacheable):
+    cache_enabled = _is_api_cache_enabled()
+    if not cache_enabled or not cacheable or request.method != "GET":
+        return cache_enabled, None, None
+    cache_key = _build_api_cache_key()
+    cached_payload = _get_api_cache().get(cache_key)
+    return cache_enabled, cache_key, cached_payload
+
+
+def _cache_store(cache_key, payload):
+    if not cache_key:
+        return
+    _get_api_cache().set(cache_key, payload, _api_cache_ttl_seconds())
+
+
+def _json_response(payload, *, cache_enabled=False, cache_hit=False, status_code=None):
+    response = jsonify_timed(payload, status_code=status_code)
+    if cache_enabled:
+        response.headers["X-Cache"] = "HIT" if cache_hit else "MISS"
+    return response
 
 
 def _normalize_genre_token(value):
@@ -500,12 +641,12 @@ def search_contents():
             source = 'all'
 
         if not normalized_query:
-            return jsonify([])
+            return _json_response([])
 
         q_len = len(normalized_query)
         # 너무 짧은 검색어(1자 이하)는 노이즈가 많으므로 즉시 반환
         if q_len <= 1:
-            return jsonify([])
+            return _json_response([])
 
         conn = get_db()
         cursor = get_cursor(conn)
@@ -559,8 +700,9 @@ def search_contents():
             params.extend([like_param, like_param])
 
         search_limit = _get_search_limit()
+        meta_expr = _meta_select_expr()
         search_query = f"""
-            SELECT content_id, title, status, meta, source, content_type
+            SELECT content_id, title, status, {meta_expr} AS meta, source, content_type
             FROM contents
             WHERE {' AND '.join(where_clauses)}
             ORDER BY
@@ -585,14 +727,72 @@ def search_contents():
             coerced['meta'] = normalize_meta(coerced.get('meta'))
             results.append(coerced)
 
-        return jsonify(results)
+        return _json_response(results)
 
     except Exception:
         current_app.logger.exception("Unhandled error in search_contents")
-        return jsonify({
+        return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
-        }), 500
+        }, status_code=500)
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
+@contents_bp.route('/api/contents/detail', methods=['GET'])
+def get_content_detail():
+    cursor = None
+    try:
+        content_id = (request.args.get("content_id") or "").strip()
+        source = (request.args.get("source") or "").strip()
+        if not content_id or not source:
+            return _json_response(
+                {
+                    "success": False,
+                    "error": {"code": "BAD_REQUEST", "message": "content_id and source are required"},
+                },
+                status_code=400,
+            )
+
+        conn = get_db()
+        cursor = get_cursor(conn)
+        cursor.execute(
+            """
+            SELECT content_id, title, status, meta, source, content_type
+            FROM contents
+            WHERE content_id = %s
+              AND source = %s
+              AND COALESCE(is_deleted, FALSE) = FALSE
+            LIMIT 1
+            """,
+            (content_id, source),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return _json_response(
+                {
+                    "success": False,
+                    "error": {"code": "NOT_FOUND", "message": "Content not found"},
+                },
+                status_code=404,
+            )
+
+        result = coerce_row_dict(row)
+        result["meta"] = normalize_meta(result.get("meta"))
+        return _json_response(result)
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_content_detail")
+        return _json_response(
+            {
+                "success": False,
+                "error": {"code": "INTERNAL", "message": "Internal Server Error"},
+            },
+            status_code=500,
+        )
     finally:
         try:
             if cursor:
@@ -604,6 +804,10 @@ def search_contents():
 @contents_bp.route('/api/contents/recommendations', methods=['GET'])
 def get_recommendations():
     cursor = None
+    cache_enabled, cache_key, cached_payload = _cache_lookup(cacheable=True)
+    if cached_payload is not None:
+        return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
+
     try:
         limit = _parse_recommendation_limit(request.args.get('limit'))
         # Fetch extra per type so we can merge/sort and still keep a mixed top-N.
@@ -615,9 +819,10 @@ def get_recommendations():
         merged_rows = []
         content_types = ('webtoon', 'novel', 'ott')
         statuses = (STATUS_ONGOING, STATUS_HIATUS)
+        meta_expr = _meta_select_expr()
 
-        query = """
-            SELECT content_id, title, status, meta, source, content_type, updated_at
+        query = f"""
+            SELECT content_id, title, status, {meta_expr} AS meta, source, content_type, updated_at
             FROM contents
             WHERE content_type = %s
               AND COALESCE(is_deleted, FALSE) = FALSE
@@ -655,14 +860,17 @@ def get_recommendations():
             if len(deduped) >= limit:
                 break
 
-        return jsonify(deduped)
+        if cache_key:
+            _cache_store(cache_key, deduped)
+
+        return _json_response(deduped, cache_enabled=cache_enabled, cache_hit=False)
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_recommendations")
-        return jsonify({
+        return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
-        }), 500
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
     finally:
         try:
             if cursor:
@@ -704,9 +912,10 @@ def get_novel_contents():
             where_clause += " AND status IN (%s, %s)"
             query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
+        meta_expr = _meta_select_expr()
         cursor.execute(
             f"""
-            SELECT content_id, title, status, meta, source
+            SELECT content_id, title, status, {meta_expr} AS meta, source
             FROM contents
             {where_clause}
             ORDER BY title ASC, content_id ASC
@@ -758,8 +967,9 @@ def get_ongoing_contents():
         conn = get_db()
         cursor = get_cursor(conn)
 
+        meta_expr = _meta_select_expr()
         base_query = (
-            "SELECT content_id, title, status, meta, source "
+            f"SELECT content_id, title, status, {meta_expr} AS meta, source "
             "FROM contents "
             "WHERE content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE "
             "AND status IN (%s, %s)"
@@ -825,6 +1035,7 @@ def get_ongoing_contents():
 def get_ongoing_contents_v2():
     """Flat paginated ongoing/hiatus browse endpoint."""
     cursor = None
+    cache_enabled = False
     try:
         raw_type = request.args.get("type", "webtoon")
         content_type = str(raw_type).strip().lower() if raw_type is not None else "webtoon"
@@ -843,9 +1054,13 @@ def get_ongoing_contents_v2():
             min_value=1,
             max_value=200,
         )
+        cache_enabled, cache_key, cached_payload = _cache_lookup(cacheable=not raw_cursor)
+        if cached_payload is not None:
+            return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
 
         conn = get_db()
         cursor = get_cursor(conn)
+        meta_expr = _meta_select_expr()
 
         where_parts = [
             "content_type = %s",
@@ -868,7 +1083,7 @@ def get_ongoing_contents_v2():
 
         cursor.execute(
             f"""
-            SELECT content_id, title, status, meta, source, content_type
+            SELECT content_id, title, status, {meta_expr} AS meta, source, content_type
             FROM contents
             WHERE {' AND '.join(where_parts)}
             ORDER BY title ASC, source ASC, content_id ASC
@@ -916,13 +1131,16 @@ def get_ongoing_contents_v2():
             bool(next_cursor),
         )
 
-        return jsonify(response_payload)
+        if cache_key:
+            _cache_store(cache_key, response_payload)
+
+        return _json_response(response_payload, cache_enabled=cache_enabled, cache_hit=False)
     except Exception:
         current_app.logger.exception("Unhandled error in get_ongoing_contents_v2")
-        return jsonify({
+        return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
-        }), 500
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
     finally:
         try:
             if cursor:
@@ -935,6 +1153,7 @@ def get_ongoing_contents_v2():
 def get_novel_contents_v2():
     """Paginated novel list endpoint with genre-group and completion filters."""
     cursor = None
+    cache_enabled = False
     try:
         source_filter = _parse_sources_args()
 
@@ -956,9 +1175,13 @@ def get_novel_contents_v2():
             min_value=1,
             max_value=200,
         )
+        cache_enabled, cache_key, cached_payload = _cache_lookup(cacheable=not raw_cursor)
+        if cached_payload is not None:
+            return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
 
         conn = get_db()
         cursor = get_cursor(conn)
+        meta_expr = _meta_select_expr()
 
         def _build_base_query(limit_value, scan_title, scan_source, scan_content_id):
             where_parts = [
@@ -978,7 +1201,7 @@ def get_novel_contents_v2():
             _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
 
             return f"""
-                SELECT content_id, title, status, meta, source, content_type
+                SELECT content_id, title, status, {meta_expr} AS meta, source, content_type
                 FROM contents
                 WHERE {' AND '.join(where_parts)}
                 ORDER BY title ASC, source ASC, content_id ASC
@@ -1085,13 +1308,16 @@ def get_novel_contents_v2():
             bool(next_cursor),
         )
 
-        return jsonify(response_payload)
+        if cache_key:
+            _cache_store(cache_key, response_payload)
+
+        return _json_response(response_payload, cache_enabled=cache_enabled, cache_hit=False)
     except Exception:
         current_app.logger.exception("Unhandled error in get_novel_contents_v2")
-        return jsonify({
+        return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
-        }), 500
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
     finally:
         try:
             if cursor:
@@ -1104,6 +1330,7 @@ def get_novel_contents_v2():
 def get_hiatus_contents():
     """[페이지네이션] 휴재중인 콘텐츠 전체 목록을 페이지별로 반환합니다."""
     cursor = None
+    cache_enabled = False
     try:
         raw_cursor = request.args.get('cursor')
         last_title = request.args.get('last_title')
@@ -1118,9 +1345,15 @@ def get_hiatus_contents():
         per_page = max(1, min(per_page, 500))
 
         cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
+        cache_enabled, cache_key, cached_payload = _cache_lookup(
+            cacheable=not raw_cursor and not last_title,
+        )
+        if cached_payload is not None:
+            return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
 
         conn = get_db()
         cursor = get_cursor(conn)
+        meta_expr = _meta_select_expr()
 
         query_params = [STATUS_HIATUS, content_type]
         where_parts = [
@@ -1136,7 +1369,7 @@ def get_hiatus_contents():
 
         cursor.execute(
             f"""
-            SELECT content_id, title, status, meta, source
+            SELECT content_id, title, status, {meta_expr} AS meta, source
             FROM contents
             WHERE {' AND '.join(where_parts)}
             ORDER BY title ASC, source ASC, content_id ASC
@@ -1182,14 +1415,17 @@ def get_hiatus_contents():
             bool(next_cursor),
         )
 
-        return jsonify(response_payload)
+        if cache_key:
+            _cache_store(cache_key, response_payload)
+
+        return _json_response(response_payload, cache_enabled=cache_enabled, cache_hit=False)
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_hiatus_contents")
-        return jsonify({
+        return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
-        }), 500
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
     finally:
         try:
             if cursor:
@@ -1202,6 +1438,7 @@ def get_hiatus_contents():
 def get_completed_contents():
     """[페이지네이션] 완결된 콘텐츠 전체 목록을 페이지별로 반환합니다."""
     cursor = None
+    cache_enabled = False
     try:
         raw_cursor = request.args.get('cursor')
         last_title = request.args.get('last_title')
@@ -1216,9 +1453,15 @@ def get_completed_contents():
         per_page = max(1, min(per_page, 500))
 
         cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
+        cache_enabled, cache_key, cached_payload = _cache_lookup(
+            cacheable=not raw_cursor and not last_title,
+        )
+        if cached_payload is not None:
+            return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
 
         conn = get_db()
         cursor = get_cursor(conn)
+        meta_expr = _meta_select_expr()
 
         query_params = [STATUS_COMPLETED, content_type]
         where_parts = [
@@ -1234,7 +1477,7 @@ def get_completed_contents():
 
         cursor.execute(
             f"""
-            SELECT content_id, title, status, meta, source
+            SELECT content_id, title, status, {meta_expr} AS meta, source
             FROM contents
             WHERE {' AND '.join(where_parts)}
             ORDER BY title ASC, source ASC, content_id ASC
@@ -1280,14 +1523,17 @@ def get_completed_contents():
             bool(next_cursor),
         )
 
-        return jsonify(response_payload)
+        if cache_key:
+            _cache_store(cache_key, response_payload)
+
+        return _json_response(response_payload, cache_enabled=cache_enabled, cache_hit=False)
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_completed_contents")
-        return jsonify({
+        return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
-        }), 500
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
     finally:
         try:
             if cursor:

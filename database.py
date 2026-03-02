@@ -5,13 +5,16 @@ import random
 import re
 import sys
 import time
+from threading import Lock
 from contextlib import contextmanager
 from typing import Callable
 
 import psycopg2
 import psycopg2.extras
-from flask import g
+from flask import g, has_request_context
+from psycopg2.pool import ThreadedConnectionPool
 from psycopg2 import sql
+from utils.perf import add_db_borrow_or_connect_ms, add_db_fetch_ms, add_db_sql_ms
 
 REQUIRED_DB_ENV_VARS = ('DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT')
 DB_INIT_APPLICATION_NAME = "endingsignal_init_db"
@@ -28,6 +31,12 @@ DEFAULT_DB_INIT_BACKFILL_MAX_SECONDS = 0.0
 DEFAULT_DB_INIT_BACKFILL_PROGRESS_EVERY = 25
 DEFAULT_DB_INIT_STRICT_MAINTENANCE = False
 PG_TIMEOUT_LITERAL_PATTERN = re.compile(r"^\d+(?:ms|s|min|h|d)?$", re.IGNORECASE)
+DEFAULT_DB_POOL_ENABLED = False
+DEFAULT_DB_POOL_MINCONN = 1
+DEFAULT_DB_POOL_MAXCONN = 4
+_DB_POOL = None
+_DB_POOL_CONFIG = None
+_DB_POOL_LOCK = Lock()
 
 
 class DatabaseUnavailableError(ValueError):
@@ -72,15 +81,11 @@ def _build_connection_kwargs():
         kwargs["application_name"] = application_name
     return kwargs
 
-def _create_connection():
-    """
-    Create a new database connection from environment configuration.
-    Prefer DATABASE_URL, otherwise use individual DB_* variables.
-    """
+def _build_connection_args_and_kwargs():
     connection_kwargs = _build_connection_kwargs()
-    database_url = os.environ.get('DATABASE_URL')
+    database_url = (os.environ.get('DATABASE_URL') or '').strip()
     if database_url:
-        return psycopg2.connect(database_url, **connection_kwargs)
+        return (database_url,), connection_kwargs
 
     # Validate local/deployment DB configuration when DATABASE_URL is absent.
     if not has_database_config():
@@ -89,24 +94,153 @@ def _create_connection():
             "DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT."
         )
 
-    return psycopg2.connect(
-        dbname=os.environ.get('DB_NAME'),
-        user=os.environ.get('DB_USER'),
-        password=os.environ.get('DB_PASSWORD'),
-        host=os.environ.get('DB_HOST'),
-        port=os.environ.get('DB_PORT'),
-        **connection_kwargs
-    )
+    return (), {
+        "dbname": os.environ.get('DB_NAME'),
+        "user": os.environ.get('DB_USER'),
+        "password": os.environ.get('DB_PASSWORD'),
+        "host": os.environ.get('DB_HOST'),
+        "port": os.environ.get('DB_PORT'),
+        **connection_kwargs,
+    }
+
+
+def _create_connection():
+    """
+    Create a new database connection from environment configuration.
+    Prefer DATABASE_URL, otherwise use individual DB_* variables.
+    """
+    args, kwargs = _build_connection_args_and_kwargs()
+    return psycopg2.connect(*args, **kwargs)
+
+
+def _read_runtime_bool_env(name, default=False):
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _read_runtime_int_env(name, default, minimum=1):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    if parsed < minimum:
+        return default
+    return parsed
+
+
+def _db_pool_enabled():
+    return _read_runtime_bool_env("DB_POOL_ENABLED", default=DEFAULT_DB_POOL_ENABLED)
+
+
+def _read_pool_config():
+    minconn = _read_runtime_int_env("DB_POOL_MINCONN", DEFAULT_DB_POOL_MINCONN, minimum=1)
+    maxconn = _read_runtime_int_env("DB_POOL_MAXCONN", DEFAULT_DB_POOL_MAXCONN, minimum=1)
+    if maxconn < minconn:
+        maxconn = minconn
+    return minconn, maxconn
+
+
+def _get_db_pool():
+    global _DB_POOL, _DB_POOL_CONFIG
+
+    if not _db_pool_enabled():
+        return None
+
+    pool_config = _read_pool_config()
+    with _DB_POOL_LOCK:
+        if _DB_POOL is None or _DB_POOL_CONFIG != pool_config:
+            if _DB_POOL is not None:
+                try:
+                    _DB_POOL.closeall()
+                except Exception:
+                    pass
+            args, kwargs = _build_connection_args_and_kwargs()
+            _DB_POOL = ThreadedConnectionPool(
+                pool_config[0],
+                pool_config[1],
+                *args,
+                **kwargs,
+            )
+            _DB_POOL_CONFIG = pool_config
+    return _DB_POOL
+
+
+class InstrumentedCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, vars=None):
+        started = time.perf_counter()
+        try:
+            return self._cursor.execute(query, vars)
+        finally:
+            add_db_sql_ms((time.perf_counter() - started) * 1000.0)
+
+    def executemany(self, query, vars_list):
+        started = time.perf_counter()
+        try:
+            return self._cursor.executemany(query, vars_list)
+        finally:
+            add_db_sql_ms((time.perf_counter() - started) * 1000.0)
+
+    def fetchall(self):
+        started = time.perf_counter()
+        try:
+            return self._cursor.fetchall()
+        finally:
+            add_db_fetch_ms((time.perf_counter() - started) * 1000.0)
+
+    def fetchone(self):
+        started = time.perf_counter()
+        try:
+            return self._cursor.fetchone()
+        finally:
+            add_db_fetch_ms((time.perf_counter() - started) * 1000.0)
+
+    def fetchmany(self, size=None):
+        started = time.perf_counter()
+        try:
+            if size is None:
+                return self._cursor.fetchmany()
+            return self._cursor.fetchmany(size)
+        finally:
+            add_db_fetch_ms((time.perf_counter() - started) * 1000.0)
+
+    def close(self):
+        return self._cursor.close()
+
+    def __getattr__(self, item):
+        return getattr(self._cursor, item)
+
 
 def get_db():
     """Return a request-scoped DB connection from Flask's application context."""
     if 'db' not in g:
-        g.db = _create_connection()
+        started = time.perf_counter()
+        borrowed_from_pool = False
+        pool = _get_db_pool()
+        if pool is not None:
+            g.db = pool.getconn()
+            borrowed_from_pool = True
+        else:
+            g.db = _create_connection()
+        g._db_from_pool = borrowed_from_pool
+        if has_request_context():
+            add_db_borrow_or_connect_ms((time.perf_counter() - started) * 1000.0)
     return g.db
+
 
 def get_cursor(db):
     """Return a DictCursor for the provided DB connection."""
-    return db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    base_cursor = db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    if has_request_context():
+        return InstrumentedCursor(base_cursor)
+    return base_cursor
 
 
 @contextmanager
@@ -124,6 +258,18 @@ def close_db(exception=None):
     """Close the request-scoped DB connection if one exists."""
     db = g.pop('db', None)
     if db is not None:
+        if g.pop("_db_from_pool", False):
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            pool = _DB_POOL
+            if pool is not None:
+                try:
+                    pool.putconn(db)
+                    return
+                except Exception:
+                    pass
         db.close()
 
 def create_standalone_connection():
@@ -2038,6 +2184,24 @@ def setup_database_standalone():
                 ON contents (content_type, updated_at DESC, content_id ASC)
                 WHERE COALESCE(is_deleted, FALSE) = FALSE
                   AND status IN ('연재중', '휴재');
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_source_content_id",
+                """
+                CREATE INDEX idx_contents_source_content_id
+                ON contents (source, content_id);
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_created_at_desc",
+                """
+                CREATE INDEX idx_contents_created_at_desc
+                ON contents (created_at DESC);
                 """,
             )
             create_index_if_missing(

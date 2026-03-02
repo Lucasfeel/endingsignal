@@ -6,6 +6,7 @@ load_dotenv()
 
 import config
 from database import close_db
+from utils.perf import init_request_perf, log_request_perf
 from views.admin import admin_bp
 from views.auth import auth_bp
 from views.contents import contents_bp
@@ -27,6 +28,16 @@ app.register_blueprint(subscriptions_bp)
 app.register_blueprint(status_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
+
+
+@app.before_request
+def before_request_perf():
+    init_request_perf()
+
+
+@app.after_request
+def after_request_perf(response):
+    return log_request_perf(response)
 
 
 @app.teardown_appcontext
