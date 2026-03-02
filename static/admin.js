@@ -1157,8 +1157,18 @@
   };
 
   const openAddSourceModal = (formKey = 'addContent') => {
-    const targetFormKey = getContentFormConfig(formKey) ? formKey : 'addContent';
-    const selectedType = getSelectedContentType(targetFormKey);
+    let targetFormKey = formKey;
+    let selectedTypeId = '';
+    if (getContentFormConfig(targetFormKey)) {
+      selectedTypeId = String(getContentFormState(targetFormKey)?.selectedTypeId || '');
+    } else if (targetFormKey === 'manageEdit') {
+      selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
+    } else {
+      targetFormKey = 'addContent';
+      selectedTypeId = String(getContentFormState(targetFormKey)?.selectedTypeId || '');
+    }
+    const selectedType =
+      STATE.addContent.types.find((entry) => String(entry.id) === selectedTypeId) || null;
     if (!selectedType) {
       showToast('소스를 추가하려면 먼저 타입을 선택하세요.', { type: 'error' });
       return;
@@ -1247,7 +1257,11 @@
     const saveBtn = document.getElementById('addSourceSaveBtn');
     const targetFormKey = STATE.addContent.modalTargetFormKey || 'addContent';
     const targetFormState = getContentFormState(targetFormKey);
-    const selectedTypeId = String(targetFormState?.selectedTypeId || '');
+    const selectedTypeId = getContentFormConfig(targetFormKey)
+      ? String(targetFormState?.selectedTypeId || '')
+      : targetFormKey === 'manageEdit'
+        ? String(STATE.manage.edit.selectedTypeId || '')
+        : '';
     const name = input?.value?.trim() || '';
     if (!selectedTypeId) {
       showToast('타입을 먼저 선택하세요.', { type: 'error' });
@@ -1278,10 +1292,19 @@
         closeAddSourceModal();
         await loadContentSourcesByType(selectedTypeId, { silent: true });
         if (createdSource?.id) {
-          assignSourceToForm(targetFormKey, String(createdSource.id));
+          if (getContentFormConfig(targetFormKey)) {
+            assignSourceToForm(targetFormKey, String(createdSource.id));
+          } else if (targetFormKey === 'manageEdit') {
+            STATE.manage.edit.selectedSourceId = String(createdSource.id);
+          }
         }
-        renderContentFormSourceRows(targetFormKey);
-        setContentFormHint(targetFormKey, `소스 추가 완료: ${createdSource?.name || name}`);
+        if (getContentFormConfig(targetFormKey)) {
+          renderContentFormSourceRows(targetFormKey);
+          setContentFormHint(targetFormKey, `소스 추가 완료: ${createdSource?.name || name}`);
+        } else if (targetFormKey === 'manageEdit') {
+          renderManageEditSourceOptions();
+          setManageEditHint(`소스 추가 완료: ${createdSource?.name || name}`);
+        }
         showToast('소스가 추가되었습니다.', { type: 'success' });
       });
     } catch (err) {
@@ -1511,11 +1534,12 @@
       'manageEditTypeSelect',
       'manageEditSourceSelect',
       'manageEditSaveBtn',
+      'manageEditAddSourceBtn',
     ];
     fieldIds.forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
-      if (id === 'manageEditSaveBtn') {
+      if (id === 'manageEditSaveBtn' || id === 'manageEditAddSourceBtn') {
         setButtonDisabled(el, disabled);
         return;
       }
@@ -1548,6 +1572,7 @@
 
   const renderManageEditSourceOptions = () => {
     const sourceSelect = document.getElementById('manageEditSourceSelect');
+    const addSourceBtn = document.getElementById('manageEditAddSourceBtn');
     if (!sourceSelect) return;
 
     const selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
@@ -1559,6 +1584,7 @@
       placeholder.textContent = '타입을 먼저 선택하세요';
       sourceSelect.appendChild(placeholder);
       sourceSelect.disabled = true;
+      setButtonDisabled(addSourceBtn, true);
       STATE.manage.edit.selectedSourceId = '';
       return;
     }
@@ -1581,6 +1607,7 @@
     sourceSelect.value = exists ? selectedSourceId : '';
     if (!exists) STATE.manage.edit.selectedSourceId = '';
     sourceSelect.disabled = false;
+    setButtonDisabled(addSourceBtn, false);
   };
 
   const populateManageEditForm = (item) => {
@@ -1614,6 +1641,7 @@
     renderManageEditSourceOptions();
     setManageEditHint('');
     setManageEditControlsDisabled(false);
+    renderManageEditSourceOptions();
 
     if (!STATE.manage.edit.selectedTypeId) return;
 
@@ -3384,6 +3412,7 @@
     const manageEditContentForm = document.getElementById('manageEditContentForm');
     const manageEditTypeSelect = document.getElementById('manageEditTypeSelect');
     const manageEditSourceSelect = document.getElementById('manageEditSourceSelect');
+    const manageEditAddSourceBtn = document.getElementById('manageEditAddSourceBtn');
     const manageEditSaveBtn = document.getElementById('manageEditSaveBtn');
     const addContentForm = document.getElementById('addContentForm');
     const addContentResetBtn = document.getElementById('addContentResetBtn');
@@ -3464,6 +3493,7 @@
     });
     manageEditTypeSelect?.addEventListener('change', handleManageEditTypeChange);
     manageEditSourceSelect?.addEventListener('change', handleManageEditSourceChange);
+    manageEditAddSourceBtn?.addEventListener('click', () => openAddSourceModal('manageEdit'));
     addTypeSaveBtn?.addEventListener('click', createContentTypeFromModal);
     addTypeCancelBtn?.addEventListener('click', closeAddTypeModal);
     addSourceSaveBtn?.addEventListener('click', createContentSourceFromModal);
