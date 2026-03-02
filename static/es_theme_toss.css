@@ -32,13 +32,13 @@
   --red-800: #bc1b2a;
   --red-900: #a51926;
 
-  --green-50: #f0faf6;
-  --green-100: #aeefd5;
-  --green-200: #76e4b8;
-  --green-300: #3fd599;
-  --green-400: #15c47e;
-  --green-500: #03b26c;
-  --green-600: #02a262;
+  --green-50: #f4ffe8;
+  --green-100: #e2f8b8;
+  --green-200: #c8ee89;
+  --green-300: #afe25f;
+  --green-400: #99d747;
+  --green-500: #84ca36;
+  --green-600: #5f9626;
 
   --es-bg: var(--grey-100);
   --es-surface: #ffffff;
@@ -52,6 +52,9 @@
   --es-primary-press: var(--blue-700);
   --es-danger: var(--red-500);
   --es-success: var(--green-500);
+  --es-success-border: var(--green-200);
+  --es-success-surface: var(--green-50);
+  --es-success-text: var(--green-600);
   --es-radius-sm: 10px;
   --es-radius-md: 12px;
   --es-radius-lg: 16px;
@@ -87,6 +90,10 @@
     --es-text-muted: #9fb0c5;
     --es-border: #223142;
     --es-divider: #223142;
+    --es-success: #a8ef58;
+    --es-success-border: rgba(188, 255, 127, 0.45);
+    --es-success-surface: rgba(179, 255, 109, 0.16);
+    --es-success-text: #d9ffac;
     --es-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
     --es-shadow-md: 0 18px 40px rgba(0, 0, 0, 0.55);
     --es-afford-overlay-from: rgba(8, 14, 22, 0.4);
@@ -119,6 +126,10 @@
   --es-text-muted: var(--grey-600);
   --es-border: var(--grey-200);
   --es-divider: var(--grey-200);
+  --es-success: var(--green-500);
+  --es-success-border: var(--green-200);
+  --es-success-surface: var(--green-50);
+  --es-success-text: var(--green-600);
   --es-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --es-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
   --es-afford-overlay-from: rgba(255, 255, 255, 0.35);
@@ -150,6 +161,10 @@
   --es-text-muted: #9fb0c5;
   --es-border: #223142;
   --es-divider: #223142;
+  --es-success: #a8ef58;
+  --es-success-border: rgba(188, 255, 127, 0.45);
+  --es-success-surface: rgba(179, 255, 109, 0.16);
+  --es-success-text: #d9ffac;
   --es-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
   --es-shadow-md: 0 18px 40px rgba(0, 0, 0, 0.55);
   --es-afford-overlay-from: rgba(8, 14, 22, 0.4);
@@ -472,9 +487,9 @@ body {
 }
 
 .es-badge-success {
-  border-color: var(--green-200);
-  background: var(--green-50);
-  color: var(--green-600);
+  border-color: var(--es-success-border);
+  background: var(--es-success-surface);
+  color: var(--es-success-text);
 }
 
 .es-badge-neutral {
@@ -566,8 +581,8 @@ body {
 }
 
 .es-toast-success {
-  border-color: var(--green-200);
-  color: var(--green-600);
+  border-color: var(--es-success-border);
+  color: var(--es-success-text);
 }
 
 .es-toast-error {
@@ -942,7 +957,7 @@ body.is-ait #bottomNav {
 }
 
 #subscribeStateDot.is-active {
-  background: var(--green-500) !important;
+  background: var(--es-success) !important;
 }
 
 #subscribeInlineError,
@@ -1064,15 +1079,15 @@ body.es-admin-page {
 }
 
 .es-admin-page [class*='border-emerald-'] {
-  border-color: var(--green-200) !important;
+  border-color: var(--es-success-border) !important;
 }
 
 .es-admin-page [class*='bg-emerald-'] {
-  background: var(--green-50) !important;
+  background: var(--es-success-surface) !important;
 }
 
 .es-admin-page [class*='text-emerald-'] {
-  color: var(--green-600) !important;
+  color: var(--es-success-text) !important;
 }
 
 .es-admin-page [class*='border-red-'] {
@@ -1119,9 +1134,9 @@ body.es-admin-page {
 }
 
 .es-status-success {
-  border-color: var(--green-200);
-  background: var(--green-50);
-  color: var(--green-600);
+  border-color: var(--es-success-border);
+  background: var(--es-success-surface);
+  color: var(--es-success-text);
 }
 
 .es-status-warning {
