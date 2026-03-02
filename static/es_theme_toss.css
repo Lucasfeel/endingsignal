@@ -51,10 +51,10 @@
   --es-primary-hover: var(--blue-600);
   --es-primary-press: var(--blue-700);
   --es-danger: var(--red-500);
-  --es-success: #89f9a7;
-  --es-success-border: #9feeb7;
-  --es-success-surface: #e7fff0;
-  --es-success-text: #1f8a45;
+  --es-success: #7de69b;
+  --es-success-border: #8fe8aa;
+  --es-success-surface: #def9e8;
+  --es-success-text: #1f7a42;
   --es-radius-sm: 10px;
   --es-radius-md: 12px;
   --es-radius-lg: 16px;
@@ -90,10 +90,10 @@
     --es-text-muted: #9fb0c5;
     --es-border: #223142;
     --es-divider: #223142;
-    --es-success: #89f9a7;
-    --es-success-border: rgba(137, 249, 167, 0.76);
-    --es-success-surface: rgba(137, 249, 167, 0.30);
-    --es-success-text: #c0ffd3;
+    --es-success: #7de69b;
+    --es-success-border: rgba(125, 230, 155, 0.76);
+    --es-success-surface: rgba(125, 230, 155, 0.26);
+    --es-success-text: #c8f8d6;
     --es-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
     --es-shadow-md: 0 18px 40px rgba(0, 0, 0, 0.55);
     --es-afford-overlay-from: rgba(8, 14, 22, 0.4);
@@ -126,10 +126,10 @@
   --es-text-muted: var(--grey-600);
   --es-border: var(--grey-200);
   --es-divider: var(--grey-200);
-  --es-success: #89f9a7;
-  --es-success-border: #9feeb7;
-  --es-success-surface: #e7fff0;
-  --es-success-text: #1f8a45;
+  --es-success: #7de69b;
+  --es-success-border: #8fe8aa;
+  --es-success-surface: #def9e8;
+  --es-success-text: #1f7a42;
   --es-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --es-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
   --es-afford-overlay-from: rgba(255, 255, 255, 0.35);
@@ -161,10 +161,10 @@
   --es-text-muted: #9fb0c5;
   --es-border: #223142;
   --es-divider: #223142;
-  --es-success: #89f9a7;
-  --es-success-border: rgba(137, 249, 167, 0.76);
-  --es-success-surface: rgba(137, 249, 167, 0.30);
-  --es-success-text: #c0ffd3;
+  --es-success: #7de69b;
+  --es-success-border: rgba(125, 230, 155, 0.76);
+  --es-success-surface: rgba(125, 230, 155, 0.26);
+  --es-success-text: #c8f8d6;
   --es-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
   --es-shadow-md: 0 18px 40px rgba(0, 0, 0, 0.55);
   --es-afford-overlay-from: rgba(8, 14, 22, 0.4);
@@ -586,8 +586,9 @@ body {
 }
 
 .es-toast-success {
-  border-color: var(--es-success-border);
-  color: var(--es-success-text);
+  border-color: var(--es-success);
+  background: var(--es-success);
+  color: #123a22;
 }
 
 .es-toast-error {
