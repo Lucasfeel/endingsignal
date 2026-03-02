@@ -193,7 +193,7 @@ const UI_STATE_DEFAULTS = {
 };
 
 const WEBTOON_DAY_FILTER_OPTIONS = [
-  { id: 'all', label: 'ALL' },
+  { id: 'all', label: '\uC804\uCCB4' },
   { id: 'mon', label: '\uC6D4' },
   { id: 'tue', label: '\uD654' },
   { id: 'wed', label: '\uC218' },
@@ -226,7 +226,7 @@ const NOVEL_GENRE_GROUP_IDS = NOVEL_GENRE_GROUP_OPTIONS.map((item) => item.id);
 const NOVEL_COMPLETED_FILTER_OPTION = { id: 'completed', label: '\uC644\uACB0' };
 
 const OTT_GENRE_OPTIONS = [
-  { id: EXCLUSIVE_MULTI_ALL_ID, label: 'ALL' },
+  { id: EXCLUSIVE_MULTI_ALL_ID, label: '\uC804\uCCB4' },
   { id: 'drama', label: '\uB4DC\uB77C\uB9C8' },
   { id: 'anime', label: '\uC560\uB2C8\uBA54\uC774\uC158' },
   { id: 'variety', label: '\uC608\uB2A5' },
