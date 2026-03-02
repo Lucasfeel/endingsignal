@@ -198,6 +198,26 @@ class RidiNovelCrawler(ContentCrawler):
         except (TypeError, ValueError):
             return None
 
+    def _no_new_ids_threshold(self) -> int:
+        default_threshold = 1
+        raw = os.getenv("RIDI_NO_NEW_IDS_THRESHOLD")
+        if raw is not None:
+            try:
+                parsed = int(raw)
+                if parsed > 0:
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+
+        configured = getattr(config, "RIDI_NO_NEW_IDS_THRESHOLD", default_threshold)
+        try:
+            parsed = int(configured)
+            if parsed > 0:
+                return parsed
+        except (TypeError, ValueError):
+            pass
+        return default_threshold
+
     @staticmethod
     def _sanitize_text(value: object) -> str:
         if value is None:
@@ -1051,6 +1071,9 @@ class RidiNovelCrawler(ContentCrawler):
             "stopped_reason": None,
         }
         max_pages = self._max_pages_per_category()
+        no_new_ids_threshold = self._no_new_ids_threshold()
+        prev_page_signature: Optional[Tuple[str, ...]] = None
+        consecutive_no_new_pages = 0
         page = 1
         while True:
             if max_pages is not None and page > max_pages:
@@ -1088,6 +1111,8 @@ class RidiNovelCrawler(ContentCrawler):
                 meta["stopped_reason"] = "empty_page"
                 break
 
+            before_unique = len(entries_by_id)
+            page_content_ids: List[str] = []
             for item in items:
                 parsed = self._parse_item(
                     item,
@@ -1101,7 +1126,22 @@ class RidiNovelCrawler(ContentCrawler):
                 if parsed.get("completion_missing"):
                     meta["completion_missing"] += 1
                 cid = parsed["content_id"]
+                page_content_ids.append(cid)
                 entries_by_id[cid] = self._merge_entries(entries_by_id.get(cid), parsed)
+
+            if not page_content_ids:
+                meta["errors"].append(f"UNPARSEABLE_PAGE:page={page}")
+                meta["stopped_reason"] = "unparseable_page"
+                print(
+                    f"[RIDI][NEXT] stop=unparseable_page root={endpoint.key} "
+                    f"completed_only={completed_only} page={page} unique={len(entries_by_id)}",
+                    flush=True,
+                )
+                break
+
+            after_unique = len(entries_by_id)
+            new_count = after_unique - before_unique
+            page_signature = tuple(page_content_ids)
 
             if self._should_log_page_progress(meta["pages_fetched"]):
                 print(
@@ -1110,6 +1150,35 @@ class RidiNovelCrawler(ContentCrawler):
                     flush=True,
                 )
 
+            if prev_page_signature is not None and page_signature == prev_page_signature:
+                meta["errors"].append(f"REPEATED_PAGE_SIGNATURE:page={page}")
+                meta["stopped_reason"] = "repeated_page_signature"
+                print(
+                    f"[RIDI][NEXT] stop=repeated_page_signature root={endpoint.key} "
+                    f"completed_only={completed_only} page={page} unique={len(entries_by_id)}",
+                    flush=True,
+                )
+                break
+
+            if new_count == 0:
+                consecutive_no_new_pages += 1
+            else:
+                consecutive_no_new_pages = 0
+
+            if consecutive_no_new_pages >= no_new_ids_threshold:
+                meta["errors"].append(
+                    f"NO_NEW_IDS:page={page}:count={consecutive_no_new_pages}:threshold={no_new_ids_threshold}"
+                )
+                meta["stopped_reason"] = "no_new_ids"
+                print(
+                    f"[RIDI][NEXT] stop=no_new_ids root={endpoint.key} "
+                    f"completed_only={completed_only} page={page} unique={len(entries_by_id)} "
+                    f"threshold={no_new_ids_threshold}",
+                    flush=True,
+                )
+                break
+
+            prev_page_signature = page_signature
             page += 1
 
         if meta["stopped_reason"] is None:
