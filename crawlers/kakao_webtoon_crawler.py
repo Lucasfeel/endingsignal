@@ -32,6 +32,10 @@ PLACEMENT_WEEKDAY_MAP = {
     "timetable_sun": "sun",
 }
 
+STATUS_ONGOING = "연재중"
+STATUS_HIATUS = "휴재"
+STATUS_FINISHED = "완결"
+
 
 class KakaoWebtoonCrawler(ContentCrawler):
     """Kakao Webtoon timetable crawler."""
@@ -308,7 +312,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
         if db_info is None:
             return True
         db_status = db_info.get("status")
-        if db_status != "완결":
+        if db_status != STATUS_FINISHED:
             return True
         profile_status = db_info.get("kakao_profile_status")
         if not profile_status:
@@ -327,7 +331,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
         if db_info is None:
             return 0
         db_status = db_info.get("status")
-        if db_status in {"연재중", "휴재"}:
+        if db_status in {STATUS_ONGOING, STATUS_HIATUS}:
             return 1
         profile_status = db_info.get("kakao_profile_status")
         checked_at = db_info.get("kakao_profile_status_checked_at")
@@ -546,13 +550,13 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "profile_lookup_failed": 0,
             "profile_status_counts": {},
             "lookup_skipped_due_to_budget": 0,
+            "completed_placement_processed": 0,
         }
         combined_map: Dict[str, Dict] = {}
         hiatus_ids = set()
         finished_ids = set()
         completed_candidate_ids = set()
         total_parsed = 0
-        hiatus_like_found_in_completed = False
 
         headers = self._build_headers()
         placements: List[Tuple[str, str]] = [
@@ -623,11 +627,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
                             existing["weekdays"] = existing_weekdays
                     else:
                         combined_map[content_id] = dict(entry)
-                    if self._is_completed_status(status):
-                        finished_ids.add(content_id)
-                    elif self._is_hiatus_like_status(status):
-                        hiatus_ids.add(content_id)
-                        hiatus_like_found_in_completed = True
+                    # Business rule: any item from completed placement is completed.
+                    finished_ids.add(content_id)
+                    hiatus_ids.discard(content_id)
 
             total_parsed += len(entries)
 
@@ -638,6 +640,11 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
         completed_candidate_list = sorted(completed_candidate_ids)
         fetch_meta["completed_candidate_total"] = len(completed_candidate_list)
+        fetch_meta["completed_placement_processed"] = len(completed_candidate_list)
+        print(
+            f"INFO: [KakaoWebtoon] completed placement processed={len(completed_candidate_list)}",
+            flush=True,
+        )
         profile_status_verified_ids = set()
         if completed_candidate_list:
             now_kst = now_kst_naive()
@@ -660,7 +667,6 @@ class KakaoWebtoonCrawler(ContentCrawler):
                     finished_ids.add(content_id)
                     profile_status_verified_ids.add(content_id)
                 elif profile_status in {"SEASON_COMPLETED", "PAUSE"}:
-                    hiatus_ids.add(content_id)
                     profile_status_verified_ids.add(content_id)
 
             lookup_candidates = self._select_profile_lookup_targets(
@@ -716,7 +722,6 @@ class KakaoWebtoonCrawler(ContentCrawler):
                         finished_ids.add(content_id)
                         profile_status_verified_ids.add(content_id)
                     elif status_key in {"SEASON_COMPLETED", "PAUSE"}:
-                        hiatus_ids.add(content_id)
                         profile_status_verified_ids.add(content_id)
 
             for content_id in completed_candidate_list:
@@ -748,8 +753,6 @@ class KakaoWebtoonCrawler(ContentCrawler):
         if fetch_meta["is_suspicious_empty"]:
             fetch_meta.setdefault("health_warnings", []).append("SUSPICIOUS_EMPTY_RESULT")
             fetch_meta["errors"].append("SUSPICIOUS_EMPTY_RESULT")
-        if hiatus_like_found_in_completed:
-            fetch_meta.setdefault("health_notes", []).append("pause_found_in_completed_placement")
         if not finished_map:
             fetch_meta.setdefault("health_notes", []).append("finished_count_zero")
 
@@ -770,24 +773,44 @@ class KakaoWebtoonCrawler(ContentCrawler):
     ):
         print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...")
         cursor = get_cursor(conn)
-        cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
-        db_existing_ids = {row["content_id"] for row in cursor.fetchall()}
+        cursor.execute(
+            "SELECT content_id, status FROM contents WHERE source = %s",
+            (self.source_name,),
+        )
+        db_status_by_id = {row["content_id"]: row.get("status") for row in cursor.fetchall()}
+        db_existing_ids = set(db_status_by_id.keys())
         updates, inserts = [], []
+        completed_placement_processed = 0
+        promoted_to_completed = 0
 
         for content_id, webtoon_data in all_content_today.items():
+            discovered_as_completed = bool(webtoon_data.get("kakao_completed_candidate"))
+            if discovered_as_completed:
+                completed_placement_processed += 1
+
             status = ""
-            if content_id in hiatus_today:
-                status = "휴재"
-            elif content_id in finished_today:
-                status = "완결"
+            if discovered_as_completed or content_id in finished_today:
+                status = STATUS_FINISHED
+            elif content_id in hiatus_today:
+                status = STATUS_HIATUS
             elif content_id in ongoing_today:
-                status = "연재중"
+                status = STATUS_ONGOING
             else:
                 continue
 
             title = webtoon_data.get("title")
             if not title:
                 continue
+
+            existing_status = db_status_by_id.get(content_id)
+            if existing_status == STATUS_FINISHED:
+                status = STATUS_FINISHED
+            elif (
+                existing_status is not None
+                and status == STATUS_FINISHED
+                and discovered_as_completed
+            ):
+                promoted_to_completed += 1
 
             authors = webtoon_data.get("authors", [])
             normalized_title = normalize_search_text(title)
@@ -856,6 +879,12 @@ class KakaoWebtoonCrawler(ContentCrawler):
                 inserts,
             )
             print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
+
+        print(
+            "INFO: [KakaoWebtoon] "
+            f"completed placement processed={completed_placement_processed} "
+            f"promoted_to_completed={promoted_to_completed}"
+        )
 
         cursor.close()
         print("DB 동기화 완료.")

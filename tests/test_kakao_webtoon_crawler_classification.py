@@ -58,7 +58,7 @@ def test_completed_placement_completed_status_goes_to_finished_without_profile_l
     assert "9001" not in ongoing_today
 
 
-def test_completed_placement_pause_status_goes_to_hiatus_without_profile_lookup(monkeypatch):
+def test_completed_placement_pause_status_goes_to_finished_without_profile_lookup(monkeypatch):
     _patch_kakao_config(monkeypatch)
     crawler = StubKakaoWebtoonCrawler(
         {
@@ -68,12 +68,12 @@ def test_completed_placement_pause_status_goes_to_hiatus_without_profile_lookup(
 
     ongoing_today, hiatus_today, finished_today, _, _ = asyncio.run(crawler.fetch_all_data())
 
-    assert "9002" in hiatus_today
-    assert "9002" not in finished_today
+    assert "9002" in finished_today
+    assert "9002" not in hiatus_today
     assert "9002" not in ongoing_today
 
 
-def test_completed_placement_season_completed_status_goes_to_hiatus_without_profile_lookup(monkeypatch):
+def test_completed_placement_season_completed_status_goes_to_finished_without_profile_lookup(monkeypatch):
     _patch_kakao_config(monkeypatch)
     crawler = StubKakaoWebtoonCrawler(
         {
@@ -81,12 +81,26 @@ def test_completed_placement_season_completed_status_goes_to_hiatus_without_prof
         }
     )
 
-    ongoing_today, hiatus_today, finished_today, _, fetch_meta = asyncio.run(crawler.fetch_all_data())
+    ongoing_today, hiatus_today, finished_today, _, _ = asyncio.run(crawler.fetch_all_data())
 
-    assert "9003" in hiatus_today
-    assert "9003" not in finished_today
+    assert "9003" in finished_today
+    assert "9003" not in hiatus_today
     assert "9003" not in ongoing_today
-    assert "pause_found_in_completed_placement" in fetch_meta.get("health_notes", [])
+
+
+def test_completed_placement_unknown_status_goes_to_finished_without_profile_lookup(monkeypatch):
+    _patch_kakao_config(monkeypatch)
+    crawler = StubKakaoWebtoonCrawler(
+        {
+            "timetable_completed": [_make_entry("9004", None)],
+        }
+    )
+
+    ongoing_today, hiatus_today, finished_today, _, _ = asyncio.run(crawler.fetch_all_data())
+
+    assert "9004" in finished_today
+    assert "9004" not in hiatus_today
+    assert "9004" not in ongoing_today
 
 
 def test_weekday_season_completed_status_is_hiatus_like(monkeypatch):
