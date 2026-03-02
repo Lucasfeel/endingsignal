@@ -4855,7 +4855,7 @@ const renderHomeSection = ({
   actions = [],
 }) => {
   const section = document.createElement('section');
-  section.className = 'space-y-3';
+  section.className = 'w-full space-y-3';
 
   const heading = document.createElement('h2');
   setClasses(heading, UI_CLASSES.sectionTitle);
@@ -4876,7 +4876,7 @@ const renderHomeSection = ({
   }
 
   const empty = document.createElement('div');
-  empty.className = 'es-page-card rounded-2xl p-4 text-center';
+  empty.className = 'w-full es-page-card rounded-2xl p-4 text-center';
 
   const emptyTitleEl = document.createElement('p');
   setClasses(emptyTitleEl, UI_CLASSES.emptyTitle);
