@@ -574,14 +574,24 @@ const sanitizeWebtoonDays = (value, fallback = DEFAULT_WEBTOON_DAYS) => {
     normalized.push(dayId);
   });
 
-  if (!normalized.length) return fallbackDays;
+  const fallbackDay =
+    fallbackDays
+      .map((entry) =>
+        String(entry || '')
+          .trim()
+          .toLowerCase(),
+      )
+      .find((dayId) => WEBTOON_DAY_FILTER_ID_SET.has(dayId)) || DEFAULT_WEBTOON_DAYS[0];
+
+  if (!normalized.length) return [fallbackDay];
 
   const exclusiveDay = normalized.find((dayId) =>
     WEBTOON_DAY_EXCLUSIVE_IDS.has(dayId),
   );
   if (exclusiveDay) return [exclusiveDay];
 
-  return sortWebtoonDays(normalized);
+  const orderedDays = sortWebtoonDays(normalized);
+  return orderedDays.length ? [orderedDays[0]] : [fallbackDay];
 };
 
 const areStringArraysEqual = (left, right) => {
@@ -598,18 +608,7 @@ const toggleWebtoonDaySelection = (currentValue, dayIdRaw) => {
   if (!WEBTOON_DAY_FILTER_ID_SET.has(dayId)) {
     return sanitizeWebtoonDays(currentValue, DEFAULT_WEBTOON_DAYS);
   }
-  if (WEBTOON_DAY_EXCLUSIVE_IDS.has(dayId)) return [dayId];
-
-  const selected = sanitizeWebtoonDays(
-    currentValue,
-    DEFAULT_WEBTOON_DAYS,
-  ).filter((entry) => !WEBTOON_DAY_EXCLUSIVE_IDS.has(entry));
-  const next = new Set(selected);
-  if (next.has(dayId)) next.delete(dayId);
-  else next.add(dayId);
-
-  if (!next.size) return [...DEFAULT_WEBTOON_DAYS];
-  return sortWebtoonDays(Array.from(next));
+  return [dayId];
 };
 
 const getSelectedWebtoonDays = () =>
@@ -711,7 +710,7 @@ const normalizeExclusiveMultiSelect = (
     });
     if (seen.has(exclusiveId)) return [exclusiveId];
     const nonExclusive = allowedList.filter((id) => id !== exclusiveId && seen.has(id));
-    if (nonExclusive.length) return nonExclusive;
+    if (nonExclusive.length) return [nonExclusive[0]];
     return allowedSet.has(exclusiveId) ? [exclusiveId] : [];
   };
 
@@ -758,18 +757,7 @@ const toggleExclusiveMultiSelect = (
       exclusiveId,
     });
   }
-  if (normalizedTarget === exclusiveId) return [exclusiveId];
-
-  const current = normalizeExclusiveMultiSelect(currentValue, {
-    allowedIds: allowedList,
-    fallback: [exclusiveId],
-    exclusiveId,
-  }).filter((entry) => entry !== exclusiveId);
-  const next = new Set(current);
-  if (next.has(normalizedTarget)) next.delete(normalizedTarget);
-  else next.add(normalizedTarget);
-  if (!next.size) return [exclusiveId];
-  return allowedList.filter((id) => id !== exclusiveId && next.has(id));
+  return [normalizedTarget];
 };
 
 const parseLegacyNovelGenreSelection = (value) => {
@@ -848,6 +836,9 @@ const UIState = {
     const nextNovelIsCompleted =
       coerceBooleanFilter(savedNovelIsCompleted, DEFAULT_NOVEL_IS_COMPLETED) ||
       legacyNovelSelection.hasCompletedToken;
+    const nextNovelGenreGroups = nextNovelIsCompleted
+      ? [EXCLUSIVE_MULTI_ALL_ID]
+      : sanitizeNovelGenreGroups(legacyNovelSelection.genreGroups, DEFAULT_NOVEL_GENRE_GROUPS);
 
     return {
       filters: {
@@ -858,8 +849,8 @@ const UIState = {
           UI_STATE_DEFAULTS.filters.status,
         ),
         day: sanitizeWebtoonDays(savedDay, DEFAULT_WEBTOON_DAYS),
-        novelGenreGroup: legacyNovelSelection.genreGroups,
-        novelGenreGroups: legacyNovelSelection.genreGroups,
+        novelGenreGroup: nextNovelGenreGroups,
+        novelGenreGroups: nextNovelGenreGroups,
         novelIsCompleted: nextNovelIsCompleted,
       },
     };
@@ -874,15 +865,19 @@ const UIState = {
       STATE.filters?.novel?.genreGroups,
       DEFAULT_NOVEL_GENRE_GROUPS,
     );
+    const novelIsCompleted = coerceBooleanFilter(
+      STATE.filters?.novel?.isCompleted,
+      DEFAULT_NOVEL_IS_COMPLETED,
+    );
+    const normalizedNovelGenreGroups = novelIsCompleted
+      ? [EXCLUSIVE_MULTI_ALL_ID]
+      : novelGenreGroups;
     const snapshot = {
       filters: {
         sources: sanitizeSourcesArray(tabFilters.sources, allowedSources),
-        novelGenreGroup: novelGenreGroups,
-        novelGenreGroups,
-        novelIsCompleted: coerceBooleanFilter(
-          STATE.filters?.novel?.isCompleted,
-          DEFAULT_NOVEL_IS_COMPLETED,
-        ),
+        novelGenreGroup: normalizedNovelGenreGroups,
+        novelGenreGroups: normalizedNovelGenreGroups,
+        novelIsCompleted: novelIsCompleted,
       },
     };
 
@@ -932,13 +927,16 @@ const UIState = {
         incoming.novelIsCompleted ?? incoming.isCompleted,
         DEFAULT_NOVEL_IS_COMPLETED,
       );
+      const nextGenreGroupsCanonical = nextIsCompleted
+        ? [EXCLUSIVE_MULTI_ALL_ID]
+        : nextGenreGroups;
 
       changed =
         changed ||
-        !areStringArraysEqual(current.genreGroups, nextGenreGroups) ||
+        !areStringArraysEqual(current.genreGroups, nextGenreGroupsCanonical) ||
         current.isCompleted !== nextIsCompleted;
 
-      STATE.filters[tabId].genreGroups = nextGenreGroups;
+      STATE.filters[tabId].genreGroups = nextGenreGroupsCanonical;
       STATE.filters[tabId].isCompleted = nextIsCompleted;
     } else {
       const nextStatus = sanitizeFilterValue(
@@ -970,7 +968,7 @@ const UIState = {
     }
 
     if (STATE.filters?.novel) {
-      STATE.filters.novel.genreGroups = sanitizeNovelGenreGroups(
+      const normalizedNovelGenreGroups = sanitizeNovelGenreGroups(
         incoming.novelGenreGroups ??
           incoming.novelGenreGroup ??
           incoming.genreGroups ??
@@ -978,10 +976,14 @@ const UIState = {
           STATE.filters.novel.genreGroups,
         DEFAULT_NOVEL_GENRE_GROUPS,
       );
-      STATE.filters.novel.isCompleted = coerceBooleanFilter(
+      const normalizedNovelIsCompleted = coerceBooleanFilter(
         incoming.novelIsCompleted ?? incoming.isCompleted ?? STATE.filters.novel.isCompleted,
         DEFAULT_NOVEL_IS_COMPLETED,
       );
+      STATE.filters.novel.genreGroups = normalizedNovelIsCompleted
+        ? [EXCLUSIVE_MULTI_ALL_ID]
+        : normalizedNovelGenreGroups;
+      STATE.filters.novel.isCompleted = normalizedNovelIsCompleted;
     }
 
     if (rerender) {
@@ -4674,12 +4676,19 @@ function renderL2Filters(tabId) {
   let activeSet = new Set();
   if (tabId === 'webtoon') activeSet = new Set(getSelectedWebtoonDays());
   if (tabId === 'novel') {
-    const selectedNovelGenres = sanitizeNovelGenreGroups(
-      STATE.filters?.novel?.genreGroups,
-      DEFAULT_NOVEL_GENRE_GROUPS,
+    const isCompleted = coerceBooleanFilter(
+      STATE.filters?.novel?.isCompleted,
+      DEFAULT_NOVEL_IS_COMPLETED,
     );
-    activeSet = new Set(selectedNovelGenres);
-    if (STATE.filters?.novel?.isCompleted) activeSet.add('completed');
+    if (isCompleted) {
+      activeSet = new Set(['completed']);
+    } else {
+      const selectedNovelGenres = sanitizeNovelGenreGroups(
+        STATE.filters?.novel?.genreGroups,
+        DEFAULT_NOVEL_GENRE_GROUPS,
+      );
+      activeSet = new Set(selectedNovelGenres);
+    }
   }
   if (tabId === 'ott') {
     activeSet = new Set(sanitizeOttGenres(STATE.filters?.ott?.genres, DEFAULT_OTT_GENRES));
@@ -4697,8 +4706,10 @@ function renderL2Filters(tabId) {
       }
       if (tabId === 'novel') {
         if (item.id === 'completed') {
-          STATE.filters[tabId].isCompleted = !Boolean(STATE.filters?.[tabId]?.isCompleted);
+          STATE.filters[tabId].isCompleted = true;
+          STATE.filters[tabId].genreGroups = [EXCLUSIVE_MULTI_ALL_ID];
         } else {
+          STATE.filters[tabId].isCompleted = false;
           STATE.filters[tabId].genreGroups = toggleExclusiveMultiSelect(
             item.id,
             STATE.filters?.[tabId]?.genreGroups,
@@ -5390,12 +5401,16 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           STATE.filters?.novel?.genreGroups,
           DEFAULT_NOVEL_GENRE_GROUPS,
         );
+        const isNovelCompleted = coerceBooleanFilter(
+          STATE.filters?.novel?.isCompleted,
+          DEFAULT_NOVEL_IS_COMPLETED,
+        );
         const query = {
-          genre_group: selectedGenreGroups.includes(EXCLUSIVE_MULTI_ALL_ID)
+          genre_group: isNovelCompleted || selectedGenreGroups.includes(EXCLUSIVE_MULTI_ALL_ID)
             ? EXCLUSIVE_MULTI_ALL_ID
             : selectedGenreGroups.join(','),
         };
-        if (coerceBooleanFilter(STATE.filters?.novel?.isCompleted, DEFAULT_NOVEL_IS_COMPLETED)) {
+        if (isNovelCompleted) {
           query.is_completed = 'true';
         }
 
