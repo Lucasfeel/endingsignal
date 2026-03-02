@@ -2,75 +2,23 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from crawlers.ridi_novel_crawler import RidiNovelCrawler
 
 
-def test_webnovel_listing_prefers_api_when_api_returns_data(monkeypatch):
+def test_webnovel_listing_routes_to_next_data_endpoint(monkeypatch):
     crawler = RidiNovelCrawler()
-    next_data_called = {"value": False}
+    captured = {}
 
-    async def fake_api_listing(_session, *, root_key, category_id, completed_only):
-        assert root_key == "webnovel_romance"
-        assert category_id == 1650
-        assert completed_only is False
+    async def fake_next_data_listing(_session, *, endpoint, completed_only):
+        captured["key"] = endpoint.key
+        captured["category_id"] = endpoint.category_id
+        captured["completed_only"] = completed_only
         return (
-            {"cid-1": {"content_id": "cid-1", "title": "API Title"}},
-            {
-                "strategy": "api",
-                "unique_contents": 1,
-                "errors": [],
-                "stopped_reason": "no_next_page",
-            },
-        )
-
-    async def fake_next_data_listing(*_args, **_kwargs):
-        next_data_called["value"] = True
-        return {}, {"strategy": "next_data", "unique_contents": 0, "errors": [], "stopped_reason": "empty_page"}
-
-    monkeypatch.setattr(crawler, "_fetch_api_category_listing", fake_api_listing)
-    monkeypatch.setattr(crawler, "_fetch_webnovel_listing_from_next_data", fake_next_data_listing)
-
-    entries, meta = asyncio.run(
-        crawler._fetch_webnovel_listing(
-            None,
-            root_key="webnovel_romance",
-            category_id=1650,
-            completed_only=False,
-        )
-    )
-
-    assert next_data_called["value"] is False
-    assert set(entries.keys()) == {"cid-1"}
-    assert meta["strategy"] == "api"
-
-
-def test_webnovel_listing_falls_back_to_next_data_on_api_empty_or_error(monkeypatch):
-    crawler = RidiNovelCrawler()
-    next_data_called = {"value": False}
-
-    async def fake_api_listing(_session, *, root_key, category_id, completed_only):
-        assert root_key == "webnovel_fantasy"
-        assert category_id == 1750
-        assert completed_only is True
-        return (
-            {},
-            {
-                "strategy": "api",
-                "unique_contents": 0,
-                "errors": ["API_TIMEOUT"],
-                "stopped_reason": "exception",
-            },
-        )
-
-    async def fake_next_data_listing(_session, *, root_key, category_id, completed_only):
-        next_data_called["value"] = True
-        assert root_key == "webnovel_fantasy"
-        assert category_id == 1750
-        assert completed_only is True
-        return (
-            {"cid-2": {"content_id": "cid-2", "title": "NextData Title"}},
+            {"cid-1": {"content_id": "cid-1", "title": "NextData Title"}},
             {
                 "strategy": "next_data",
                 "unique_contents": 1,
@@ -79,23 +27,34 @@ def test_webnovel_listing_falls_back_to_next_data_on_api_empty_or_error(monkeypa
             },
         )
 
-    monkeypatch.setattr(crawler, "_fetch_api_category_listing", fake_api_listing)
     monkeypatch.setattr(crawler, "_fetch_webnovel_listing_from_next_data", fake_next_data_listing)
 
     entries, meta = asyncio.run(
         crawler._fetch_webnovel_listing(
             None,
-            root_key="webnovel_fantasy",
-            category_id=1750,
-            completed_only=True,
+            root_key="romance",
+            category_id=1650,
+            completed_only=False,
         )
     )
 
-    assert next_data_called["value"] is True
-    assert set(entries.keys()) == {"cid-2"}
+    assert captured == {"key": "romance", "category_id": 1650, "completed_only": False}
+    assert set(entries.keys()) == {"cid-1"}
     assert meta["strategy"] == "next_data"
-    assert meta["fallback_from"] == "api"
-    assert meta["api_errors"] == ["API_TIMEOUT"]
+
+
+def test_webnovel_listing_raises_for_non_next_data_strategy():
+    crawler = RidiNovelCrawler()
+
+    with pytest.raises(ValueError, match="RIDI_ENDPOINT_STRATEGY_MISMATCH"):
+        asyncio.run(
+            crawler._fetch_webnovel_listing(
+                None,
+                root_key="light_novel",
+                category_id=3000,
+                completed_only=True,
+            )
+        )
 
 
 def test_fetch_all_data_marks_suspicious_empty_when_every_listing_is_empty(monkeypatch):
@@ -105,7 +64,7 @@ def test_fetch_all_data_marks_suspicious_empty_when_every_listing_is_empty(monke
         return (
             {},
             {
-                "strategy": "api",
+                "strategy": "next_data",
                 "root_key": root_key,
                 "category_id": category_id,
                 "completed_only": completed_only,
@@ -120,7 +79,7 @@ def test_fetch_all_data_marks_suspicious_empty_when_every_listing_is_empty(monke
             {},
             {
                 "strategy": "api",
-                "root_key": "lightnovel",
+                "root_key": "light_novel",
                 "category_id": crawler.LIGHTNOVEL_ROOT[1],
                 "completed_only": completed_only,
                 "unique_contents": 0,

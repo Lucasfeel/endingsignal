@@ -2,8 +2,9 @@ import copy
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
+from urllib.parse import parse_qsl, urljoin, urlparse
 
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -18,17 +19,118 @@ STATUS_FINISHED = "\uc644\uacb0"
 STATUS_ONGOING = "\uc5f0\uc7ac\uc911"
 
 
+@dataclass(frozen=True)
+class RidiEndpoint:
+    key: str
+    genre_key: str
+    category_id: int
+    strategy: str
+    start_url_all: str
+    start_url_completed: str
+    genre_tokens: Tuple[str, ...]
+
+
 class RidiNovelCrawler(ContentCrawler):
     DISPLAY_NAME = "RIDI Novel"
     RIDI_API_BASE = "https://api.ridibooks.com"
     RIDI_WEB_BASE = "https://ridibooks.com"
     RIDI_LIST_PATH = "/v2/category/books"
-    LIGHTNOVEL_ROOT = ("lightnovel", 3000)
-    WEBNOVEL_ROOTS = (
-        ("webnovel_romance", 1650),
-        ("webnovel_ropan", 6050),
-        ("webnovel_fantasy", 1750),
-        ("webnovel_bl", 4150),
+    NEXT_BUILD_ID_SEED = "456f5f4"
+
+    LIGHT_NOVEL_ALL_START_URL = (
+        "https://api.ridibooks.com/v2/category/books?category_id=3000&tab=books&limit=60"
+        "&platform=web&offset=0&order_by=popular"
+    )
+    LIGHT_NOVEL_COMPLETED_START_URL = (
+        "https://api.ridibooks.com/v2/category/books?category_id=3000&tab=books&limit=60"
+        "&platform=web&offset=0&order_by=popular&series_completed=1"
+    )
+    ROMANCE_ALL_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/1650.json?"
+        "tab=books&category=1650&page=1"
+    )
+    ROMANCE_COMPLETED_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/1650.json?"
+        "tab=books&category=1650&series_completed=y&page=1"
+    )
+    ROMANCE_FANTASY_ALL_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/6050.json?"
+        "tab=books&category=6050"
+    )
+    ROMANCE_FANTASY_COMPLETED_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/6050.json?"
+        "tab=books&category=6050&series_completed=y&page=1"
+    )
+    FANTASY_ALL_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/1750.json?"
+        "tab=books&category=1750"
+    )
+    FANTASY_COMPLETED_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/1750.json?"
+        "tab=books&category=1750&series_completed=y&page=1"
+    )
+    BL_ALL_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/4150.json?"
+        "page=1&tab=books&category=4150"
+    )
+    BL_COMPLETED_START_URL = (
+        "https://ridibooks.com/_next/data/456f5f4/category/books/4150.json?"
+        "page=1&tab=books&category=4150&series_completed=y"
+    )
+
+    ENDPOINT_REGISTRY: Tuple[RidiEndpoint, ...] = (
+        RidiEndpoint(
+            key="romance",
+            genre_key="romance",
+            category_id=1650,
+            strategy="next_data",
+            start_url_all=ROMANCE_ALL_START_URL,
+            start_url_completed=ROMANCE_COMPLETED_START_URL,
+            genre_tokens=("romance", "\ub85c\ub9e8\uc2a4"),
+        ),
+        RidiEndpoint(
+            key="romance_fantasy",
+            genre_key="romance_fantasy",
+            category_id=6050,
+            strategy="next_data",
+            start_url_all=ROMANCE_FANTASY_ALL_START_URL,
+            start_url_completed=ROMANCE_FANTASY_COMPLETED_START_URL,
+            genre_tokens=("romance_fantasy", "\ub85c\ud310", "\ub85c\ub9e8\uc2a4\ud310\ud0c0\uc9c0"),
+        ),
+        RidiEndpoint(
+            key="fantasy",
+            genre_key="fantasy",
+            category_id=1750,
+            strategy="next_data",
+            start_url_all=FANTASY_ALL_START_URL,
+            start_url_completed=FANTASY_COMPLETED_START_URL,
+            genre_tokens=("fantasy", "\ud310\ud0c0\uc9c0"),
+        ),
+        RidiEndpoint(
+            key="bl",
+            genre_key="bl",
+            category_id=4150,
+            strategy="next_data",
+            start_url_all=BL_ALL_START_URL,
+            start_url_completed=BL_COMPLETED_START_URL,
+            genre_tokens=("bl", "BL", "\ube44\uc5d8"),
+        ),
+        RidiEndpoint(
+            key="light_novel",
+            genre_key="light_novel",
+            category_id=3000,
+            strategy="api_v2",
+            start_url_all=LIGHT_NOVEL_ALL_START_URL,
+            start_url_completed=LIGHT_NOVEL_COMPLETED_START_URL,
+            genre_tokens=("light_novel", "lightnovel", "\ub77c\uc774\ud2b8\ub178\ubca8", "\ub77c\ub178\ubca8"),
+        ),
+    )
+    ENDPOINT_BY_KEY = {endpoint.key: endpoint for endpoint in ENDPOINT_REGISTRY}
+    LIGHTNOVEL_ROOT = ("light_novel", 3000)
+    WEBNOVEL_ROOTS = tuple(
+        (endpoint.key, endpoint.category_id)
+        for endpoint in ENDPOINT_REGISTRY
+        if endpoint.strategy == "next_data"
     )
     WRITER_ROLE_PRIORITY = ("author", "story_writer", "original_author")
     BUILD_ID_JSON_RE = re.compile(r'"buildId"\s*:\s*"([^"]+)"')
@@ -48,7 +150,22 @@ class RidiNovelCrawler(ContentCrawler):
 
     def __init__(self):
         super().__init__("ridi")
-        self._next_build_id: Optional[str] = None
+        self._next_build_id: Optional[str] = self.NEXT_BUILD_ID_SEED
+
+    @classmethod
+    def _iter_endpoints(cls) -> Tuple[RidiEndpoint, ...]:
+        return cls.ENDPOINT_REGISTRY
+
+    @classmethod
+    def _get_endpoint(cls, key: str) -> RidiEndpoint:
+        endpoint = cls.ENDPOINT_BY_KEY.get(str(key))
+        if endpoint is None:
+            raise KeyError(f"RIDI_ENDPOINT_NOT_FOUND:{key}")
+        return endpoint
+
+    @staticmethod
+    def _endpoint_start_url(endpoint: RidiEndpoint, completed_only: bool) -> str:
+        return endpoint.start_url_completed if completed_only else endpoint.start_url_all
 
     def _build_headers(self) -> Dict[str, str]:
         return {
@@ -387,6 +504,8 @@ class RidiNovelCrawler(ContentCrawler):
         item: Dict[str, Any],
         *,
         root_key: Optional[str] = None,
+        genre_group: Optional[str] = None,
+        genre_tokens: Optional[Tuple[str, ...]] = None,
         force_completed: bool = False,
     ) -> Optional[Dict[str, Any]]:
         if not isinstance(item, dict):
@@ -429,6 +548,8 @@ class RidiNovelCrawler(ContentCrawler):
         authors, primary_authors = self._extract_authors(book.get("authors"))
         thumbnail_url = self._extract_thumbnail_url(book)
         genres, category_names, categories = self._extract_categories(book.get("categories"))
+        deterministic_genres = [self._sanitize_text(token) for token in (genre_tokens or ()) if self._sanitize_text(token)]
+        genres = self._merge_unique_strings(deterministic_genres, genres)
 
         parsed = {
             "content_id": content_id,
@@ -443,6 +564,8 @@ class RidiNovelCrawler(ContentCrawler):
             "categories": categories,
             "crawl_roots": [root_key] if root_key else [],
         }
+        if genre_group:
+            parsed["genre_group"] = self._sanitize_text(genre_group).lower()
         if serial_id:
             parsed["serial_id"] = serial_id
         if book_id:
@@ -489,6 +612,8 @@ class RidiNovelCrawler(ContentCrawler):
         for key in ("title", "content_url", "thumbnail_url", "serial_id", "book_id"):
             if (not merged.get(key)) and incoming.get(key):
                 merged[key] = incoming[key]
+        if (not merged.get("genre_group")) and incoming.get("genre_group"):
+            merged["genre_group"] = incoming["genre_group"]
 
         merged["authors"] = self._merge_unique_strings(merged.get("authors"), incoming.get("authors"))
         merged["primary_authors"] = self._merge_unique_strings(
@@ -715,54 +840,58 @@ class RidiNovelCrawler(ContentCrawler):
             return self._next_build_id
         return await self._discover_next_build_id(category_id, session=session)
 
-    def _build_lightnovel_start_url(self, completed_only: bool) -> str:
-        return self._build_api_start_url(
-            category_id=self.LIGHTNOVEL_ROOT[1],
-            completed_only=completed_only,
-        )
+    @staticmethod
+    def _replace_next_data_build_id(url: str, build_id: str) -> str:
+        normalized = re.sub(r"[^0-9A-Za-z_-]", "", str(build_id or "").strip())
+        if not normalized:
+            return url
+        return re.sub(r"(/_next/data/)([^/]+)(/)", rf"\g<1>{normalized}\3", url, count=1)
 
-    def _build_api_start_url(self, category_id: int, completed_only: bool) -> str:
-        params = {
-            "category_id": int(category_id),
-            "tab": "books",
-            "limit": int(config.RIDI_LIMIT),
-            "platform": str(config.RIDI_PLATFORM),
-            "offset": 0,
-            "order_by": str(config.RIDI_ORDER_BY),
-        }
-        if completed_only:
-            params["series_completed"] = 1
-        return f"{self.RIDI_API_BASE}{self.RIDI_LIST_PATH}?{urlencode(params)}"
+    @staticmethod
+    def _set_query_param_preserving_order(url: str, key: str, value: object) -> str:
+        parsed = urlparse(url)
+        raw_query = parsed.query
+        pair = f"{key}={value}"
+        pattern = re.compile(rf"(^|&){re.escape(key)}=[^&]*")
+        if pattern.search(raw_query):
+            updated_query = pattern.sub(lambda m: f"{m.group(1)}{pair}", raw_query, count=1)
+        elif raw_query:
+            updated_query = f"{raw_query}&{pair}"
+        else:
+            updated_query = pair
+        return parsed._replace(query=updated_query).geturl()
+
+    def _build_api_start_url(self, endpoint: RidiEndpoint, completed_only: bool) -> str:
+        return self._endpoint_start_url(endpoint, completed_only)
 
     def _build_webnovel_next_data_url(
         self,
-        build_id: str,
-        category_id: int,
+        endpoint: RidiEndpoint,
         page: int,
         *,
         completed_only: bool,
+        build_id_override: Optional[str] = None,
     ) -> str:
-        params = {"tab": "books", "category": category_id, "page": page}
-        if completed_only:
-            params["series_completed"] = "y"
-        return (
-            f"{self.RIDI_WEB_BASE}/_next/data/{build_id}/category/books/{category_id}.json?"
-            f"{urlencode(params)}"
-        )
+        template_url = self._endpoint_start_url(endpoint, completed_only)
+        url = template_url
+        if build_id_override:
+            url = self._replace_next_data_build_id(url, build_id_override)
+        if page <= 1:
+            return url
+        return self._set_query_param_preserving_order(url, "page", page)
 
     async def _fetch_api_category_listing(
         self,
         session: aiohttp.ClientSession,
         *,
-        root_key: str,
-        category_id: int,
+        endpoint: RidiEndpoint,
         completed_only: bool,
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
         entries_by_id: Dict[str, Dict[str, Any]] = {}
         meta = {
             "strategy": "api",
-            "root_key": root_key,
-            "category_id": int(category_id),
+            "root_key": endpoint.key,
+            "category_id": int(endpoint.category_id),
             "completed_only": bool(completed_only),
             "pages_fetched": 0,
             "items_seen": 0,
@@ -773,7 +902,7 @@ class RidiNovelCrawler(ContentCrawler):
             "stopped_reason": None,
         }
 
-        url = self._build_api_start_url(category_id=category_id, completed_only=completed_only)
+        url = self._build_api_start_url(endpoint=endpoint, completed_only=completed_only)
         visited_urls: Set[str] = set()
         max_pages = self._max_pages_per_category()
         while url:
@@ -806,7 +935,9 @@ class RidiNovelCrawler(ContentCrawler):
             for item in items:
                 parsed = self._parse_item(
                     item,
-                    root_key=root_key,
+                    root_key=endpoint.key,
+                    genre_group=endpoint.genre_key,
+                    genre_tokens=endpoint.genre_tokens,
                     force_completed=completed_only,
                 )
                 if not parsed:
@@ -817,7 +948,7 @@ class RidiNovelCrawler(ContentCrawler):
                 entries_by_id[cid] = self._merge_entries(entries_by_id.get(cid), parsed)
 
             self._log_api_page_progress(
-                root_key=root_key,
+                root_key=endpoint.key,
                 completed_only=completed_only,
                 page_number=meta["pages_fetched"],
                 request_url=url,
@@ -843,31 +974,38 @@ class RidiNovelCrawler(ContentCrawler):
     async def _fetch_webnovel_page_items(
         self,
         session: aiohttp.ClientSession,
-        category_id: int,
+        endpoint: RidiEndpoint,
         page: int,
         *,
         completed_only: bool,
         allow_refresh_retry: bool = True,
+        build_id_override: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], bool]:
-        build_id = await self._get_next_build_id(session, category_id)
+        if build_id_override is None and page > 1:
+            build_id_override = await self._get_next_build_id(session, endpoint.category_id)
         url = self._build_webnovel_next_data_url(
-            build_id,
-            category_id,
+            endpoint,
             page,
             completed_only=completed_only,
+            build_id_override=build_id_override,
         )
         try:
             payload = await self._fetch_json(session, url, phase="next")
         except aiohttp.ClientResponseError as exc:
             self._annotate_request_exception(exc, url=url, phase="next", status=exc.status)
             if exc.status == 404 and allow_refresh_retry:
-                await self._get_next_build_id(session, category_id, force_refresh=True)
+                refreshed_build_id = await self._get_next_build_id(
+                    session,
+                    endpoint.category_id,
+                    force_refresh=True,
+                )
                 return await self._fetch_webnovel_page_items(
                     session,
-                    category_id,
+                    endpoint,
                     page,
                     completed_only=completed_only,
                     allow_refresh_retry=False,
+                    build_id_override=refreshed_build_id,
                 )
             raise
         except Exception as exc:
@@ -876,13 +1014,18 @@ class RidiNovelCrawler(ContentCrawler):
 
         items, structure_found = self._extract_next_data_items(payload)
         if not structure_found and allow_refresh_retry:
-            await self._get_next_build_id(session, category_id, force_refresh=True)
+            refreshed_build_id = await self._get_next_build_id(
+                session,
+                endpoint.category_id,
+                force_refresh=True,
+            )
             return await self._fetch_webnovel_page_items(
                 session,
-                category_id,
+                endpoint,
                 page,
                 completed_only=completed_only,
                 allow_refresh_retry=False,
+                build_id_override=refreshed_build_id,
             )
         return items, structure_found
 
@@ -890,15 +1033,14 @@ class RidiNovelCrawler(ContentCrawler):
         self,
         session: aiohttp.ClientSession,
         *,
-        root_key: str,
-        category_id: int,
+        endpoint: RidiEndpoint,
         completed_only: bool,
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
         entries_by_id: Dict[str, Dict[str, Any]] = {}
         meta = {
             "strategy": "next_data",
-            "root_key": root_key,
-            "category_id": int(category_id),
+            "root_key": endpoint.key,
+            "category_id": int(endpoint.category_id),
             "completed_only": bool(completed_only),
             "pages_fetched": 0,
             "items_seen": 0,
@@ -917,19 +1059,19 @@ class RidiNovelCrawler(ContentCrawler):
             try:
                 items, structure_found = await self._fetch_webnovel_page_items(
                     session,
-                    category_id,
+                    endpoint,
                     page,
                     completed_only=completed_only,
                 )
             except Exception as exc:
                 meta["errors"].append(f"{type(exc).__name__}:{exc}")
                 request_url = self._sanitize_text(getattr(exc, "_ridi_request_url", ""))
-                if not request_url and self._next_build_id:
+                if not request_url:
                     request_url = self._build_webnovel_next_data_url(
-                        self._next_build_id,
-                        category_id,
+                        endpoint,
                         page,
                         completed_only=completed_only,
+                        build_id_override=self._next_build_id if page > 1 else None,
                     )
                 self._record_request_error(meta, phase="next", exc=exc, url=request_url or None)
                 meta["stopped_reason"] = "exception"
@@ -947,7 +1089,13 @@ class RidiNovelCrawler(ContentCrawler):
                 break
 
             for item in items:
-                parsed = self._parse_item(item, root_key=root_key, force_completed=completed_only)
+                parsed = self._parse_item(
+                    item,
+                    root_key=endpoint.key,
+                    genre_group=endpoint.genre_key,
+                    genre_tokens=endpoint.genre_tokens,
+                    force_completed=completed_only,
+                )
                 if not parsed:
                     continue
                 if parsed.get("completion_missing"):
@@ -957,7 +1105,7 @@ class RidiNovelCrawler(ContentCrawler):
 
             if self._should_log_page_progress(meta["pages_fetched"]):
                 print(
-                    f"[RIDI][NEXT] root={root_key} completed_only={completed_only} "
+                    f"[RIDI][NEXT] root={endpoint.key} completed_only={completed_only} "
                     f"page={page} items={len(items)} unique={len(entries_by_id)}",
                     flush=True,
                 )
@@ -978,48 +1126,18 @@ class RidiNovelCrawler(ContentCrawler):
         category_id: int,
         completed_only: bool,
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
-        api_entries, api_meta = await self._fetch_api_category_listing(
+        endpoint = self._get_endpoint(root_key)
+        if endpoint.category_id != int(category_id):
+            raise ValueError(
+                f"RIDI_ENDPOINT_CATEGORY_MISMATCH:{root_key}:{category_id}:{endpoint.category_id}"
+            )
+        if endpoint.strategy != "next_data":
+            raise ValueError(f"RIDI_ENDPOINT_STRATEGY_MISMATCH:{root_key}:{endpoint.strategy}")
+        return await self._fetch_webnovel_listing_from_next_data(
             session,
-            root_key=root_key,
-            category_id=category_id,
+            endpoint=endpoint,
             completed_only=completed_only,
         )
-        api_unique_contents = int(api_meta.get("unique_contents") or 0)
-        api_errors = list(api_meta.get("errors") or [])
-        api_stopped_reason = api_meta.get("stopped_reason")
-        should_fallback = (
-            api_unique_contents <= 0
-            or api_stopped_reason == "exception"
-            or bool(api_errors)
-        )
-        if not should_fallback:
-            return api_entries, api_meta
-
-        fallback_reasons = []
-        if api_unique_contents <= 0:
-            fallback_reasons.append("api_unique_contents=0")
-        if api_stopped_reason:
-            fallback_reasons.append(f"api_stopped_reason={api_stopped_reason}")
-        if api_errors:
-            fallback_reasons.append(f"api_error={self._short_message(api_errors[0], limit=140)}")
-        reason_text = ", ".join(fallback_reasons) if fallback_reasons else "unknown"
-        print(
-            f"[RIDI] API -> Next.js fallback triggered root={root_key} "
-            f"completed_only={completed_only} reason={reason_text}",
-            flush=True,
-        )
-
-        next_data_entries, next_data_meta = await self._fetch_webnovel_listing_from_next_data(
-            session,
-            root_key=root_key,
-            category_id=category_id,
-            completed_only=completed_only,
-        )
-        next_data_meta["api_errors"] = api_errors
-        next_data_meta["api_stopped_reason"] = api_stopped_reason
-        next_data_meta["api_unique_contents"] = api_unique_contents
-        next_data_meta["fallback_from"] = "api"
-        return next_data_entries, next_data_meta
 
     def _merge_discovered_entries(
         self,
@@ -1061,11 +1179,12 @@ class RidiNovelCrawler(ContentCrawler):
             "category_counts": {},
             "totals": {},
         }
-        webnovel_roots_label = ", ".join(f"{root}({category_id})" for root, category_id in self.WEBNOVEL_ROOTS)
-        lightnovel_root_label = f"{self.LIGHTNOVEL_ROOT[0]}({self.LIGHTNOVEL_ROOT[1]})"
+        endpoint_labels = ", ".join(
+            f"{endpoint.key}({endpoint.category_id}:{endpoint.strategy})"
+            for endpoint in self._iter_endpoints()
+        )
         print(
-            f"[RIDI] fetch_all_data start roots=[{webnovel_roots_label}, {lightnovel_root_label}] "
-            f"api_listing=enabled next_fallback=enabled",
+            f"[RIDI] fetch_all_data start endpoints=[{endpoint_labels}]",
             flush=True,
         )
 
@@ -1110,16 +1229,8 @@ class RidiNovelCrawler(ContentCrawler):
                                 entry,
                                 limit=self.REQUEST_ERROR_LIMIT,
                             )
-                    for api_error in meta.get("api_errors", []):
-                        fetch_meta["errors"].append(f"{root_key}:{label}:api:{api_error}")
                     if meta.get("stopped_reason") == "max_pages":
                         fetch_meta["health_warnings"].append(f"MAX_PAGES_REACHED:{root_key}:{label}")
-                    if meta.get("strategy") == "next_data" and meta.get("fallback_from") == "api":
-                        fetch_meta["health_warnings"].append(f"WEBNOVEL_API_FALLBACK:{root_key}:{label}")
-                        fetch_meta["health_notes"].append(
-                            f"WEBNOVEL_API_FALLBACK_USED:{root_key}:{label}:"
-                            f"api_stopped_reason={meta.get('api_stopped_reason')}"
-                        )
 
             light_root, light_category_id = self.LIGHTNOVEL_ROOT
             light_all_entries, light_all_meta = await self._fetch_lightnovel_listing(
@@ -1250,6 +1361,11 @@ class RidiNovelCrawler(ContentCrawler):
                 "categories": self._merge_categories(entry.get("categories"), []),
                 "crawl_roots": self._merge_unique_strings(entry.get("crawl_roots"), []),
             }
+            genre_group = self._sanitize_text(entry.get("genre_group")).lower()
+            if genre_group:
+                attributes["genre"] = genre_group
+            elif attributes["genres"]:
+                attributes["genre"] = str(attributes["genres"][0])
             if isinstance(entry.get("completion"), bool):
                 attributes["completion"] = entry["completion"]
             if entry.get("serial_id"):
@@ -1323,9 +1439,9 @@ class RidiNovelCrawler(ContentCrawler):
         *,
         completed_only: bool,
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+        endpoint = self._get_endpoint(self.LIGHTNOVEL_ROOT[0])
         return await self._fetch_api_category_listing(
             session,
-            root_key=self.LIGHTNOVEL_ROOT[0],
-            category_id=self.LIGHTNOVEL_ROOT[1],
+            endpoint=endpoint,
             completed_only=completed_only,
         )
