@@ -138,6 +138,7 @@ Dry runs:
 ```bash
 python scripts/backfill_novels_once.py --sources naver_series --max-pages 1 --dry-run
 python scripts/backfill_novels_once.py --sources kakao_page --max-items 20 --dry-run
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-seed-set webnoveldb --max-items 20 --dry-run
 ```
 
 Real run:
@@ -146,6 +147,7 @@ Real run:
 python scripts/backfill_novels_once.py --sources naver_series,kakao_page
 python scripts/backfill_novels_once.py --sources naver_series --reset-state
 python scripts/backfill_novels_once.py --sources naver_series --rewind-pages 20
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-seed-set webnoveldb --reset-state
 ```
 
 Notes:
@@ -161,3 +163,28 @@ Notes:
 - Optional cookie env for age-gated KakaoPage pages:
   - `KAKAOPAGE_COOKIE_HEADER`
   - `KAKAOPAGE_COOKIES_JSON`
+- KakaoPage seed modes:
+  - `--kakaopage-seed-set all` (default): existing discovery behavior.
+  - `--kakaopage-seed-set webnoveldb`: fixed six WebNovelDB genre seeds (ongoing/completed variants), no dynamic tab expansion.
+
+Manual validation checklist (KakaoPage WebNovelDB seed mode):
+
+```bash
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-seed-set webnoveldb --max-items 20 --dry-run
+```
+
+- Confirm dry-run samples include `title`, `authors`, `status`, `genres`, and canonical `content_url` (`https://page.kakao.com/content/<id>`).
+- Confirm dry-run logs/summary include per-seed stats (`discovered`, `parsed`, `skipped`, `errors`).
+
+```sql
+SELECT
+  content_id,
+  source,
+  status,
+  meta->'common'->>'content_url' AS content_url,
+  meta->'attributes'->'genres' AS genres,
+  meta->'attributes'->>'is_completed' AS is_completed
+FROM contents
+WHERE source='kakao_page' AND content_type='novel'
+LIMIT 20;
+```

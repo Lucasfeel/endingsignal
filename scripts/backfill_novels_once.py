@@ -60,7 +60,73 @@ NAVER_LIST_URL_COMPLETED = (
 )
 
 KAKAOPAGE_LIST_URL = f"{KAKAOPAGE_BASE_URL}{KAKAOPAGE_GENRE_ROOT_PATH}"
-KAKAOPAGE_CONTENT_URL_TEMPLATE = f"{KAKAOPAGE_BASE_URL}/content/{{content_id}}"
+KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE = f"{KAKAOPAGE_BASE_URL}/content/{{content_id}}"
+KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE = "https://page.kakao.com/content/{content_id}"
+
+KAKAOPAGE_SEED_SET_ALL = "all"
+KAKAOPAGE_SEED_SET_WEBNOVELDB = "webnoveldb"
+KAKAOPAGE_SEED_SET_CHOICES = (KAKAOPAGE_SEED_SET_ALL, KAKAOPAGE_SEED_SET_WEBNOVELDB)
+
+GENRE_FANTASY = "\ud310\ud0c0\uc9c0"
+GENRE_HYEONPAN = "\ud604\ud310"
+GENRE_ROMANCE = "\ub85c\ub9e8\uc2a4"
+GENRE_ROMANCE_FANTASY = "\ub85c\ud310"
+GENRE_WUXIA = "\ubb34\ud611"
+GENRE_BL = "BL"
+KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES = {
+    GENRE_FANTASY,
+    GENRE_HYEONPAN,
+    GENRE_ROMANCE,
+    GENRE_ROMANCE_FANTASY,
+    GENRE_WUXIA,
+    GENRE_BL,
+}
+KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID = {
+    "86": GENRE_FANTASY,
+    "120": GENRE_HYEONPAN,
+    "89": GENRE_ROMANCE,
+    "117": GENRE_ROMANCE_FANTASY,
+    "87": GENRE_WUXIA,
+    "123": GENRE_BL,
+}
+KAKAOPAGE_WEBNOVELDB_SEED_INPUTS = (
+    {"genre_id": "86", "completed": False, "url": "https://page.kakao.com/landing/genre/11/86"},
+    {
+        "genre_id": "86",
+        "completed": True,
+        "url": "https://page.kakao.com/landing/genre/11/86?is_complete=true",
+    },
+    {"genre_id": "120", "completed": False, "url": "https://page.kakao.com/landing/genre/11/120"},
+    {
+        "genre_id": "120",
+        "completed": True,
+        "url": "https://page.kakao.com/landing/genre/11/120?is_complete=true",
+    },
+    {"genre_id": "89", "completed": False, "url": "https://page.kakao.com/landing/genre/11/89"},
+    {
+        "genre_id": "89",
+        "completed": True,
+        "url": "https://page.kakao.com/landing/genre/11/89?is_complete=true",
+    },
+    {"genre_id": "117", "completed": False, "url": "https://page.kakao.com/landing/genre/11/117"},
+    {
+        "genre_id": "117",
+        "completed": True,
+        "url": "https://page.kakao.com/landing/genre/11/117?is_complete=true",
+    },
+    {"genre_id": "87", "completed": False, "url": "https://page.kakao.com/landing/genre/11/87"},
+    {
+        "genre_id": "87",
+        "completed": True,
+        "url": "https://page.kakao.com/landing/genre/11/87?is_complete=true",
+    },
+    {"genre_id": "123", "completed": False, "url": "https://page.kakao.com/landing/genre/11/123"},
+    {
+        "genre_id": "123",
+        "completed": True,
+        "url": "https://page.kakao.com/landing/genre/11/123?is_complete=true",
+    },
+)
 
 
 @dataclass
@@ -73,6 +139,7 @@ class SourceSummary:
     skipped_count: int = 0
     error_count: int = 0
     sample_records: List[Dict[str, Any]] = field(default_factory=list)
+    seed_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
 def _setup_logging(level: str) -> None:
@@ -235,9 +302,24 @@ async def _fetch_text_with_retry(
 
 def _normalize_kakao_discovered_entry(raw_entry: Any) -> Dict[str, Any]:
     if not isinstance(raw_entry, dict):
-        return {"genres": []}
+        return {"genres": [], "seed_completed": False}
+    raw_genres = raw_entry.get("genres")
+    if isinstance(raw_genres, list):
+        genres = dedupe_strings(raw_genres)
+    else:
+        genres = []
+    raw_seed_completed = raw_entry.get("seed_completed")
+    if isinstance(raw_seed_completed, bool):
+        seed_completed = raw_seed_completed
+    elif isinstance(raw_seed_completed, (int, float)):
+        seed_completed = bool(raw_seed_completed)
+    elif isinstance(raw_seed_completed, str):
+        seed_completed = raw_seed_completed.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    else:
+        seed_completed = False
     return {
-        "genres": dedupe_strings(raw_entry.get("genres", [])),
+        "genres": genres,
+        "seed_completed": seed_completed,
     }
 
 
@@ -315,6 +397,119 @@ def _build_kakao_tab_url(url: str) -> str:
     merged = dict(parse_qsl(parsed.query, keep_blank_values=True))
     merged.pop("is_complete", None)
     return urlunparse(parsed._replace(query=urlencode(merged)))
+
+
+def _normalize_kakao_seed_url_to_crawler_host(seed_url: str) -> str:
+    parsed_seed = urlparse(seed_url)
+    parsed_crawler = urlparse(KAKAOPAGE_BASE_URL)
+    return urlunparse(
+        parsed_seed._replace(
+            scheme=parsed_crawler.scheme,
+            netloc=parsed_crawler.netloc,
+        )
+    )
+
+
+def _build_kakaopage_content_urls(content_id: str) -> Dict[str, str]:
+    normalized_content_id = str(content_id or "").strip()
+    return {
+        "fetch_url": KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE.format(content_id=normalized_content_id),
+        "canonical_url": KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE.format(content_id=normalized_content_id),
+    }
+
+
+def _build_webnoveldb_kakao_seeds() -> List[Dict[str, Any]]:
+    seeds: List[Dict[str, Any]] = []
+    for item in KAKAOPAGE_WEBNOVELDB_SEED_INPUTS:
+        genre_id = str(item.get("genre_id") or "").strip()
+        canonical_genre = KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID.get(genre_id)
+        if not canonical_genre:
+            continue
+        input_url = str(item.get("url") or "").strip()
+        if not input_url:
+            continue
+        crawl_url = _normalize_kakao_seed_url_to_crawler_host(input_url)
+        seeds.append(
+            {
+                "url": crawl_url,
+                "name": canonical_genre,
+                "genres": [canonical_genre],
+                "seed_completed": bool(item.get("completed")),
+                "seed_stat_key": canonical_genre,
+            }
+        )
+    return seeds
+
+
+def _normalize_seed_stat_key(raw_value: Any) -> str:
+    if not isinstance(raw_value, str):
+        return ""
+    return raw_value.strip()
+
+
+def _init_seed_stats(summary: SourceSummary, seed_key: str) -> None:
+    normalized_seed_key = _normalize_seed_stat_key(seed_key)
+    if not normalized_seed_key:
+        return
+    summary.seed_stats.setdefault(
+        normalized_seed_key,
+        {"discovered": 0, "parsed": 0, "skipped": 0, "errors": 0},
+    )
+
+
+def _bump_seed_stats(summary: SourceSummary, seed_keys: List[str], field: str, delta: int = 1) -> None:
+    if delta <= 0:
+        return
+    for seed_key in dedupe_strings(seed_keys):
+        normalized_seed_key = _normalize_seed_stat_key(seed_key)
+        if not normalized_seed_key:
+            continue
+        _init_seed_stats(summary, normalized_seed_key)
+        summary.seed_stats[normalized_seed_key][field] += delta
+
+
+def _seed_stat_keys_from_discovered_entry(discovered_entry: Dict[str, Any]) -> List[str]:
+    genres = discovered_entry.get("genres", [])
+    if not isinstance(genres, list):
+        return []
+    return [
+        genre
+        for genre in dedupe_strings(genres)
+        if genre in KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES
+    ]
+
+
+def _filter_webnoveldb_discovered_map(raw_discovered_map: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw_discovered_map, dict):
+        return {}
+    filtered: Dict[str, Dict[str, Any]] = {}
+    for raw_content_id, raw_entry in raw_discovered_map.items():
+        content_id = str(raw_content_id or "").strip()
+        if not content_id:
+            continue
+        discovered_entry = _normalize_kakao_discovered_entry(raw_entry)
+        if not _seed_stat_keys_from_discovered_entry(discovered_entry):
+            continue
+        filtered[content_id] = discovered_entry
+    return filtered
+
+
+def _resolve_kakaopage_status(
+    *,
+    parsed_status: Any,
+    seed_completed: bool,
+    content_id: str,
+) -> str:
+    status = coerce_status(str(parsed_status or STATUS_ONGOING))
+    if seed_completed and status != BACKFILL_STATUS_COMPLETED:
+        LOGGER.warning(
+            "Kakao status override via seed_completed content_id=%s parsed_status=%s final_status=%s",
+            content_id,
+            status,
+            BACKFILL_STATUS_COMPLETED,
+        )
+        return BACKFILL_STATUS_COMPLETED
+    return status
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -534,6 +729,8 @@ async def _discover_kakaopage_ids(
     dry_run: bool,
     state_dir: Path,
     max_items: Optional[int],
+    seed_set: str,
+    summary: SourceSummary,
 ) -> None:
     discovered = state.setdefault("discovered", {})
     if not isinstance(discovered, dict):
@@ -553,8 +750,27 @@ async def _discover_kakaopage_ids(
 
     stagnant_threshold = int(os.getenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "4"))
     max_scrolls_per_tab = int(os.getenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "120"))
-    queue: List[Dict[str, str]] = [{"name": "all", "url": _build_kakao_tab_url(KAKAOPAGE_LIST_URL)}]
-    queued_urls = {queue[0]["url"]}
+    if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
+        queue: List[Dict[str, Any]] = _build_webnoveldb_kakao_seeds()
+    else:
+        queue = [
+            {
+                "name": "all",
+                "url": _build_kakao_tab_url(KAKAOPAGE_LIST_URL),
+                "genres": [],
+                "seed_completed": False,
+                "seed_stat_key": "",
+            }
+        ]
+
+    queued_urls = set()
+    for seed in queue:
+        url = str(seed.get("url") or "").strip()
+        if url:
+            queued_urls.add(url)
+        seed_stat_key = str(seed.get("seed_stat_key") or "").strip()
+        if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB and seed_stat_key:
+            _init_seed_stats(summary, seed_stat_key)
 
     while queue:
         if max_items is not None and len(discovered) >= max_items:
@@ -562,12 +778,23 @@ async def _discover_kakaopage_ids(
             break
 
         tab = queue.pop(0)
-        tab_url = tab["url"]
-        tab_name = tab["name"] or "all"
+        tab_url = str(tab.get("url") or "").strip()
+        tab_name = str(tab.get("name") or "all").strip() or "all"
+        tab_genres = dedupe_strings(tab.get("genres", []))
+        tab_seed_completed = bool(tab.get("seed_completed"))
+        tab_seed_stat_key = str(tab.get("seed_stat_key") or "").strip()
+        if not tab_url:
+            continue
         if tab_url in done_set:
             continue
 
-        LOGGER.info("Kakao discovery open tab=%s url=%s", tab_name, tab_url)
+        LOGGER.info(
+            "Kakao discovery open tab=%s genres=%s completed_seed=%s url=%s",
+            tab_name,
+            tab_genres,
+            tab_seed_completed,
+            tab_url,
+        )
         try:
             await page.goto(tab_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(1200)
@@ -589,19 +816,32 @@ async def _discover_kakaopage_ids(
 
             for content_id in ids:
                 entry = _normalize_kakao_discovered_entry(discovered.get(content_id))
-                if tab_name and tab_name != "all":
+                if tab_genres:
+                    entry["genres"] = dedupe_strings([*entry["genres"], *tab_genres])
+                elif tab_name and tab_name != "all":
                     entry["genres"] = dedupe_strings([*entry["genres"], tab_name])
+                if tab_seed_completed:
+                    entry["seed_completed"] = bool(entry.get("seed_completed")) or True
                 discovered[content_id] = entry
                 tab_discovered_ids.add(content_id)
 
             new_count = len(discovered) - previous_count
-            tab_links = extract_tab_links(html, base_url=KAKAOPAGE_BASE_URL)
-            for tab_link in tab_links:
-                candidate_url = _build_kakao_tab_url(tab_link["url"])
-                if candidate_url in queued_urls or candidate_url in done_set:
-                    continue
-                queued_urls.add(candidate_url)
-                queue.append({"name": tab_link.get("name") or "tab", "url": candidate_url})
+            if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
+                tab_links = extract_tab_links(html, base_url=KAKAOPAGE_BASE_URL)
+                for tab_link in tab_links:
+                    candidate_url = _build_kakao_tab_url(tab_link["url"])
+                    if candidate_url in queued_urls or candidate_url in done_set:
+                        continue
+                    queued_urls.add(candidate_url)
+                    queue.append(
+                        {
+                            "name": tab_link.get("name") or "tab",
+                            "url": candidate_url,
+                            "genres": [],
+                            "seed_completed": False,
+                            "seed_stat_key": "",
+                        }
+                    )
 
             if new_count <= 0:
                 stagnant_rounds += 1
@@ -635,6 +875,8 @@ async def _discover_kakaopage_ids(
                 diagnostics.get("title"),
                 diagnostics.get("text_snippet"),
             )
+        elif seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB and tab_seed_stat_key:
+            _bump_seed_stats(summary, [tab_seed_stat_key], "discovered", len(tab_discovered_ids))
 
         done_set.add(tab_url)
         state["tabs_done"] = sorted(done_set)
@@ -652,13 +894,19 @@ async def _fetch_kakao_detail_and_build_record(
     headers: Dict[str, str],
 ) -> Optional[Dict[str, Any]]:
     await asyncio.sleep(random.uniform(0.03, 0.15))
-    content_url = KAKAOPAGE_CONTENT_URL_TEMPLATE.format(content_id=content_id)
-    html = await _fetch_text_with_retry(session, content_url, headers=headers)
+    content_urls = _build_kakaopage_content_urls(content_id)
+    fetch_url = content_urls["fetch_url"]
+    canonical_content_url = content_urls["canonical_url"]
+    html = await _fetch_text_with_retry(session, fetch_url, headers=headers)
     parsed = parse_kakaopage_detail(
         html,
         fallback_genres=discovered_entry.get("genres", []),
     )
-    status = parsed.get("status") or STATUS_ONGOING
+    status = _resolve_kakaopage_status(
+        parsed_status=parsed.get("status"),
+        seed_completed=bool(discovered_entry.get("seed_completed")),
+        content_id=content_id,
+    )
     genres = merge_genres(parsed.get("genres"), discovered_entry.get("genres"))
 
     return {
@@ -667,7 +915,7 @@ async def _fetch_kakao_detail_and_build_record(
         "title": parsed.get("title"),
         "authors": parsed.get("authors", []),
         "status": status,
-        "content_url": content_url,
+        "content_url": canonical_content_url,
         "genres": genres,
     }
 
@@ -678,14 +926,29 @@ async def run_kakaopage_backfill(
     dry_run: bool,
     max_items: Optional[int],
     state_dir: Path,
+    seed_set: str,
     summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
     summary = summary or SourceSummary(source=SOURCE_KAKAOPAGE)
+    if seed_set not in KAKAOPAGE_SEED_SET_CHOICES:
+        LOGGER.warning("Unknown KakaoPage seed_set=%s; falling back to %s", seed_set, KAKAOPAGE_SEED_SET_ALL)
+        seed_set = KAKAOPAGE_SEED_SET_ALL
     state = _load_state(
         state_dir,
         SOURCE_KAKAOPAGE,
         default={"discovered": {}, "tabs_done": [], "detail_done": []},
     )
+    if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
+        pre_filtered_discovered = _filter_webnoveldb_discovered_map(state.get("discovered", {}))
+        dropped_count = len(state.get("discovered", {})) - len(pre_filtered_discovered)
+        if dropped_count > 0:
+            LOGGER.info(
+                "Kakao webnoveldb mode dropped non-seed discovered entries from state kept=%s dropped=%s",
+                len(pre_filtered_discovered),
+                dropped_count,
+            )
+            state["discovered"] = pre_filtered_discovered
+            _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
 
     try:
         from playwright.async_api import async_playwright
@@ -724,6 +987,8 @@ async def run_kakaopage_backfill(
                 dry_run=dry_run,
                 state_dir=state_dir,
                 max_items=max_items,
+                seed_set=seed_set,
+                summary=summary,
             )
         finally:
             await context.close()
@@ -732,6 +997,17 @@ async def run_kakaopage_backfill(
     discovered_map = state.get("discovered", {})
     if not isinstance(discovered_map, dict):
         discovered_map = {}
+    if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
+        for canonical_genre in sorted(KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES):
+            _init_seed_stats(summary, canonical_genre)
+            summary.seed_stats[canonical_genre]["discovered"] = 0
+        for raw_entry in discovered_map.values():
+            discovered_entry = _normalize_kakao_discovered_entry(raw_entry)
+            _bump_seed_stats(
+                summary,
+                _seed_stat_keys_from_discovered_entry(discovered_entry),
+                "discovered",
+            )
     if not discovered_map:
         LOGGER.warning(
             "Kakao discovery returned 0 ids from listing=%s. Verify page access, SSR HTML shape, and cookies.",
@@ -771,6 +1047,11 @@ async def run_kakaopage_backfill(
             entry = _normalize_kakao_discovered_entry(discovered_map.get(content_id))
             async with semaphore:
                 summary.fetched_count += 1
+                seed_stat_keys = (
+                    _seed_stat_keys_from_discovered_entry(entry)
+                    if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB
+                    else []
+                )
                 try:
                     record = await _fetch_kakao_detail_and_build_record(
                         session=session,
@@ -780,18 +1061,22 @@ async def run_kakaopage_backfill(
                     )
                 except Exception as exc:
                     summary.error_count += 1
+                    _bump_seed_stats(summary, seed_stat_keys, "errors")
                     LOGGER.error("Kakao detail fetch failed content_id=%s: %s", content_id, exc)
                     return
 
                 if not record:
                     summary.skipped_count += 1
+                    _bump_seed_stats(summary, seed_stat_keys, "skipped")
                     return
                 summary.parsed_count += 1
+                _bump_seed_stats(summary, seed_stat_keys, "parsed")
 
                 authors = record.get("authors") or []
                 if not authors:
                     skipped_missing_author += 1
                     summary.skipped_count += 1
+                    _bump_seed_stats(summary, seed_stat_keys, "skipped")
                     LOGGER.warning(
                         "Kakao skip missing author content_id=%s url=%s",
                         content_id,
@@ -801,6 +1086,7 @@ async def run_kakaopage_backfill(
 
                 accepted = upserter.add_raw(record)
                 if not accepted:
+                    _bump_seed_stats(summary, seed_stat_keys, "skipped")
                     LOGGER.debug("Kakao skipped invalid record content_id=%s", content_id)
                 if dry_run:
                     _record_sample(summary, record)
@@ -855,6 +1141,12 @@ def _make_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db-batch-size", type=int, default=500, help="Batch size for DB upsert commits.")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR).")
     parser.add_argument("--state-dir", default=".backfill_state/", help="State directory for resumable runs.")
+    parser.add_argument(
+        "--kakaopage-seed-set",
+        choices=KAKAOPAGE_SEED_SET_CHOICES,
+        default=KAKAOPAGE_SEED_SET_ALL,
+        help="KakaoPage discovery seed set. 'all' keeps existing tab crawling, 'webnoveldb' uses fixed WebNovelDB seeds.",
+    )
     parser.add_argument(
         "--reset-state",
         action="store_true",
@@ -916,6 +1208,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                             dry_run=args.dry_run,
                             max_items=remaining,
                             state_dir=state_dir,
+                            seed_set=args.kakaopage_seed_set,
                             summary=summary,
                         )
                     else:
@@ -960,6 +1253,14 @@ async def _async_main(args: argparse.Namespace) -> int:
             print(f"[{summary.source}] dry-run samples:")
             for sample in summary.sample_records:
                 print(json.dumps(sample, ensure_ascii=False))
+        if args.dry_run and summary.seed_stats:
+            print(f"[{summary.source}] dry-run seed stats:")
+            for seed_key in sorted(summary.seed_stats.keys()):
+                stat = summary.seed_stats[seed_key]
+                print(
+                    f"[{summary.source}][{seed_key}] discovered={stat.get('discovered', 0)} "
+                    f"parsed={stat.get('parsed', 0)} skipped={stat.get('skipped', 0)} errors={stat.get('errors', 0)}"
+                )
 
     print(
         f"[overall] fetched={overall.fetched_count} parsed={overall.parsed_count} "
