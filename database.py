@@ -23,6 +23,9 @@ DEFAULT_DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS = 1.0
 DEFAULT_DB_INIT_STALE_DDL_MAX_AGE_SECONDS = 300
 DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION = "cancel"
 DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE = 20000
+DEFAULT_DB_INIT_BACKFILL_MAX_BATCHES = 0
+DEFAULT_DB_INIT_BACKFILL_MAX_SECONDS = 0.0
+DEFAULT_DB_INIT_BACKFILL_PROGRESS_EVERY = 25
 DEFAULT_DB_INIT_STRICT_MAINTENANCE = False
 PG_TIMEOUT_LITERAL_PATTERN = re.compile(r"^\d+(?:ms|s|min|h|d)?$", re.IGNORECASE)
 
@@ -229,6 +232,21 @@ def _read_db_init_settings():
             "DB_INIT_BACKFILL_BATCH_SIZE",
             DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE,
             minimum=1,
+        ),
+        "backfill_max_batches": _read_int_env(
+            "DB_INIT_BACKFILL_MAX_BATCHES",
+            DEFAULT_DB_INIT_BACKFILL_MAX_BATCHES,
+            minimum=0,
+        ),
+        "backfill_max_seconds": _read_float_env(
+            "DB_INIT_BACKFILL_MAX_SECONDS",
+            DEFAULT_DB_INIT_BACKFILL_MAX_SECONDS,
+            minimum=0.0,
+        ),
+        "backfill_progress_every": _read_int_env(
+            "DB_INIT_BACKFILL_PROGRESS_EVERY",
+            DEFAULT_DB_INIT_BACKFILL_PROGRESS_EVERY,
+            minimum=0,
         ),
         "strict_maintenance": _read_bool_env(
             "DB_INIT_STRICT_MAINTENANCE",
@@ -1097,8 +1115,13 @@ def ensure_updated_at_trigger_with_retry(
 
 
 def run_contents_backfill_in_batches(conn, cursor, *, settings):
-    batch_size = settings["backfill_batch_size"]
-    strict_maintenance = settings["strict_maintenance"]
+    batch_size = int(settings.get("backfill_batch_size") or DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE)
+    strict_maintenance = bool(
+        settings.get("strict_maintenance", DEFAULT_DB_INIT_STRICT_MAINTENANCE)
+    )
+    max_batches = int(settings.get("backfill_max_batches") or 0)
+    max_seconds = float(settings.get("backfill_max_seconds") or 0.0)
+    progress_every = int(settings.get("backfill_progress_every") or 0)
     updates = [
         (
             "backfill contents.is_deleted",
@@ -1147,7 +1170,8 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
             WHERE ctid IN (
                 SELECT ctid
                 FROM contents
-                WHERE normalized_title IS NULL OR normalized_title = ''
+                WHERE (normalized_title IS NULL OR normalized_title = '')
+                  AND normalized_title IS DISTINCT FROM regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')
                 LIMIT %s
             )
             """,
@@ -1160,7 +1184,8 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
             WHERE ctid IN (
                 SELECT ctid
                 FROM contents
-                WHERE normalized_authors IS NULL OR normalized_authors = ''
+                WHERE (normalized_authors IS NULL OR normalized_authors = '')
+                  AND normalized_authors IS DISTINCT FROM regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')
                 LIMIT %s
             )
             """,
@@ -1169,12 +1194,55 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
 
     for label, batch_sql in updates:
         total_updated = 0
+        batches = 0
+        start_time = time.monotonic()
         while True:
+            if max_batches > 0 and batches >= max_batches:
+                message = (
+                    "WARN: [DB Setup] Contents backfill reached max-batches breaker "
+                    f"({label}, max_batches={max_batches}, total_updated={total_updated})."
+                )
+                if strict_maintenance:
+                    print(message, file=sys.stderr)
+                    raise RuntimeError(
+                        f"Contents backfill max-batches breaker reached for {label}."
+                    )
+                print(
+                    f"{message} Continuing because DB_INIT_STRICT_MAINTENANCE=false.",
+                    file=sys.stderr,
+                )
+                break
+
+            elapsed = time.monotonic() - start_time
+            if max_seconds > 0 and elapsed >= max_seconds:
+                message = (
+                    "WARN: [DB Setup] Contents backfill reached max-seconds breaker "
+                    f"({label}, max_seconds={max_seconds:g}, elapsed={elapsed:.2f}, "
+                    f"total_updated={total_updated})."
+                )
+                if strict_maintenance:
+                    print(message, file=sys.stderr)
+                    raise RuntimeError(
+                        f"Contents backfill max-seconds breaker reached for {label}."
+                    )
+                print(
+                    f"{message} Continuing because DB_INIT_STRICT_MAINTENANCE=false.",
+                    file=sys.stderr,
+                )
+                break
+
             try:
                 cursor.execute(batch_sql, (batch_size,))
                 updated = cursor.rowcount or 0
                 conn.commit()
+                batches += 1
                 total_updated += updated
+                if progress_every > 0 and batches % progress_every == 0 and updated > 0:
+                    print(
+                        "LOG: [DB Setup] Contents backfill progress "
+                        f"({label}, batches={batches}, last_updated={updated}, "
+                        f"total_updated={total_updated})."
+                    )
                 if updated == 0:
                     print(
                         "LOG: [DB Setup] Contents backfill complete "
