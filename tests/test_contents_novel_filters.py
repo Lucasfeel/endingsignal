@@ -99,6 +99,29 @@ def test_novel_genre_group_filters_fantasy_and_includes_hyeonpan(monkeypatch, cl
     assert "romance-1" not in ids
 
 
+def test_novel_genre_group_filters_hyeonpan_explicitly(monkeypatch, client):
+    rows = [
+        _row(
+            "hyeonpan-1",
+            meta={"attributes": {"genres": ["\uD604\uD310"]}},
+        ),
+        _row(
+            "fantasy-1",
+            meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
+        ),
+    ]
+    _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genre_group=hyeonpan")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"hyeonpan-1"}
+    assert payload["filters"]["genre_groups"] == ["HYEONPAN"]
+    assert payload["filters"]["genre_group"] == "HYEONPAN"
+
+
 def test_novel_genre_group_filters_light_novel(monkeypatch, client):
     rows = [
         _row(

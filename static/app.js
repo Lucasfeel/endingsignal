@@ -216,6 +216,7 @@ const DEFAULT_NOVEL_IS_COMPLETED = false;
 const NOVEL_GENRE_GROUP_OPTIONS = [
   { id: EXCLUSIVE_MULTI_ALL_ID, label: '\uC804\uCCB4' },
   { id: 'fantasy', label: '\uD310\uD0C0\uC9C0' },
+  { id: 'hyeonpan', label: '\uD604\uD310' },
   { id: 'romance', label: '\uB85C\uB9E8\uC2A4' },
   { id: 'romance_fantasy', label: '\uB85C\uD310' },
   { id: 'light_novel', label: '\uB77C\uC774\uD2B8\uB178\uBCA8' },
@@ -231,6 +232,8 @@ const OTT_GENRE_OPTIONS = [
   { id: 'anime', label: '\uC560\uB2C8\uBA54\uC774\uC158' },
   { id: 'variety', label: '\uC608\uB2A5' },
   { id: 'docu', label: '\uB2E4\uD050\uBA58\uD130\uB9AC' },
+  { id: 'etc', label: '\uAE30\uD0C0' },
+  { id: 'completed', label: '\uC644\uACB0' },
 ];
 const OTT_GENRE_IDS = OTT_GENRE_OPTIONS.map((item) => item.id);
 const DEFAULT_OTT_GENRES = [EXCLUSIVE_MULTI_ALL_ID];
@@ -4824,22 +4827,77 @@ const extractOttGenreTokens = (content) => {
   return Array.from(tokenSet);
 };
 
+const OTT_COMPLETED_FILTER_ID = 'completed';
+const OTT_ETC_FILTER_ID = 'etc';
+const OTT_PRIMARY_GENRE_ALIASES = {
+  drama: ['drama', 'k-drama', 'drama series', '\uB4DC\uB77C\uB9C8'],
+  anime: ['anime', 'animation', '\uC560\uB2C8', '\uC560\uB2C8\uBA54\uC774\uC158'],
+  variety: ['variety', '\uC608\uB2A5', 'reality'],
+  docu: ['docu', 'documentary', '\uB2E4\uD050', '\uB2E4\uD050\uBA58\uD130\uB9AC'],
+};
+const OTT_PRIMARY_GENRE_IDS = Object.keys(OTT_PRIMARY_GENRE_ALIASES);
+
+const matchesOttGenreAlias = (genreToken, aliasToken) => {
+  if (!genreToken || !aliasToken) return false;
+  return genreToken.includes(aliasToken) || aliasToken.includes(genreToken);
+};
+
+const matchesOttGenreId = (genreTokens, genreId) => {
+  const aliases = OTT_PRIMARY_GENRE_ALIASES[genreId] || [genreId];
+  return genreTokens.some((genreToken) => {
+    return aliases.some((aliasToken) => matchesOttGenreAlias(genreToken, aliasToken));
+  });
+};
+
 const filterOttItemsByGenres = (items, genreFilters) => {
   if (!Array.isArray(items)) return [];
   const selectedGenres = sanitizeOttGenres(genreFilters, DEFAULT_OTT_GENRES);
   if (!selectedGenres.length || selectedGenres.includes(EXCLUSIVE_MULTI_ALL_ID)) return items;
 
+  const requiresCompleted = selectedGenres.includes(OTT_COMPLETED_FILTER_ID);
+  const genreSelections = selectedGenres.filter((genreId) => genreId !== OTT_COMPLETED_FILTER_ID);
   let sawGenreMetadata = false;
   const filtered = items.filter((item) => {
+    if (requiresCompleted) {
+      const completedStatus =
+        item?.final_state?.final_status ||
+        item?.final_status ||
+        item?.status ||
+        '';
+      if (!isCompletedStatusToken(completedStatus)) {
+        return false;
+      }
+    }
+
+    if (!genreSelections.length) return true;
+
     const genres = extractOttGenreTokens(item);
-    if (!genres.length) return true;
+    if (!genres.length) {
+      return genreSelections.includes(OTT_ETC_FILTER_ID);
+    }
     sawGenreMetadata = true;
-    return genres.some((genre) => {
-      return selectedGenres.some((selected) => genre.includes(selected) || selected.includes(genre));
+
+    const hasKnownGenre = OTT_PRIMARY_GENRE_IDS.some((genreId) => matchesOttGenreId(genres, genreId));
+    return genreSelections.some((selected) => {
+      if (selected === OTT_ETC_FILTER_ID) {
+        return !hasKnownGenre;
+      }
+      return matchesOttGenreId(genres, selected);
     });
   });
 
-  return sawGenreMetadata ? filtered : items;
+  if (genreSelections.length === 0) {
+    return filtered;
+  }
+  return sawGenreMetadata ? filtered : items.filter((item) => {
+    if (!requiresCompleted) return true;
+    const completedStatus =
+      item?.final_state?.final_status ||
+      item?.final_status ||
+      item?.status ||
+      '';
+    return isCompletedStatusToken(completedStatus);
+  });
 };
 
 async function fetchHomeRecommendations({ limit = HOME_RECOMMENDATIONS_LIMIT, signal } = {}) {

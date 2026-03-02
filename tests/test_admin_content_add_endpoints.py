@@ -554,6 +554,193 @@ def test_create_admin_content_saves_author_name_in_meta(monkeypatch, client, aut
     assert meta["common"]["authors"] == "홍길동"
 
 
+def test_create_admin_content_saves_novel_l2_hyeonpan(monkeypatch, client, auth_headers):
+    class FakeUuid:
+        hex = "manuall2novelid"
+
+    monkeypatch.setattr(admin_view, "uuid4", lambda: FakeUuid())
+
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (31,),
+                "fetchall": [
+                    {
+                        "source_id": 31,
+                        "source_name": "리디",
+                        "type_id": 2,
+                        "type_name": "웹소설",
+                    }
+                ],
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("ridi", "novel", "현판 수동 등록"),
+                "fetchone": None,
+            },
+            {
+                "contains": "INSERT INTO contents",
+                "fetchone": {
+                    "content_id": "manual:manuall2novelid",
+                    "source": "ridi",
+                    "content_type": "novel",
+                    "title": "현판 수동 등록",
+                    "status": "연재중",
+                    "meta": {
+                        "manual_registration": {"source_id": 31, "l2_id": "hyeonpan"},
+                        "attributes": {"genres": ["현판"]},
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+        ],
+    )
+
+    response = client.post(
+        "/api/admin/contents",
+        json={
+            "title": "현판 수동 등록",
+            "typeId": 2,
+            "sourceId": 31,
+            "l2Id": "hyeonpan",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 201
+    assert payload["success"] is True
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 3
+
+    insert_params = cursor.executed[2]["params"]
+    assert insert_params[0] == "manual:manuall2novelid"
+    assert insert_params[1] == "ridi"
+    assert insert_params[2] == "novel"
+    assert insert_params[4] == "연재중"
+    meta = json.loads(insert_params[5])
+    assert meta["manual_registration"]["l2_id"] == "hyeonpan"
+    assert meta["manual_registration"]["l2_label"] == "현판"
+    assert meta["attributes"]["genres"] == ["현판"]
+
+
+def test_create_admin_content_sets_ott_completed_status_from_l2(monkeypatch, client, auth_headers):
+    class FakeUuid:
+        hex = "manuall2ottid"
+
+    monkeypatch.setattr(admin_view, "uuid4", lambda: FakeUuid())
+
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (41,),
+                "fetchall": [
+                    {
+                        "source_id": 41,
+                        "source_name": "넷플릭스",
+                        "type_id": 3,
+                        "type_name": "OTT",
+                    }
+                ],
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("netflix", "ott", "완결 OTT 수동 등록"),
+                "fetchone": None,
+            },
+            {
+                "contains": "INSERT INTO contents",
+                "fetchone": {
+                    "content_id": "manual:manuall2ottid",
+                    "source": "netflix",
+                    "content_type": "ott",
+                    "title": "완결 OTT 수동 등록",
+                    "status": "완결",
+                    "meta": {
+                        "manual_registration": {"source_id": 41, "l2_id": "completed"},
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+        ],
+    )
+
+    response = client.post(
+        "/api/admin/contents",
+        json={
+            "title": "완결 OTT 수동 등록",
+            "typeId": 3,
+            "sourceId": 41,
+            "l2Id": "completed",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 201
+    assert payload["success"] is True
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 3
+
+    insert_params = cursor.executed[2]["params"]
+    assert insert_params[0] == "manual:manuall2ottid"
+    assert insert_params[1] == "netflix"
+    assert insert_params[2] == "ott"
+    assert insert_params[4] == "완결"
+    meta = json.loads(insert_params[5])
+    assert meta["manual_registration"]["l2_id"] == "completed"
+    assert meta["manual_registration"]["l2_label"] == "완결"
+    assert "attributes" not in meta
+
+
+def test_create_admin_content_rejects_l2_type_mismatch(monkeypatch, client, auth_headers):
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (11,),
+                "fetchall": [
+                    {
+                        "source_id": 11,
+                        "source_name": "네이버웹툰",
+                        "type_id": 1,
+                        "type_name": "웹툰",
+                    }
+                ],
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/admin/contents",
+        json={
+            "title": "웹툰에 잘못된 L2",
+            "typeId": 1,
+            "sourceId": 11,
+            "l2Id": "hyeonpan",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 400
+    assert payload["error"]["code"] == "INVALID_L2_ID"
+    assert conn.committed is False
+    assert conn.rolled_back is False
+    assert cursor.step_index == 1
+
+
 def test_create_admin_content_rejects_source_type_mismatch(monkeypatch, client, auth_headers):
     conn, cursor = _patch_db(
         monkeypatch,

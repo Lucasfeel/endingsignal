@@ -176,6 +176,10 @@ GENRE_GROUP_MAPPING = {
         "modern fantasy",
         "urban fantasy",
     ],
+    "HYEONPAN": [
+        "\uD604\uD310",
+        "hyeonpan",
+    ],
     "ROMANCE": [
         "\uB85C\uB9E8\uC2A4",
         "romance",
@@ -209,6 +213,7 @@ GENRE_GROUP_MAPPING = {
 GENRE_GROUP_ALIASES = {
     "ALL": ("all", "\uC804\uCCB4"),
     "FANTASY": ("fantasy", "\uD310\uD0C0\uC9C0", "\uD604\uD310", "\uD604\uB300\uD310\uD0C0\uC9C0"),
+    "HYEONPAN": ("hyeonpan", "\uD604\uD310"),
     "ROMANCE": ("romance", "\uB85C\uB9E8\uC2A4"),
     "ROMANCE_FANTASY": (
         "romancefantasy",

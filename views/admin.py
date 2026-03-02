@@ -56,6 +56,51 @@ MANUAL_CONTENT_SOURCE_MAP = {
     '라프텔': 'laftel',
 }
 
+MANUAL_CONTENT_STATUS_ONGOING = '연재중'
+MANUAL_CONTENT_STATUS_COMPLETED = '완결'
+
+MANUAL_CONTENT_L2_OPTIONS = {
+    'webtoon': {
+        'mon': {'id': 'mon', 'label': '월', 'attributes': {'weekdays': ['mon']}},
+        'tue': {'id': 'tue', 'label': '화', 'attributes': {'weekdays': ['tue']}},
+        'wed': {'id': 'wed', 'label': '수', 'attributes': {'weekdays': ['wed']}},
+        'thu': {'id': 'thu', 'label': '목', 'attributes': {'weekdays': ['thu']}},
+        'fri': {'id': 'fri', 'label': '금', 'attributes': {'weekdays': ['fri']}},
+        'sat': {'id': 'sat', 'label': '토', 'attributes': {'weekdays': ['sat']}},
+        'sun': {'id': 'sun', 'label': '일', 'attributes': {'weekdays': ['sun']}},
+        'daily': {'id': 'daily', 'label': '매일', 'attributes': {'weekdays': ['daily']}},
+    },
+    'novel': {
+        'fantasy': {'id': 'fantasy', 'label': '판타지', 'attributes': {'genres': ['fantasy']}},
+        'hyeonpan': {'id': 'hyeonpan', 'label': '현판', 'attributes': {'genres': ['현판']}},
+        'romance': {'id': 'romance', 'label': '로맨스', 'attributes': {'genres': ['romance']}},
+        'romance_fantasy': {
+            'id': 'romance_fantasy',
+            'label': '로판',
+            'attributes': {'genres': ['romance_fantasy']},
+        },
+        'light_novel': {
+            'id': 'light_novel',
+            'label': '라이트노벨',
+            'attributes': {'genres': ['light_novel']},
+        },
+        'wuxia': {'id': 'wuxia', 'label': '무협', 'attributes': {'genres': ['wuxia']}},
+        'bl': {'id': 'bl', 'label': 'BL', 'attributes': {'genres': ['bl']}},
+    },
+    'ott': {
+        'drama': {'id': 'drama', 'label': '드라마', 'attributes': {'genres': ['drama']}},
+        'anime': {'id': 'anime', 'label': '애니메이션', 'attributes': {'genres': ['anime']}},
+        'variety': {'id': 'variety', 'label': '예능', 'attributes': {'genres': ['variety']}},
+        'docu': {'id': 'docu', 'label': '다큐멘터리', 'attributes': {'genres': ['docu']}},
+        'etc': {'id': 'etc', 'label': '기타', 'attributes': {'genres': ['etc']}},
+        'completed': {
+            'id': 'completed',
+            'label': '완결',
+            'status': MANUAL_CONTENT_STATUS_COMPLETED,
+        },
+    },
+}
+
 
 def _error_response(status_code: int, code: str, message: str):
     return jsonify({'success': False, 'error': {'code': code, 'message': message}}), status_code
@@ -305,6 +350,48 @@ def _parse_positive_int(value):
     return parsed if parsed > 0 else None
 
 
+def _normalize_l2_id(value):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    normalized = value.strip().lower()
+    return normalized if normalized else None
+
+
+def _resolve_manual_l2_option(content_type_value, l2_id):
+    if not content_type_value or not l2_id:
+        return None
+    type_options = MANUAL_CONTENT_L2_OPTIONS.get(content_type_value)
+    if not isinstance(type_options, dict):
+        return None
+    option = type_options.get(l2_id)
+    return option if isinstance(option, dict) else None
+
+
+def _copy_manual_l2_attributes(l2_option):
+    if not isinstance(l2_option, dict):
+        return None
+    raw_attributes = l2_option.get('attributes')
+    if not isinstance(raw_attributes, dict) or not raw_attributes:
+        return None
+    copied = {}
+    for key, value in raw_attributes.items():
+        if isinstance(value, list):
+            copied[key] = [entry for entry in value]
+        else:
+            copied[key] = value
+    return copied if copied else None
+
+
+def _resolve_manual_content_status(l2_option):
+    if isinstance(l2_option, dict):
+        status = l2_option.get('status')
+        if isinstance(status, str) and status.strip():
+            return status.strip()
+    return MANUAL_CONTENT_STATUS_ONGOING
+
+
 def _parse_source_ids_payload(data):
     parsed_source_ids = []
 
@@ -521,6 +608,12 @@ def create_admin_content():
     title = _normalize_input_text(data.get('title'))
     type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
     source_ids = _parse_source_ids_payload(data)
+    l2_input = data.get('l2Id')
+    if l2_input is None:
+        l2_input = data.get('l2_id')
+    if l2_input is None:
+        l2_input = data.get('l2')
+    l2_id = _normalize_l2_id(l2_input)
     author_name = _normalize_input_text(
         data.get('authorName') or data.get('author_name') or data.get('author')
     )
@@ -584,6 +677,10 @@ def create_admin_content():
             source_type_id = int(_get_row_value(first_source_row, 'type_id') or 0)
             type_name = _get_row_value(first_source_row, 'type_name')
             content_type_value = MANUAL_CONTENT_TYPE_MAP.get(type_name, type_name)
+            l2_option = _resolve_manual_l2_option(content_type_value, l2_id)
+            if l2_id and l2_option is None:
+                return _error_response(400, 'INVALID_L2_ID', 'l2Id does not belong to typeId')
+            manual_status_value = _resolve_manual_content_status(l2_option)
 
             normalized_sources = []
             seen_content_sources = set()
@@ -643,6 +740,12 @@ def create_admin_content():
                         'admin_id': g.current_user.get('id'),
                     }
                 }
+                if l2_option:
+                    manual_meta_payload['manual_registration']['l2_id'] = l2_option.get('id')
+                    manual_meta_payload['manual_registration']['l2_label'] = l2_option.get('label')
+                l2_attributes = _copy_manual_l2_attributes(l2_option)
+                if l2_attributes:
+                    manual_meta_payload['attributes'] = l2_attributes
                 if common_payload:
                     manual_meta_payload['common'] = common_payload
                 manual_meta = json.dumps(
@@ -670,7 +773,7 @@ def create_admin_content():
                         source_entry['value'],
                         content_type_value,
                         title,
-                        '연재중',
+                        manual_status_value,
                         manual_meta,
                         normalized_title_value,
                         normalized_authors_value,

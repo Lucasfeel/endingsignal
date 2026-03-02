@@ -164,11 +164,13 @@
       forms: {
         addContent: {
           selectedTypeId: '',
+          selectedL2Id: '',
           selectedSourceIds: [''],
           sourceErrors: [''],
         },
         manageCreate: {
           selectedTypeId: '',
+          selectedL2Id: '',
           selectedSourceIds: [''],
           sourceErrors: [''],
         },
@@ -360,6 +362,36 @@
     '디즈니 플러스': 'disney_plus',
     웨이브: 'wavve',
     라프텔: 'laftel',
+  };
+
+  const CONTENT_L2_OPTIONS_BY_TYPE = {
+    webtoon: [
+      { id: 'mon', label: '월' },
+      { id: 'tue', label: '화' },
+      { id: 'wed', label: '수' },
+      { id: 'thu', label: '목' },
+      { id: 'fri', label: '금' },
+      { id: 'sat', label: '토' },
+      { id: 'sun', label: '일' },
+      { id: 'daily', label: '매일' },
+    ],
+    novel: [
+      { id: 'fantasy', label: '판타지' },
+      { id: 'hyeonpan', label: '현판' },
+      { id: 'romance', label: '로맨스' },
+      { id: 'romance_fantasy', label: '로판' },
+      { id: 'light_novel', label: '라이트노벨' },
+      { id: 'wuxia', label: '무협' },
+      { id: 'bl', label: 'BL' },
+    ],
+    ott: [
+      { id: 'drama', label: '드라마' },
+      { id: 'anime', label: '애니메이션' },
+      { id: 'variety', label: '예능' },
+      { id: 'docu', label: '다큐멘터리' },
+      { id: 'etc', label: '기타' },
+      { id: 'completed', label: '완결' },
+    ],
   };
 
   const normalizeContentTypeValue = (value) => {
@@ -859,6 +891,7 @@
       authorInputId: 'addContentAuthor',
       urlInputId: 'addContentUrl',
       typeSelectId: 'addContentTypeSelect',
+      l2SelectId: 'addContentL2Select',
       sourcesContainerId: 'addContentSourcesContainer',
       addSourceRowBtnId: 'addContentAddSourceRowBtn',
       openTypeModalBtnId: 'addTypeOpenBtn',
@@ -873,6 +906,7 @@
       authorInputId: 'manageCreateContentAuthor',
       urlInputId: 'manageCreateContentUrl',
       typeSelectId: 'manageCreateContentTypeSelect',
+      l2SelectId: 'manageCreateContentL2Select',
       sourcesContainerId: 'manageCreateSourcesContainer',
       addSourceRowBtnId: 'manageCreateAddSourceRowBtn',
       openTypeModalBtnId: 'manageCreateTypeOpenBtn',
@@ -909,6 +943,14 @@
         (entry) => String(entry.id) === String(formState.selectedTypeId || ''),
       ) || null
     );
+  };
+
+  const getContentFormL2Options = (formKey) => {
+    const selectedType = getSelectedContentType(formKey);
+    const normalizedType = normalizeContentTypeValue(
+      selectedType?.name || selectedType?.value || '',
+    );
+    return CONTENT_L2_OPTIONS_BY_TYPE[normalizedType] || [];
   };
 
   const setContentFormSourceErrors = (formKey, errors = []) => {
@@ -1029,6 +1071,7 @@
     );
     if (!selectedTypeExists) {
       formState.selectedTypeId = '';
+      formState.selectedL2Id = '';
       formState.selectedSourceIds = [''];
       formState.sourceErrors = [''];
     }
@@ -1047,7 +1090,45 @@
     });
 
     typeSelect.value = formState.selectedTypeId ? String(formState.selectedTypeId) : '';
+    renderContentFormL2Options(formKey);
     renderContentFormSourceRows(formKey);
+  };
+
+  const renderContentFormL2Options = (formKey) => {
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState || !config.l2SelectId) return;
+
+    const l2Select = document.getElementById(config.l2SelectId);
+    if (!l2Select) return;
+
+    const hasType = !!String(formState.selectedTypeId || '');
+    const options = getContentFormL2Options(formKey);
+    const selectedL2Id = String(formState.selectedL2Id || '');
+    const selectedExists = options.some((entry) => entry.id === selectedL2Id);
+    if (!selectedExists) {
+      formState.selectedL2Id = '';
+    }
+
+    l2Select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = hasType
+      ? options.length
+        ? 'L2 선택 (선택)'
+        : '선택 가능한 L2 없음'
+      : '타입을 먼저 선택하세요';
+    l2Select.appendChild(placeholder);
+
+    options.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.id;
+      option.textContent = entry.label;
+      l2Select.appendChild(option);
+    });
+
+    l2Select.value = formState.selectedL2Id || '';
+    l2Select.disabled = !hasType || options.length === 0;
   };
 
   const renderAllContentForms = () => {
@@ -1094,6 +1175,7 @@
           const formState = getContentFormState(formKey);
           if (!formState) return;
           formState.selectedTypeId = selectedTypeId ? String(selectedTypeId) : '';
+          formState.selectedL2Id = '';
           formState.selectedSourceIds = [''];
           formState.sourceErrors = [''];
         });
@@ -1132,6 +1214,7 @@
     if (urlInput) urlInput.value = '';
 
     formState.selectedTypeId = '';
+    formState.selectedL2Id = '';
     formState.selectedSourceIds = [''];
     formState.sourceErrors = [''];
     renderContentFormTypeOptions(formKey);
@@ -1320,13 +1403,24 @@
     const typeSelect = document.getElementById(config.typeSelectId);
     const nextTypeId = typeSelect?.value || '';
     formState.selectedTypeId = nextTypeId;
+    formState.selectedL2Id = '';
     formState.selectedSourceIds = [''];
     formState.sourceErrors = [''];
+    renderContentFormL2Options(formKey);
     renderContentFormSourceRows(formKey);
 
     if (nextTypeId) {
       await loadContentSourcesByType(nextTypeId, { silent: true });
     }
+  };
+
+  const handleContentFormL2Change = (formKey) => {
+    const config = getContentFormConfig(formKey);
+    const formState = getContentFormState(formKey);
+    if (!config || !formState || !config.l2SelectId) return;
+
+    const l2Select = document.getElementById(config.l2SelectId);
+    formState.selectedL2Id = String(l2Select?.value || '').trim().toLowerCase();
   };
 
   const appendContentFormSourceRow = (formKey) => {
@@ -1426,6 +1520,10 @@
         }
         if (authorName) {
           requestBody.authorName = authorName;
+        }
+        const l2Id = String(formState.selectedL2Id || '').trim().toLowerCase();
+        if (l2Id) {
+          requestBody.l2Id = l2Id;
         }
 
         const payload = await apiRequest('POST', '/api/admin/contents', {
@@ -3417,6 +3515,7 @@
     const addContentForm = document.getElementById('addContentForm');
     const addContentResetBtn = document.getElementById('addContentResetBtn');
     const addContentTypeSelect = document.getElementById('addContentTypeSelect');
+    const addContentL2Select = document.getElementById('addContentL2Select');
     const addContentAddSourceRowBtn = document.getElementById('addContentAddSourceRowBtn');
     const addTypeOpenBtn = document.getElementById('addTypeOpenBtn');
     const addSourceOpenBtn = document.getElementById('addSourceOpenBtn');
@@ -3483,6 +3582,9 @@
     addContentResetBtn?.addEventListener('click', () => resetContentForm('addContent'));
     addContentTypeSelect?.addEventListener('change', () => {
       handleContentFormTypeChange('addContent');
+    });
+    addContentL2Select?.addEventListener('change', () => {
+      handleContentFormL2Change('addContent');
     });
     addContentAddSourceRowBtn?.addEventListener('click', () => appendContentFormSourceRow('addContent'));
     addTypeOpenBtn?.addEventListener('click', () => openAddTypeModal('addContent'));

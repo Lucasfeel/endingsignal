@@ -192,6 +192,36 @@ def test_novels_v2_genre_group_filtering_kept(monkeypatch, client):
     assert len(fake_cursor.executed) == 1
 
 
+def test_novels_v2_supports_hyeonpan_genre_group(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "hyeonpan-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            ),
+            _row(
+                "fantasy-1",
+                source="ridi",
+                content_type="novel",
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
+            ),
+        ]],
+    )
+
+    response = client.get("/api/contents/novels_v2?genre_group=hyeonpan&per_page=10")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"hyeonpan-1"}
+    assert payload["filters"]["genre_groups"] == ["HYEONPAN"]
+    assert payload["filters"]["genre_group"] == "HYEONPAN"
+    assert len(fake_cursor.executed) == 1
+
+
 def test_novels_v2_supports_comma_separated_multi_genres(monkeypatch, client):
     fake_cursor = _stub_db(
         monkeypatch,
