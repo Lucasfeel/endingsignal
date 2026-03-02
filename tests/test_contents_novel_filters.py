@@ -51,7 +51,7 @@ def test_genre_mapping_fantasy_includes_modern_fantasy_aliases():
     assert contents_view._normalize_genre_token("modern fantasy") in normalized
 
 
-def test_novel_endpoint_applies_completed_filter_only_when_true(monkeypatch, client):
+def test_novel_endpoint_applies_status_filter_for_completed_toggle(monkeypatch, client):
     cursor_true = _stub_db(monkeypatch, [])
     response_true = client.get("/api/contents/novels?is_completed=true")
     assert response_true.status_code == 200
@@ -62,8 +62,10 @@ def test_novel_endpoint_applies_completed_filter_only_when_true(monkeypatch, cli
     cursor_false = _stub_db(monkeypatch, [])
     response_false = client.get("/api/contents/novels?is_completed=false")
     assert response_false.status_code == 200
-    executed_query_false, _ = cursor_false.executed[0]
-    assert "status = %s" not in executed_query_false
+    executed_query_false, params_false = cursor_false.executed[0]
+    assert "status IN (%s, %s)" in executed_query_false
+    assert contents_view.STATUS_ONGOING in params_false
+    assert contents_view.STATUS_HIATUS in params_false
 
 
 def test_novel_endpoint_ignores_weekday_params(monkeypatch, client):

@@ -684,6 +684,9 @@ def get_novel_contents():
         if is_completed:
             where_clause += " AND status = %s"
             query_params.append(STATUS_COMPLETED)
+        else:
+            where_clause += " AND status IN (%s, %s)"
+            query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
         cursor.execute(
             f"""
@@ -947,6 +950,9 @@ def get_novel_contents_v2():
             if is_completed:
                 where_parts.append("status = %s")
                 query_params.append(STATUS_COMPLETED)
+            else:
+                where_parts.append("status IN (%s, %s)")
+                query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
             _append_source_filter(where_parts, query_params, source_filter)
             _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)

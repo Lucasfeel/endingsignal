@@ -113,6 +113,20 @@ def test_novels_v2_applies_completed_filter(monkeypatch, client):
     assert payload["filters"]["is_completed"] is True
 
 
+def test_novels_v2_excludes_completed_when_filter_is_false(monkeypatch, client):
+    fake_cursor = _stub_db(monkeypatch, [[]])
+
+    response = client.get("/api/contents/novels_v2?is_completed=false")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    query, params = fake_cursor.executed[0]
+    assert "status IN (%s, %s)" in query
+    assert contents_view.STATUS_ONGOING in params
+    assert contents_view.STATUS_HIATUS in params
+    assert payload["filters"]["is_completed"] is False
+
+
 def test_novels_v2_genre_group_filtering_kept(monkeypatch, client):
     fake_cursor = _stub_db(
         monkeypatch,
