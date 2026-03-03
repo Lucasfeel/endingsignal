@@ -33,6 +33,7 @@ def test_naver_wrapper_build_exec_argv_forces_naver_series_only():
 
 def test_kakao_wrapper_build_exec_argv_uses_default_seed_when_env_unset(monkeypatch):
     monkeypatch.delenv("KAKAOPAGE_SEED_SET", raising=False)
+    monkeypatch.delenv("KAKAOPAGE_BACKFILL_PHASE", raising=False)
 
     argv = kakao_only.build_exec_argv(["--dry-run"])
 
@@ -40,13 +41,24 @@ def test_kakao_wrapper_build_exec_argv_uses_default_seed_when_env_unset(monkeypa
     assert "--kakaopage-seed-set" in argv
     seed_idx = argv.index("--kakaopage-seed-set")
     assert argv[seed_idx + 1] == "webnoveldb"
+    assert "--kakaopage-phase" in argv
+    phase_idx = argv.index("--kakaopage-phase")
+    assert argv[phase_idx + 1] == "all"
     assert "--dry-run" in argv
 
 
 def test_kakao_wrapper_forwarded_seed_set_wins_over_default():
-    argv = kakao_only.build_exec_argv(["--kakaopage-seed-set", "all", "--dry-run"], seed_set="webnoveldb")
+    argv = kakao_only.build_exec_argv(
+        ["--kakaopage-seed-set", "all", "--kakaopage-phase", "detail", "--dry-run"],
+        seed_set="webnoveldb",
+        phase="all",
+    )
 
     indices = [idx for idx, token in enumerate(argv) if token == "--kakaopage-seed-set"]
     assert len(indices) == 2
     assert argv[indices[0] + 1] == "webnoveldb"
     assert argv[indices[-1] + 1] == "all"
+    phase_indices = [idx for idx, token in enumerate(argv) if token == "--kakaopage-phase"]
+    assert len(phase_indices) == 2
+    assert argv[phase_indices[0] + 1] == "all"
+    assert argv[phase_indices[-1] + 1] == "detail"

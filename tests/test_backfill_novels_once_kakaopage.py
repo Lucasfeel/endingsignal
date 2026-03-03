@@ -127,3 +127,65 @@ def test_trip_kakao_circuit_sets_stop_flag_for_blocked():
 
     assert tripped is True
     assert stop_event.is_set() is True
+
+
+def test_kakaopage_phase_default_resolved_from_env(monkeypatch):
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_PHASE", "detail")
+
+    parser = backfill._make_arg_parser()
+    args = parser.parse_args([])
+
+    assert args.kakaopage_phase == "detail"
+
+
+class _NoopUpserter:
+    def add_raw(self, _record):
+        return True
+
+
+def test_kakaopage_detail_phase_does_not_require_playwright_import(monkeypatch, tmp_path):
+    def _raise_if_called():
+        raise AssertionError("Playwright import should not be called for detail-only phase")
+
+    monkeypatch.setattr(backfill, "_load_playwright_async_api", _raise_if_called)
+
+    with pytest.raises(RuntimeError, match="No discovered IDs; run discovery phase first"):
+        asyncio.run(
+            backfill.run_kakaopage_backfill(
+                upserter=_NoopUpserter(),
+                dry_run=True,
+                max_items=5,
+                state_dir=tmp_path,
+                seed_set=backfill.KAKAOPAGE_SEED_SET_WEBNOVELDB,
+                phase=backfill.KAKAOPAGE_PHASE_DETAIL,
+                allow_low_memory_playwright=False,
+            )
+        )
+
+
+def test_kakaopage_low_memory_guard_blocks_discovery_before_playwright(monkeypatch, tmp_path):
+    monkeypatch.setattr(backfill, "read_memory_limit_bytes", lambda: 512 * 1024 * 1024)
+    monkeypatch.setattr(
+        backfill,
+        "get_memory_snapshot",
+        lambda: {"limit_bytes": 512 * 1024 * 1024, "usage_bytes": 128 * 1024 * 1024, "usage_ratio": 0.25},
+    )
+
+    def _raise_if_called():
+        raise AssertionError("Playwright import should not run when low-memory guard blocks discovery")
+
+    monkeypatch.setattr(backfill, "_load_playwright_async_api", _raise_if_called)
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_MIN_MEMORY_FOR_PLAYWRIGHT_MB", "1024")
+
+    with pytest.raises(RuntimeError, match="low-memory guard"):
+        asyncio.run(
+            backfill.run_kakaopage_backfill(
+                upserter=_NoopUpserter(),
+                dry_run=True,
+                max_items=5,
+                state_dir=tmp_path,
+                seed_set=backfill.KAKAOPAGE_SEED_SET_WEBNOVELDB,
+                phase=backfill.KAKAOPAGE_PHASE_DISCOVERY,
+                allow_low_memory_playwright=False,
+            )
+        )

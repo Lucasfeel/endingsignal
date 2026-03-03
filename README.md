@@ -133,6 +133,14 @@ docker run --rm -e DATABASE_URL=postgresql://... endingsignal-backfill:latest \
   python scripts/backfill_novels_once.py --sources kakao_page --reset-state
 ```
 
+Render memory note:
+- Running KakaoPage discovery (Playwright/Chromium) inside a low-memory web shell (for example `512MB`) can OOM-kill the service.
+- Prefer running KakaoPage discovery in a dedicated worker container (`Dockerfile.backfill`) or locally.
+- You can split phases:
+  - `--kakaopage-phase discovery` (Playwright discovery only)
+  - `--kakaopage-phase detail` (detail fetch/upsert only, no Playwright import/launch)
+  - `--kakaopage-phase all` (default: discovery + detail)
+
 Docker Compose split backfill services:
 
 ```bash
@@ -151,12 +159,23 @@ DATABASE_URL=postgresql://... docker compose --profile backfill run --rm backfil
 
 - Both compose backfill services mount `./.backfill_state` to `/app/.backfill_state` for resumable runs.
 
+Hybrid workflow example (cloud-friendly):
+
+```bash
+# 1) Discovery on a larger machine/worker
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-phase discovery --kakaopage-seed-set webnoveldb
+
+# 2) Detail phase on Render or another constrained environment
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-phase detail --kakaopage-seed-set webnoveldb
+```
+
 Dry runs:
 
 ```bash
 python scripts/backfill_novels_once.py --sources naver_series --max-pages 1 --dry-run
 python scripts/backfill_novels_once.py --sources kakao_page --max-items 20 --dry-run
 python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-seed-set webnoveldb --max-items 20 --dry-run
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-phase detail --kakaopage-seed-set webnoveldb --max-items 20 --dry-run
 ```
 
 Real run:
@@ -184,6 +203,15 @@ Notes:
 - KakaoPage seed modes:
   - `--kakaopage-seed-set all` (default): existing discovery behavior.
   - `--kakaopage-seed-set webnoveldb`: fixed six WebNovelDB genre seeds (ongoing/completed variants), no dynamic tab expansion.
+- KakaoPage phase controls:
+  - `--kakaopage-phase {all,discovery,detail}` (default from `KAKAOPAGE_BACKFILL_PHASE`, fallback `all`).
+  - `detail` phase never imports/launches Playwright and requires existing discovered IDs in state.
+- KakaoPage Playwright memory guard:
+  - `KAKAOPAGE_BACKFILL_MIN_MEMORY_FOR_PLAYWRIGHT_MB` (default: `1024`)
+  - `--kakaopage-allow-low-memory-playwright` (or env `KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT=1`) to override guard.
+- KakaoPage Playwright launch args:
+  - Default args: `--disable-dev-shm-usage --no-sandbox --disable-gpu`
+  - Override list via `KAKAOPAGE_BACKFILL_PLAYWRIGHT_ARGS_JSON` (JSON list; replaces defaults when valid)
 - KakaoPage polite crawling/backoff envs:
   - Detail worker concurrency:
     - `KAKAOPAGE_BACKFILL_DETAIL_CONCURRENCY` (default: `2`)

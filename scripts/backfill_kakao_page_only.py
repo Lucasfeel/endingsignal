@@ -32,9 +32,22 @@ def _seed_set_from_env() -> str:
     return seed_set
 
 
-def build_exec_argv(user_args: Sequence[str] | None = None, *, seed_set: str | None = None) -> List[str]:
+def _phase_from_env() -> str:
+    phase = (os.getenv("KAKAOPAGE_BACKFILL_PHASE") or "").strip().lower()
+    if not phase:
+        return "all"
+    return phase
+
+
+def build_exec_argv(
+    user_args: Sequence[str] | None = None,
+    *,
+    seed_set: str | None = None,
+    phase: str | None = None,
+) -> List[str]:
     forwarded_args = _strip_sources_args(list(user_args or []))
     resolved_seed_set = (seed_set or "").strip() or _seed_set_from_env()
+    resolved_phase = (phase or "").strip() or _phase_from_env()
     return [
         sys.executable,
         "scripts/backfill_novels_once.py",
@@ -42,6 +55,8 @@ def build_exec_argv(user_args: Sequence[str] | None = None, *, seed_set: str | N
         "kakao_page",
         "--kakaopage-seed-set",
         resolved_seed_set,
+        "--kakaopage-phase",
+        resolved_phase,
         *forwarded_args,
     ]
 

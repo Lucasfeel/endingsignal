@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import aiohttp
 from dotenv import load_dotenv
@@ -28,6 +28,7 @@ from services.kakaopage_parser import (
     KAKAOPAGE_GENRE_ROOT_PATH,
     extract_listing_content_ids,
     extract_tab_links,
+    parse_content_id_from_href,
     parse_kakaopage_detail,
 )
 from services.naver_series_parser import (
@@ -52,6 +53,7 @@ from utils.polite_http import (
     extract_html_diagnostics,
     fetch_text_polite,
 )
+from utils.cgroup_memory import get_memory_snapshot, read_memory_limit_bytes
 
 LOGGER = logging.getLogger("backfill_novels_once")
 
@@ -75,6 +77,10 @@ KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE = "https://page.kakao.com/content/{cont
 KAKAOPAGE_SEED_SET_ALL = "all"
 KAKAOPAGE_SEED_SET_WEBNOVELDB = "webnoveldb"
 KAKAOPAGE_SEED_SET_CHOICES = (KAKAOPAGE_SEED_SET_ALL, KAKAOPAGE_SEED_SET_WEBNOVELDB)
+KAKAOPAGE_PHASE_ALL = "all"
+KAKAOPAGE_PHASE_DISCOVERY = "discovery"
+KAKAOPAGE_PHASE_DETAIL = "detail"
+KAKAOPAGE_PHASE_CHOICES = (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DISCOVERY, KAKAOPAGE_PHASE_DETAIL)
 
 GENRE_FANTASY = "\ud310\ud0c0\uc9c0"
 GENRE_HYEONPAN = "\ud604\ud310"
@@ -625,6 +631,80 @@ def _resolve_kakao_discovery_scroll_delay_ms() -> int:
     return max(200, int(base_delay_ms * factor))
 
 
+def _resolve_kakao_phase_default() -> str:
+    raw_phase = (os.getenv("KAKAOPAGE_BACKFILL_PHASE") or "").strip().lower()
+    if raw_phase in KAKAOPAGE_PHASE_CHOICES:
+        return raw_phase
+    return KAKAOPAGE_PHASE_ALL
+
+
+def _resolve_kakao_allow_low_memory_playwright_from_env() -> bool:
+    raw_value = (os.getenv("KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT") or "").strip().lower()
+    return raw_value in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _resolve_kakao_playwright_args() -> List[str]:
+    default_args = [
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--disable-gpu",
+    ]
+    raw_json = os.getenv("KAKAOPAGE_BACKFILL_PLAYWRIGHT_ARGS_JSON")
+    if not raw_json:
+        return default_args
+    try:
+        parsed = json.loads(raw_json)
+    except Exception as exc:
+        LOGGER.warning("Invalid KAKAOPAGE_BACKFILL_PLAYWRIGHT_ARGS_JSON, using defaults: %s", exc)
+        return default_args
+    if not isinstance(parsed, list):
+        LOGGER.warning("KAKAOPAGE_BACKFILL_PLAYWRIGHT_ARGS_JSON must be a JSON list, using defaults.")
+        return default_args
+    normalized = [str(item).strip() for item in parsed if str(item).strip()]
+    if not normalized:
+        LOGGER.warning("KAKAOPAGE_BACKFILL_PLAYWRIGHT_ARGS_JSON resolved empty args, using defaults.")
+        return default_args
+    return normalized
+
+
+def _load_playwright_async_api():
+    from playwright.async_api import async_playwright
+
+    return async_playwright
+
+
+def _guard_kakao_playwright_memory(
+    *,
+    allow_low_memory_playwright: bool,
+) -> None:
+    threshold_mb = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_MIN_MEMORY_FOR_PLAYWRIGHT_MB")) or 1024
+    limit_bytes = read_memory_limit_bytes()
+    snapshot = get_memory_snapshot()
+    if limit_bytes is None:
+        LOGGER.info(
+            "Kakao memory guard: cgroup limit not detected (threshold_mb=%s usage_bytes=%s).",
+            threshold_mb,
+            snapshot.get("usage_bytes"),
+        )
+        return
+    limit_mb = int(limit_bytes / (1024 * 1024))
+    if allow_low_memory_playwright or limit_mb >= threshold_mb:
+        LOGGER.info(
+            "Kakao memory guard: limit_mb=%s threshold_mb=%s allow_override=%s",
+            limit_mb,
+            threshold_mb,
+            allow_low_memory_playwright,
+        )
+        return
+    raise RuntimeError(
+        "KakaoPage discovery blocked by low-memory guard before launching Playwright: "
+        f"detected_limit_mb={limit_mb} threshold_mb={threshold_mb}. "
+        "Run discovery on a higher-memory worker/local machine, or run with "
+        "--kakaopage-phase detail if discovered IDs already exist, or explicitly set "
+        "--kakaopage-allow-low-memory-playwright / KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT=1."
+    )
+
+
 def _is_probable_kakao_block_page(
     *,
     title: str,
@@ -661,6 +741,63 @@ def _trip_kakao_circuit_if_needed(
 
 def _extract_html_diagnostics(html: str) -> Dict[str, str]:
     return extract_html_diagnostics(html, snippet_size=200)
+
+
+def _normalize_kakao_anchor_href(raw_href: Any) -> str:
+    href = str(raw_href or "").strip()
+    if not href:
+        return ""
+    return urljoin(KAKAOPAGE_BASE_URL, href)
+
+
+async def _extract_listing_ids_via_dom(page) -> Set[str]:
+    hrefs = await page.eval_on_selector_all(
+        "a[href]",
+        "els => els.map(e => e.getAttribute('href'))",
+    )
+    content_ids: Set[str] = set()
+    if not isinstance(hrefs, list):
+        return content_ids
+    for raw_href in hrefs:
+        normalized_href = _normalize_kakao_anchor_href(raw_href)
+        content_id = parse_content_id_from_href(normalized_href)
+        if content_id:
+            content_ids.add(content_id)
+    return content_ids
+
+
+async def _extract_tab_links_via_dom(page) -> List[Dict[str, str]]:
+    rows = await page.eval_on_selector_all(
+        "a[href]",
+        (
+            "els => els.map(e => ({"
+            "href: e.getAttribute('href') || '',"
+            "label: (e.getAttribute('aria-label') || e.textContent || '').trim()"
+            "}))"
+        ),
+    )
+    discovered: List[Dict[str, str]] = []
+    seen_urls: Set[str] = set()
+    if not isinstance(rows, list):
+        return discovered
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        normalized_href = _normalize_kakao_anchor_href(row.get("href"))
+        if not normalized_href:
+            continue
+        parsed = urlparse(normalized_href)
+        if KAKAOPAGE_GENRE_ROOT_PATH not in (parsed.path or ""):
+            continue
+        normalized_tab_url = _build_kakao_tab_url(normalized_href)
+        if not normalized_tab_url or normalized_tab_url in seen_urls:
+            continue
+        seen_urls.add(normalized_tab_url)
+        label = str(row.get("label") or "").strip()
+        if not label:
+            label = "tab"
+        discovered.append({"name": label, "url": normalized_tab_url})
+    return discovered
 
 
 def _record_sample(summary: SourceSummary, record: Dict[str, Any], *, max_samples: int = 5) -> None:
@@ -979,9 +1116,23 @@ async def _discover_kakaopage_ids(
                 LOGGER.warning("Kakao discovery stop event while scrolling tab=%s; persisting state.", tab_name)
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
                 break
-            html = await page.content()
-            last_html = html
-            ids = extract_listing_content_ids(html)
+            used_html_fallback = False
+            fallback_tab_links: List[Dict[str, str]] = []
+            try:
+                ids = await _extract_listing_ids_via_dom(page)
+                if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
+                    discovered_tabs = await _extract_tab_links_via_dom(page)
+                else:
+                    discovered_tabs = []
+            except Exception as exc:
+                LOGGER.debug("Kakao discovery DOM extraction failed tab=%s scroll=%s: %s", tab_name, scroll_idx + 1, exc)
+                html = await page.content()
+                last_html = html
+                ids = extract_listing_content_ids(html)
+                if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
+                    fallback_tab_links = extract_tab_links(html, base_url=KAKAOPAGE_BASE_URL)
+                used_html_fallback = True
+                discovered_tabs = []
             previous_count = len(discovered)
 
             for content_id in ids:
@@ -997,9 +1148,14 @@ async def _discover_kakaopage_ids(
 
             new_count = len(discovered) - previous_count
             if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
-                tab_links = extract_tab_links(html, base_url=KAKAOPAGE_BASE_URL)
-                for tab_link in tab_links:
-                    candidate_url = _build_kakao_tab_url(tab_link["url"])
+                tab_links_to_use = discovered_tabs
+                if used_html_fallback:
+                    tab_links_to_use = [
+                        {"name": str(item.get("name") or "tab"), "url": str(item.get("url") or "")}
+                        for item in fallback_tab_links
+                    ]
+                for tab_link in tab_links_to_use:
+                    candidate_url = _build_kakao_tab_url(tab_link.get("url") or "")
                     if candidate_url in queued_urls or candidate_url in done_set:
                         continue
                     queued_urls.add(candidate_url)
@@ -1124,6 +1280,8 @@ async def run_kakaopage_backfill(
     max_items: Optional[int],
     state_dir: Path,
     seed_set: str,
+    phase: str,
+    allow_low_memory_playwright: bool,
     shutdown_event: Optional[asyncio.Event] = None,
     summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
@@ -1132,6 +1290,10 @@ async def run_kakaopage_backfill(
     if seed_set not in KAKAOPAGE_SEED_SET_CHOICES:
         LOGGER.warning("Unknown KakaoPage seed_set=%s; falling back to %s", seed_set, KAKAOPAGE_SEED_SET_ALL)
         seed_set = KAKAOPAGE_SEED_SET_ALL
+    if phase not in KAKAOPAGE_PHASE_CHOICES:
+        LOGGER.warning("Unknown KakaoPage phase=%s; falling back to %s", phase, KAKAOPAGE_PHASE_ALL)
+        phase = KAKAOPAGE_PHASE_ALL
+
     state = _load_state(
         state_dir,
         SOURCE_KAKAOPAGE,
@@ -1149,18 +1311,9 @@ async def run_kakaopage_backfill(
             state["discovered"] = pre_filtered_discovered
             _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
 
-    try:
-        from playwright.async_api import async_playwright
-    except Exception as exc:
-        raise RuntimeError(
-            "Playwright is required for KakaoPage backfill. "
-            "Install with `pip install -r requirements-backfill.txt` and "
-            "`python -m playwright install --with-deps chromium`."
-        ) from exc
-
     cookies = _cookies_from_env_for_playwright()
     cookie_header = _kakao_cookie_header()
-    if not cookies and not cookie_header:
+    if not cookies and not cookie_header and phase in (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DISCOVERY):
         LOGGER.warning(
             "No KakaoPage cookies were provided. If discovery/detail pages are age- or login-gated, "
             "set KAKAOPAGE_COOKIE_HEADER or KAKAOPAGE_COOKIES_JSON."
@@ -1174,46 +1327,65 @@ async def run_kakaopage_backfill(
         )
 
     bridged_cookie_header: Optional[str] = None
-    async with async_playwright() as playwright:
+    should_run_discovery = phase in (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DISCOVERY)
+    should_run_detail = phase in (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DETAIL)
+
+    if should_run_discovery:
+        _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+        _guard_kakao_playwright_memory(
+            allow_low_memory_playwright=allow_low_memory_playwright,
+        )
         try:
-            browser = await playwright.chromium.launch(headless=True)
+            async_playwright = _load_playwright_async_api()
         except Exception as exc:
-            _raise_kakao_playwright_launch_error(exc)
-            raise
-        context = await browser.new_context()
-        if cookies:
+            raise RuntimeError(
+                "Playwright is required for KakaoPage discovery phase. "
+                "Install with `pip install -r requirements-backfill.txt` and "
+                "`python -m playwright install --with-deps chromium`."
+            ) from exc
+
+        playwright_args = _resolve_kakao_playwright_args()
+        LOGGER.info("Kakao Playwright launch args=%s", playwright_args)
+        async with async_playwright() as playwright:
             try:
-                await context.add_cookies(cookies)
+                browser = await playwright.chromium.launch(headless=True, args=playwright_args)
             except Exception as exc:
-                LOGGER.warning("Failed to inject Kakao cookies into Playwright context: %s", exc)
-        page = await context.new_page()
-        try:
-            await _discover_kakaopage_ids(
-                page=page,
-                state=state,
-                dry_run=dry_run,
-                state_dir=state_dir,
-                max_items=max_items,
-                seed_set=seed_set,
-                summary=summary,
-                stop_event=stop_event,
-            )
-        finally:
-            if not cookie_header:
+                _raise_kakao_playwright_launch_error(exc)
+                raise
+            context = await browser.new_context()
+            if cookies:
                 try:
-                    context_cookies = await context.cookies()
-                    bridged_cookie_header = _cookie_header_from_playwright_cookies(context_cookies)
-                    if bridged_cookie_header:
-                        cookie_names = _cookie_names_from_header(bridged_cookie_header)
-                        LOGGER.info(
-                            "Bridged Kakao cookies from Playwright context cookie_count=%s cookie_names=%s",
-                            len(cookie_names),
-                            cookie_names[:10],
-                        )
+                    await context.add_cookies(cookies)
                 except Exception as exc:
-                    LOGGER.warning("Failed to bridge cookies from Playwright context: %s", exc)
-            await context.close()
-            await browser.close()
+                    LOGGER.warning("Failed to inject Kakao cookies into Playwright context: %s", exc)
+            page = await context.new_page()
+            try:
+                await _discover_kakaopage_ids(
+                    page=page,
+                    state=state,
+                    dry_run=dry_run,
+                    state_dir=state_dir,
+                    max_items=max_items,
+                    seed_set=seed_set,
+                    summary=summary,
+                    stop_event=stop_event,
+                )
+            finally:
+                if not cookie_header:
+                    try:
+                        context_cookies = await context.cookies()
+                        bridged_cookie_header = _cookie_header_from_playwright_cookies(context_cookies)
+                        if bridged_cookie_header:
+                            cookie_names = _cookie_names_from_header(bridged_cookie_header)
+                            LOGGER.info(
+                                "Bridged Kakao cookies from Playwright context cookie_count=%s cookie_names=%s",
+                                len(cookie_names),
+                                cookie_names[:10],
+                            )
+                    except Exception as exc:
+                        LOGGER.warning("Failed to bridge cookies from Playwright context: %s", exc)
+                await context.close()
+                await browser.close()
 
     if not cookie_header and bridged_cookie_header:
         cookie_header = bridged_cookie_header
@@ -1232,6 +1404,14 @@ async def run_kakaopage_backfill(
                 _seed_stat_keys_from_discovered_entry(discovered_entry),
                 "discovered",
             )
+    if phase == KAKAOPAGE_PHASE_DISCOVERY:
+        if stop_event.is_set():
+            raise RuntimeError("Kakao discovery interrupted by shutdown signal. Progress saved to state file.")
+        return summary
+
+    if phase == KAKAOPAGE_PHASE_DETAIL and not discovered_map:
+        raise RuntimeError("No discovered IDs; run discovery phase first (--kakaopage-phase discovery).")
+
     if not discovered_map:
         LOGGER.warning(
             "Kakao discovery returned 0 ids from listing=%s. Verify page access, SSR HTML shape, and cookies.",
@@ -1242,6 +1422,9 @@ async def run_kakaopage_backfill(
             "Kakao discovery returned 0 ids without cookies. KakaoPage likely requires authenticated/age-verified "
             "cookies for this environment. Provide KAKAOPAGE_COOKIE_HEADER or KAKAOPAGE_COOKIES_JSON."
         )
+    if not should_run_detail:
+        return summary
+
     detail_done_list = state.get("detail_done", [])
     if not isinstance(detail_done_list, list):
         detail_done_list = []
@@ -1554,6 +1737,18 @@ def _make_arg_parser() -> argparse.ArgumentParser:
         help="KakaoPage discovery seed set. 'all' keeps existing tab crawling, 'webnoveldb' uses fixed WebNovelDB seeds.",
     )
     parser.add_argument(
+        "--kakaopage-phase",
+        choices=KAKAOPAGE_PHASE_CHOICES,
+        default=_resolve_kakao_phase_default(),
+        help="KakaoPage execution phase: all (discovery+detail), discovery-only, or detail-only.",
+    )
+    parser.add_argument(
+        "--kakaopage-allow-low-memory-playwright",
+        action="store_true",
+        default=_resolve_kakao_allow_low_memory_playwright_from_env(),
+        help="Allow running KakaoPage discovery Playwright even under low cgroup memory limits.",
+    )
+    parser.add_argument(
         "--reset-state",
         action="store_true",
         help="Delete state files for requested sources before starting.",
@@ -1641,6 +1836,8 @@ async def _async_main(args: argparse.Namespace) -> int:
                             max_items=remaining,
                             state_dir=state_dir,
                             seed_set=args.kakaopage_seed_set,
+                            phase=args.kakaopage_phase,
+                            allow_low_memory_playwright=args.kakaopage_allow_low_memory_playwright,
                             shutdown_event=shutdown_event,
                             summary=summary,
                         )
