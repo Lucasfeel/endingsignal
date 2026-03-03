@@ -133,6 +133,24 @@ docker run --rm -e DATABASE_URL=postgresql://... endingsignal-backfill:latest \
   python scripts/backfill_novels_once.py --sources kakao_page --reset-state
 ```
 
+Docker Compose split backfill services:
+
+```bash
+docker compose --profile backfill build backfill-kakao-page backfill-naver-series
+```
+
+```bash
+DATABASE_URL=postgresql://... docker compose --profile backfill run --rm backfill-naver-series --dry-run --max-pages 1
+DATABASE_URL=postgresql://... docker compose --profile backfill run --rm backfill-kakao-page --dry-run --max-items 20
+```
+
+```bash
+DATABASE_URL=postgresql://... docker compose --profile backfill run --rm backfill-naver-series
+DATABASE_URL=postgresql://... docker compose --profile backfill run --rm backfill-kakao-page
+```
+
+- Both compose backfill services mount `./.backfill_state` to `/app/.backfill_state` for resumable runs.
+
 Dry runs:
 
 ```bash

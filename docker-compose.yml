@@ -22,6 +22,50 @@ services:
       SKIP_DB_INIT: ${SKIP_DB_INIT:-0}
     restart: unless-stopped
 
+  backfill-naver-series:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: endingsignal-web:latest
+    profiles: ["backfill"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_NAME: ${DB_NAME:-}
+      DB_USER: ${DB_USER:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_HOST: ${DB_HOST:-}
+      DB_PORT: ${DB_PORT:-}
+      DB_TIMEZONE: ${DB_TIMEZONE:-Asia/Seoul}
+    volumes:
+      - ./.backfill_state:/app/.backfill_state
+    entrypoint: ["python", "scripts/backfill_naver_series_only.py"]
+    command: []
+    restart: "no"
+
+  backfill-kakao-page:
+    build:
+      context: .
+      dockerfile: Dockerfile.backfill
+    image: endingsignal-backfill:latest
+    profiles: ["backfill"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_NAME: ${DB_NAME:-}
+      DB_USER: ${DB_USER:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_HOST: ${DB_HOST:-}
+      DB_PORT: ${DB_PORT:-}
+      DB_TIMEZONE: ${DB_TIMEZONE:-Asia/Seoul}
+      KAKAOPAGE_COOKIE_HEADER: ${KAKAOPAGE_COOKIE_HEADER:-}
+      KAKAOPAGE_COOKIES_JSON: ${KAKAOPAGE_COOKIES_JSON:-}
+      KAKAOPAGE_SEED_SET: ${KAKAOPAGE_SEED_SET:-webnoveldb}
+    volumes:
+      - ./.backfill_state:/app/.backfill_state
+    shm_size: "1gb"
+    entrypoint: ["python", "scripts/backfill_kakao_page_only.py"]
+    command: []
+    restart: "no"
+
   db:
     image: postgres:16-alpine
     profiles: ["with-db"]
