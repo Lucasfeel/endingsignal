@@ -184,6 +184,28 @@ Notes:
 - KakaoPage seed modes:
   - `--kakaopage-seed-set all` (default): existing discovery behavior.
   - `--kakaopage-seed-set webnoveldb`: fixed six WebNovelDB genre seeds (ongoing/completed variants), no dynamic tab expansion.
+- KakaoPage polite crawling/backoff envs:
+  - Detail worker concurrency:
+    - `KAKAOPAGE_BACKFILL_DETAIL_CONCURRENCY` (default: `2`)
+    - Backward-compatible fallback: `KAKAOPAGE_BACKFILL_HTTP_CONCURRENCY`
+  - Global request pacing:
+    - `KAKAOPAGE_BACKFILL_MIN_INTERVAL_SECONDS` (default: `1.0`)
+    - Or set `KAKAOPAGE_BACKFILL_RPS` (converted to min-interval)
+  - Per-request jitter before detail fetch:
+    - `KAKAOPAGE_BACKFILL_DETAIL_JITTER_MIN_SECONDS` (default: `0.8`)
+    - `KAKAOPAGE_BACKFILL_DETAIL_JITTER_MAX_SECONDS` (default: `1.8`)
+  - HTTP retry behavior:
+    - `KAKAOPAGE_BACKFILL_HTTP_RETRIES` (default: `4`)
+    - `KAKAOPAGE_BACKFILL_HTTP_RETRY_BASE_DELAY_SECONDS` (default: `1.0`)
+    - `KAKAOPAGE_BACKFILL_HTTP_RETRY_MAX_DELAY_SECONDS` (default: `60.0`)
+  - Circuit breaker / cooldown guidance:
+    - `KAKAOPAGE_BACKFILL_MAX_CONSECUTIVE_RATE_LIMITS` (default: `5`)
+    - `KAKAOPAGE_BACKFILL_COOLDOWN_SECONDS` (default: `900`)
+  - Discovery scroll pacing:
+    - `KAKAOPAGE_BACKFILL_DISCOVERY_SCROLL_DELAY_MS` (default base: `1600`, jitter applied)
+    - `KAKAOPAGE_BACKFILL_DISCOVERY_SCROLL_JITTER_RATIO` (default: `0.25`)
+  - State checkpoint cadence during detail stage:
+    - `KAKAOPAGE_BACKFILL_SAVE_STATE_EVERY` (default: `20`)
 
 Manual validation checklist (KakaoPage WebNovelDB seed mode):
 

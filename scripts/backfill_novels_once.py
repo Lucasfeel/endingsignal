@@ -9,11 +9,11 @@ import json
 import logging
 import os
 import random
-import re
+import signal
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import aiohttp
@@ -42,6 +42,15 @@ from utils.backfill import (
     coerce_status,
     dedupe_strings,
     merge_genres,
+)
+from utils.polite_http import (
+    AsyncRateLimiter,
+    BlockedError,
+    HttpStatusError,
+    RateLimitedError,
+    TransientHttpError,
+    extract_html_diagnostics,
+    fetch_text_polite,
 )
 
 LOGGER = logging.getLogger("backfill_novels_once")
@@ -128,6 +137,21 @@ KAKAOPAGE_WEBNOVELDB_SEED_INPUTS = (
     },
 )
 
+KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS = (
+    "로그인",
+    "접근",
+    "권한",
+    "인증",
+    "차단",
+    "captcha",
+    "bot",
+    "robot",
+    "forbidden",
+    "denied",
+    "verify",
+    "age",
+)
+
 
 @dataclass
 class SourceSummary:
@@ -155,6 +179,18 @@ def _clean_int_limit(value: Optional[int]) -> Optional[int]:
         return None
     try:
         parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _clean_float_limit(value: Optional[Any]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
     if parsed <= 0:
@@ -512,22 +548,119 @@ def _resolve_kakaopage_status(
     return status
 
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-_HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
-_MULTISPACE_RE = re.compile(r"\s+")
+def _cookie_names_from_header(cookie_header: Optional[str]) -> List[str]:
+    raw_header = str(cookie_header or "").strip()
+    if not raw_header:
+        return []
+    names: List[str] = []
+    for part in raw_header.split(";"):
+        token = part.strip()
+        if not token or "=" not in token:
+            continue
+        name = token.split("=", 1)[0].strip()
+        if name:
+            names.append(name)
+    return dedupe_strings(names)
+
+
+def _cookie_header_from_playwright_cookies(raw_cookies: Any) -> Optional[str]:
+    if not isinstance(raw_cookies, list):
+        return None
+    parts: List[str] = []
+    for item in raw_cookies:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if not name or not value:
+            continue
+        parts.append(f"{name}={value}")
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
+def _resolve_kakao_detail_concurrency() -> int:
+    preferred = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_DETAIL_CONCURRENCY"))
+    if preferred is not None:
+        return max(1, preferred)
+    legacy = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_HTTP_CONCURRENCY"))
+    if legacy is not None:
+        return max(1, legacy)
+    return 2
+
+
+def _resolve_kakao_min_interval_seconds() -> float:
+    configured_min_interval = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_MIN_INTERVAL_SECONDS"))
+    if configured_min_interval is not None:
+        return configured_min_interval
+    configured_rps = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_RPS"))
+    if configured_rps is not None:
+        return 1.0 / configured_rps
+    return 1.0
+
+
+def _resolve_kakao_detail_jitter_bounds() -> Tuple[float, float]:
+    jitter_min = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_DETAIL_JITTER_MIN_SECONDS")) or 0.8
+    jitter_max = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_DETAIL_JITTER_MAX_SECONDS")) or 1.8
+    if jitter_max < jitter_min:
+        jitter_min, jitter_max = jitter_max, jitter_min
+    return jitter_min, jitter_max
+
+
+def _resolve_kakao_http_retry_policy() -> Tuple[int, float, float]:
+    retries = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_HTTP_RETRIES")) or 4
+    base_delay = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_HTTP_RETRY_BASE_DELAY_SECONDS")) or 1.0
+    max_delay = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_HTTP_RETRY_MAX_DELAY_SECONDS")) or 60.0
+    if max_delay < base_delay:
+        max_delay = base_delay
+    return retries, base_delay, max_delay
+
+
+def _resolve_kakao_discovery_scroll_delay_ms() -> int:
+    base_delay_ms = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_SCROLL_DELAY_MS")) or 1600
+    jitter_ratio = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_SCROLL_JITTER_RATIO")) or 0.25
+    jitter_ratio = min(max(jitter_ratio, 0.0), 0.9)
+    factor = 1.0 + random.uniform(-jitter_ratio, jitter_ratio)
+    return max(200, int(base_delay_ms * factor))
+
+
+def _is_probable_kakao_block_page(
+    *,
+    title: str,
+    authors: List[str],
+    diagnostics: Dict[str, str],
+) -> bool:
+    if title and authors:
+        return False
+    diagnostic_text = " ".join(
+        [
+            str(diagnostics.get("title") or ""),
+            str(diagnostics.get("text_snippet") or ""),
+        ]
+    ).lower()
+    return any(keyword.lower() in diagnostic_text for keyword in KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS)
+
+
+def _trip_kakao_circuit_if_needed(
+    *,
+    error_kind: str,
+    consecutive_rate_limits: int,
+    max_consecutive_rate_limits: int,
+    stop_event: asyncio.Event,
+) -> bool:
+    should_trip = False
+    if error_kind == "blocked":
+        should_trip = True
+    elif error_kind == "rate_limited" and consecutive_rate_limits >= max(1, max_consecutive_rate_limits):
+        should_trip = True
+    if should_trip:
+        stop_event.set()
+    return should_trip
 
 
 def _extract_html_diagnostics(html: str) -> Dict[str, str]:
-    raw_html = str(html or "")
-    title = ""
-    match = _HTML_TITLE_RE.search(raw_html)
-    if match:
-        title = _MULTISPACE_RE.sub(" ", _HTML_TAG_RE.sub(" ", match.group(1))).strip()
-    text = _MULTISPACE_RE.sub(" ", _HTML_TAG_RE.sub(" ", raw_html)).strip()
-    return {
-        "title": title,
-        "text_snippet": text[:200],
-    }
+    return extract_html_diagnostics(html, snippet_size=200)
 
 
 def _record_sample(summary: SourceSummary, record: Dict[str, Any], *, max_samples: int = 5) -> None:
@@ -554,6 +687,7 @@ async def run_naver_series_backfill(
     max_items: Optional[int],
     state_dir: Path,
     rewind_pages: int,
+    shutdown_event: Optional[asyncio.Event] = None,
     summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
     summary = summary or SourceSummary(source=SOURCE_NAVER_SERIES)
@@ -603,6 +737,15 @@ async def run_naver_series_backfill(
         previous_page_signature: Optional[str] = None
 
         while True:
+            if shutdown_event is not None and shutdown_event.is_set():
+                LOGGER.warning(
+                    "Naver backfill interrupted by stop event mode=%s page=%s; state will be saved for resume.",
+                    mode_name,
+                    page,
+                )
+                mode_state["next_page"] = page
+                _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
+                break
             if max_items is not None and summary.parsed_count >= max_items:
                 LOGGER.info("Naver reached max_items=%s; stopping.", max_items)
                 break
@@ -718,7 +861,11 @@ async def run_naver_series_backfill(
 
         if max_items is not None and summary.parsed_count >= max_items:
             break
+        if shutdown_event is not None and shutdown_event.is_set():
+            break
 
+    if shutdown_event is not None and shutdown_event.is_set():
+        raise RuntimeError("Naver backfill interrupted by shutdown signal. Progress saved to state file.")
     return summary
 
 
@@ -731,6 +878,7 @@ async def _discover_kakaopage_ids(
     max_items: Optional[int],
     seed_set: str,
     summary: SourceSummary,
+    stop_event: asyncio.Event,
 ) -> None:
     discovered = state.setdefault("discovered", {})
     if not isinstance(discovered, dict):
@@ -772,7 +920,25 @@ async def _discover_kakaopage_ids(
         if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB and seed_stat_key:
             _init_seed_stats(summary, seed_stat_key)
 
+    blocked_resource_types = {"image", "media", "font", "stylesheet"}
+
+    async def _route_handler(route) -> None:
+        resource_type = str(route.request.resource_type or "").strip().lower()
+        if resource_type in blocked_resource_types:
+            await route.abort()
+            return
+        await route.continue_()
+
+    try:
+        await page.route("**/*", _route_handler)
+    except Exception as exc:
+        LOGGER.debug("Kakao discovery route optimization unavailable: %s", exc)
+
     while queue:
+        if stop_event.is_set():
+            LOGGER.warning("Kakao discovery interrupted by stop event; saving state before exit.")
+            _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+            break
         if max_items is not None and len(discovered) >= max_items:
             LOGGER.info("Kakao discovery reached max_items=%s", max_items)
             break
@@ -797,7 +963,7 @@ async def _discover_kakaopage_ids(
         )
         try:
             await page.goto(tab_url, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_timeout(1200)
+            await page.wait_for_timeout(_resolve_kakao_discovery_scroll_delay_ms())
         except Exception as exc:
             LOGGER.error("Kakao discovery failed to open tab=%s: %s", tab_url, exc)
             done_set.add(tab_url)
@@ -809,6 +975,10 @@ async def _discover_kakaopage_ids(
         tab_discovered_ids: Set[str] = set()
         last_html = ""
         for scroll_idx in range(max_scrolls_per_tab):
+            if stop_event.is_set():
+                LOGGER.warning("Kakao discovery stop event while scrolling tab=%s; persisting state.", tab_name)
+                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+                break
             html = await page.content()
             last_html = html
             ids = extract_listing_content_ids(html)
@@ -864,7 +1034,13 @@ async def _discover_kakaopage_ids(
                 break
 
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            await page.wait_for_timeout(1200)
+            await page.wait_for_timeout(_resolve_kakao_discovery_scroll_delay_ms())
+
+        if stop_event.is_set():
+            done_set.add(tab_url)
+            state["tabs_done"] = sorted(done_set)
+            _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+            break
 
         if not tab_discovered_ids:
             diagnostics = _extract_html_diagnostics(last_html)
@@ -892,16 +1068,36 @@ async def _fetch_kakao_detail_and_build_record(
     content_id: str,
     discovered_entry: Dict[str, Any],
     headers: Dict[str, str],
+    retries: int,
+    retry_base_delay_seconds: float,
+    retry_max_delay_seconds: float,
 ) -> Optional[Dict[str, Any]]:
-    await asyncio.sleep(random.uniform(0.03, 0.15))
     content_urls = _build_kakaopage_content_urls(content_id)
     fetch_url = content_urls["fetch_url"]
     canonical_content_url = content_urls["canonical_url"]
-    html = await _fetch_text_with_retry(session, fetch_url, headers=headers)
+    html = await fetch_text_polite(
+        session,
+        fetch_url,
+        headers=headers,
+        retries=retries,
+        retry_base_delay_seconds=retry_base_delay_seconds,
+        retry_max_delay_seconds=retry_max_delay_seconds,
+    )
+    diagnostics = _extract_html_diagnostics(html)
     parsed = parse_kakaopage_detail(
         html,
         fallback_genres=discovered_entry.get("genres", []),
     )
+    if _is_probable_kakao_block_page(
+        title=str(parsed.get("title") or ""),
+        authors=parsed.get("authors", []) or [],
+        diagnostics=diagnostics,
+    ):
+        raise BlockedError(
+            status=200,
+            url=fetch_url,
+            diagnostics=diagnostics,
+        )
     status = _resolve_kakaopage_status(
         parsed_status=parsed.get("status"),
         seed_completed=bool(discovered_entry.get("seed_completed")),
@@ -917,6 +1113,7 @@ async def _fetch_kakao_detail_and_build_record(
         "status": status,
         "content_url": canonical_content_url,
         "genres": genres,
+        "_diagnostics": diagnostics,
     }
 
 
@@ -927,9 +1124,11 @@ async def run_kakaopage_backfill(
     max_items: Optional[int],
     state_dir: Path,
     seed_set: str,
+    shutdown_event: Optional[asyncio.Event] = None,
     summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
     summary = summary or SourceSummary(source=SOURCE_KAKAOPAGE)
+    stop_event = shutdown_event or asyncio.Event()
     if seed_set not in KAKAOPAGE_SEED_SET_CHOICES:
         LOGGER.warning("Unknown KakaoPage seed_set=%s; falling back to %s", seed_set, KAKAOPAGE_SEED_SET_ALL)
         seed_set = KAKAOPAGE_SEED_SET_ALL
@@ -966,7 +1165,15 @@ async def run_kakaopage_backfill(
             "No KakaoPage cookies were provided. If discovery/detail pages are age- or login-gated, "
             "set KAKAOPAGE_COOKIE_HEADER or KAKAOPAGE_COOKIES_JSON."
         )
+    elif cookie_header:
+        cookie_names = _cookie_names_from_header(cookie_header)
+        LOGGER.info(
+            "Kakao cookie header detected from env cookie_count=%s cookie_names=%s",
+            len(cookie_names),
+            cookie_names[:10],
+        )
 
+    bridged_cookie_header: Optional[str] = None
     async with async_playwright() as playwright:
         try:
             browser = await playwright.chromium.launch(headless=True)
@@ -989,10 +1196,27 @@ async def run_kakaopage_backfill(
                 max_items=max_items,
                 seed_set=seed_set,
                 summary=summary,
+                stop_event=stop_event,
             )
         finally:
+            if not cookie_header:
+                try:
+                    context_cookies = await context.cookies()
+                    bridged_cookie_header = _cookie_header_from_playwright_cookies(context_cookies)
+                    if bridged_cookie_header:
+                        cookie_names = _cookie_names_from_header(bridged_cookie_header)
+                        LOGGER.info(
+                            "Bridged Kakao cookies from Playwright context cookie_count=%s cookie_names=%s",
+                            len(cookie_names),
+                            cookie_names[:10],
+                        )
+                except Exception as exc:
+                    LOGGER.warning("Failed to bridge cookies from Playwright context: %s", exc)
             await context.close()
             await browser.close()
+
+    if not cookie_header and bridged_cookie_header:
+        cookie_header = bridged_cookie_header
 
     discovered_map = state.get("discovered", {})
     if not isinstance(discovered_map, dict):
@@ -1028,90 +1252,272 @@ async def run_kakaopage_backfill(
         ids_to_process = ids_to_process[:max_items]
 
     headers = _build_headers(referer=KAKAOPAGE_LIST_URL, cookie_header=cookie_header)
+    detail_concurrency = _resolve_kakao_detail_concurrency()
+    min_interval_seconds = _resolve_kakao_min_interval_seconds()
+    detail_jitter_min, detail_jitter_max = _resolve_kakao_detail_jitter_bounds()
+    retries, retry_base_delay_seconds, retry_max_delay_seconds = _resolve_kakao_http_retry_policy()
+    max_consecutive_rate_limits = (
+        _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_MAX_CONSECUTIVE_RATE_LIMITS")) or 5
+    )
+    cooldown_seconds = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_COOLDOWN_SECONDS")) or 900
+    save_every = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_SAVE_STATE_EVERY")) or 20
+
+    LOGGER.info(
+        "Kakao detail config concurrency=%s min_interval_seconds=%.3f jitter=[%.3f, %.3f] retries=%s max_rate_limits=%s",
+        detail_concurrency,
+        min_interval_seconds,
+        detail_jitter_min,
+        detail_jitter_max,
+        retries,
+        max_consecutive_rate_limits,
+    )
 
     timeout = aiohttp.ClientTimeout(
         total=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
         connect=config.CRAWLER_HTTP_CONNECT_TIMEOUT_SECONDS,
         sock_read=config.CRAWLER_HTTP_SOCK_READ_TIMEOUT_SECONDS,
     )
-    connector = aiohttp.TCPConnector(limit=max(4, int(os.getenv("KAKAOPAGE_BACKFILL_HTTP_CONCURRENCY", "10"))))
-    semaphore = asyncio.Semaphore(max(1, int(os.getenv("KAKAOPAGE_BACKFILL_HTTP_CONCURRENCY", "10"))))
+    connector = aiohttp.TCPConnector(limit=max(4, detail_concurrency * 2))
+    limiter = AsyncRateLimiter(min_interval_seconds=min_interval_seconds)
+    worker_stop_event = asyncio.Event()
     detail_done_dirty = False
     skipped_missing_author = 0
+    processed_since_save = 0
+    protection_lock = asyncio.Lock()
+    consecutive_rate_limits = 0
+    abort_reason: Optional[str] = None
+
+    ids_queue: asyncio.Queue[str] = asyncio.Queue()
+    for content_id in ids_to_process:
+        if content_id in detail_done_set:
+            continue
+        ids_queue.put_nowait(content_id)
+
+    async def persist_detail_state(*, force: bool = False) -> None:
+        nonlocal detail_done_dirty, processed_since_save
+        if not force and not detail_done_dirty:
+            return
+        state["detail_done"] = sorted(detail_done_set)
+        _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+        detail_done_dirty = False
+        processed_since_save = 0
+
+    async def mark_protection_event(
+        *,
+        error_kind: str,
+        content_id: str,
+        diagnostics: Optional[Dict[str, str]] = None,
+        retry_after_seconds: Optional[float] = None,
+    ) -> None:
+        nonlocal abort_reason, consecutive_rate_limits
+        async with protection_lock:
+            if error_kind == "rate_limited":
+                consecutive_rate_limits += 1
+            elif error_kind == "blocked":
+                consecutive_rate_limits = max_consecutive_rate_limits
+            else:
+                consecutive_rate_limits = 0
+
+            should_stop = _trip_kakao_circuit_if_needed(
+                error_kind=error_kind,
+                consecutive_rate_limits=consecutive_rate_limits,
+                max_consecutive_rate_limits=max_consecutive_rate_limits,
+                stop_event=worker_stop_event,
+            )
+            if should_stop and not abort_reason:
+                title = ""
+                snippet = ""
+                if diagnostics:
+                    title = str(diagnostics.get("title") or "")
+                    snippet = str(diagnostics.get("text_snippet") or "")
+                if error_kind == "blocked":
+                    abort_reason = (
+                        "KakaoPage appears blocked or gated; stopping early to avoid repeated access attempts. "
+                        f"content_id={content_id} title={title!r} snippet={snippet!r}"
+                    )
+                else:
+                    abort_reason = (
+                        "KakaoPage detail fetch is rate-limited repeatedly; cooldown recommended before retry. "
+                        f"consecutive_rate_limits={consecutive_rate_limits} suggested_cooldown_seconds={cooldown_seconds} "
+                        f"last_retry_after_seconds={retry_after_seconds}"
+                    )
+                await persist_detail_state(force=True)
+
+    async def reset_rate_limit_streak() -> None:
+        nonlocal consecutive_rate_limits
+        async with protection_lock:
+            consecutive_rate_limits = 0
 
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-        async def process_one(content_id: str) -> None:
-            nonlocal detail_done_dirty, skipped_missing_author
-            if content_id in detail_done_set:
-                return
-            entry = _normalize_kakao_discovered_entry(discovered_map.get(content_id))
-            async with semaphore:
-                summary.fetched_count += 1
-                seed_stat_keys = (
-                    _seed_stat_keys_from_discovered_entry(entry)
-                    if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB
-                    else []
-                )
+        async def worker(worker_id: int) -> None:
+            nonlocal detail_done_dirty, skipped_missing_author, processed_since_save
+            while True:
+                if stop_event.is_set():
+                    worker_stop_event.set()
+                if worker_stop_event.is_set():
+                    return
                 try:
-                    record = await _fetch_kakao_detail_and_build_record(
-                        session=session,
-                        content_id=content_id,
-                        discovered_entry=entry,
-                        headers=headers,
+                    content_id = ids_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+
+                try:
+                    if content_id in detail_done_set:
+                        continue
+                    entry = _normalize_kakao_discovered_entry(discovered_map.get(content_id))
+                    seed_stat_keys = (
+                        _seed_stat_keys_from_discovered_entry(entry)
+                        if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB
+                        else []
                     )
-                except Exception as exc:
-                    summary.error_count += 1
-                    _bump_seed_stats(summary, seed_stat_keys, "errors")
-                    LOGGER.error("Kakao detail fetch failed content_id=%s: %s", content_id, exc)
-                    return
 
-                if not record:
-                    summary.skipped_count += 1
-                    _bump_seed_stats(summary, seed_stat_keys, "skipped")
-                    return
-                summary.parsed_count += 1
-                _bump_seed_stats(summary, seed_stat_keys, "parsed")
+                    await limiter.wait()
+                    if worker_stop_event.is_set() or stop_event.is_set():
+                        continue
+                    await asyncio.sleep(random.uniform(detail_jitter_min, detail_jitter_max))
+                    if worker_stop_event.is_set() or stop_event.is_set():
+                        continue
 
-                authors = record.get("authors") or []
-                if not authors:
-                    skipped_missing_author += 1
-                    summary.skipped_count += 1
-                    _bump_seed_stats(summary, seed_stat_keys, "skipped")
-                    LOGGER.warning(
-                        "Kakao skip missing author content_id=%s url=%s",
-                        content_id,
-                        record.get("content_url"),
-                    )
-                    return
+                    summary.fetched_count += 1
+                    try:
+                        record = await _fetch_kakao_detail_and_build_record(
+                            session=session,
+                            content_id=content_id,
+                            discovered_entry=entry,
+                            headers=headers,
+                            retries=retries,
+                            retry_base_delay_seconds=retry_base_delay_seconds,
+                            retry_max_delay_seconds=retry_max_delay_seconds,
+                        )
+                    except RateLimitedError as exc:
+                        summary.error_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "errors")
+                        LOGGER.warning(
+                            "Kakao detail rate limited content_id=%s status=%s retry_after=%s url=%s",
+                            content_id,
+                            exc.status,
+                            exc.retry_after_seconds,
+                            exc.url,
+                        )
+                        await mark_protection_event(
+                            error_kind="rate_limited",
+                            content_id=content_id,
+                            retry_after_seconds=exc.retry_after_seconds,
+                        )
+                        continue
+                    except BlockedError as exc:
+                        summary.error_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "errors")
+                        LOGGER.error(
+                            "Kakao detail blocked content_id=%s status=%s url=%s title=%r snippet=%r",
+                            content_id,
+                            exc.status,
+                            exc.url,
+                            exc.diagnostics.get("title"),
+                            exc.diagnostics.get("text_snippet"),
+                        )
+                        await mark_protection_event(
+                            error_kind="blocked",
+                            content_id=content_id,
+                            diagnostics=exc.diagnostics,
+                        )
+                        continue
+                    except TransientHttpError as exc:
+                        summary.error_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "errors")
+                        LOGGER.warning(
+                            "Kakao detail transient failure content_id=%s status=%s url=%s",
+                            content_id,
+                            exc.status,
+                            exc.url,
+                        )
+                        await reset_rate_limit_streak()
+                        continue
+                    except HttpStatusError as exc:
+                        summary.error_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "errors")
+                        LOGGER.error(
+                            "Kakao detail non-retryable HTTP error content_id=%s status=%s url=%s",
+                            content_id,
+                            exc.status,
+                            exc.url,
+                        )
+                        await reset_rate_limit_streak()
+                        continue
+                    except Exception as exc:
+                        summary.error_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "errors")
+                        LOGGER.error("Kakao detail fetch failed content_id=%s worker=%s: %s", content_id, worker_id, exc)
+                        await reset_rate_limit_streak()
+                        continue
 
-                accepted = upserter.add_raw(record)
-                if not accepted:
-                    _bump_seed_stats(summary, seed_stat_keys, "skipped")
-                    LOGGER.debug("Kakao skipped invalid record content_id=%s", content_id)
-                if dry_run:
-                    _record_sample(summary, record)
-                detail_done_set.add(content_id)
-                detail_done_dirty = True
+                    if not record:
+                        summary.skipped_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "skipped")
+                        await reset_rate_limit_streak()
+                        continue
 
-        chunk_size = 100
-        for idx in range(0, len(ids_to_process), chunk_size):
-            chunk = ids_to_process[idx : idx + chunk_size]
-            await asyncio.gather(*(process_one(content_id) for content_id in chunk))
-            LOGGER.info(
-                "Kakao detail progress processed=%s/%s parsed=%s skipped=%s errors=%s",
-                min(idx + len(chunk), len(ids_to_process)),
-                len(ids_to_process),
-                summary.parsed_count,
-                summary.skipped_count,
-                summary.error_count,
-            )
-            if detail_done_dirty:
-                state["detail_done"] = sorted(detail_done_set)
-                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
-                detail_done_dirty = False
+                    summary.parsed_count += 1
+                    _bump_seed_stats(summary, seed_stat_keys, "parsed")
+                    authors = record.get("authors") or []
+                    title = str(record.get("title") or "")
+                    diagnostics = record.get("_diagnostics") if isinstance(record.get("_diagnostics"), dict) else {}
 
+                    if not title or not authors:
+                        if _is_probable_kakao_block_page(
+                            title=title,
+                            authors=authors,
+                            diagnostics=diagnostics,
+                        ):
+                            summary.error_count += 1
+                            _bump_seed_stats(summary, seed_stat_keys, "errors")
+                            await mark_protection_event(
+                                error_kind="blocked",
+                                content_id=content_id,
+                                diagnostics=diagnostics,
+                            )
+                            continue
+                        skipped_missing_author += 1
+                        summary.skipped_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "skipped")
+                        LOGGER.warning(
+                            "Kakao skip missing title/authors content_id=%s url=%s title=%r",
+                            content_id,
+                            record.get("content_url"),
+                            title,
+                        )
+                        await reset_rate_limit_streak()
+                        continue
+
+                    record.pop("_diagnostics", None)
+                    accepted = upserter.add_raw(record)
+                    if not accepted:
+                        _bump_seed_stats(summary, seed_stat_keys, "skipped")
+                        LOGGER.debug("Kakao skipped invalid record content_id=%s", content_id)
+                    if dry_run:
+                        _record_sample(summary, record)
+                    detail_done_set.add(content_id)
+                    detail_done_dirty = True
+                    processed_since_save += 1
+                    await reset_rate_limit_streak()
+                    if processed_since_save >= save_every:
+                        await persist_detail_state(force=True)
+                finally:
+                    ids_queue.task_done()
+
+        workers = [asyncio.create_task(worker(index + 1)) for index in range(detail_concurrency)]
+        await asyncio.gather(*workers)
+
+    await persist_detail_state(force=True)
+
+    if stop_event.is_set() and not abort_reason:
+        abort_reason = (
+            "Backfill received shutdown signal (SIGINT/SIGTERM). Progress was saved; resume with same state file."
+        )
     if skipped_missing_author:
-        LOGGER.warning("Kakao skipped %s items due to missing authors.", skipped_missing_author)
+        LOGGER.warning("Kakao skipped %s items due to missing title/authors.", skipped_missing_author)
+    if abort_reason:
+        raise RuntimeError(abort_reason)
     return summary
 
 
@@ -1179,10 +1585,35 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     summaries: List[SourceSummary] = []
     total_processed = 0
+    shutdown_event = asyncio.Event()
+    interrupted = False
+
+    loop = asyncio.get_running_loop()
+
+    def _request_shutdown(sig_name: str) -> None:
+        nonlocal interrupted
+        if shutdown_event.is_set():
+            return
+        interrupted = True
+        LOGGER.warning("Received %s; finishing current step, saving state, and exiting.", sig_name)
+        shutdown_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _request_shutdown, sig.name)
+        except (NotImplementedError, RuntimeError):
+            try:
+                signal.signal(sig, lambda *_args, _sig=sig: _request_shutdown(_sig.name))
+            except Exception:
+                continue
 
     try:
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
             for source in requested_sources:
+                if shutdown_event.is_set():
+                    interrupted = True
+                    LOGGER.warning("Stop event set before source=%s; ending run early.", source)
+                    break
                 remaining = _remaining_limit(max_items, total_processed)
                 if remaining == 0:
                     LOGGER.info("Global max_items reached before source=%s", source)
@@ -1200,6 +1631,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                             max_items=remaining,
                             state_dir=state_dir,
                             rewind_pages=rewind_pages,
+                            shutdown_event=shutdown_event,
                             summary=summary,
                         )
                     elif source == SOURCE_KAKAOPAGE:
@@ -1209,6 +1641,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                             max_items=remaining,
                             state_dir=state_dir,
                             seed_set=args.kakaopage_seed_set,
+                            shutdown_event=shutdown_event,
                             summary=summary,
                         )
                     else:
@@ -1228,6 +1661,10 @@ async def _async_main(args: argparse.Namespace) -> int:
 
                 summaries.append(summary)
                 total_processed += summary.parsed_count
+                if shutdown_event.is_set():
+                    interrupted = True
+                    LOGGER.warning("Stop event set after source=%s; ending run early.", source)
+                    break
 
     finally:
         if conn:
@@ -1270,6 +1707,8 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         print("Dry run enabled: no DB writes were committed.")
+    if interrupted:
+        return 1
     return 1 if overall.error_count > 0 else 0
 
 
