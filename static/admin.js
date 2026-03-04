@@ -156,6 +156,7 @@
       edit: {
         selectedTypeId: '',
         selectedSourceId: '',
+        selectedL2Id: '',
       },
     },
     addContent: {
@@ -1184,6 +1185,7 @@
       renderAllContentForms();
       renderManageEditTypeOptions();
       renderManageEditSourceOptions();
+      renderManageEditL2Options();
 
       const typeIdsToLoad = new Set();
       CONTENT_FORM_KEYS.forEach((formKey) => {
@@ -1193,9 +1195,14 @@
           typeIdsToLoad.add(selectedTypeId);
         }
       });
+      const manageSelectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
+      if (manageSelectedTypeId) {
+        typeIdsToLoad.add(manageSelectedTypeId);
+      }
       await Promise.all(
         Array.from(typeIdsToLoad).map((typeId) => loadContentSourcesByType(typeId, { silent: true })),
       );
+      renderManageEditSourceOptions();
     } catch (err) {
       showToast(err.message || '타입 목록을 불러오지 못했습니다.', { type: 'error' });
     }
@@ -1222,7 +1229,10 @@
   };
 
   const openAddTypeModal = (formKey = 'addContent') => {
-    STATE.addContent.modalTargetFormKey = getContentFormConfig(formKey) ? formKey : 'addContent';
+    STATE.addContent.modalTargetFormKey =
+      getContentFormConfig(formKey) || formKey === 'manageEdit'
+        ? formKey
+        : 'addContent';
     const modal = document.getElementById('addTypeModal');
     const input = document.getElementById('addTypeNameInput');
     if (!modal) return;
@@ -1307,12 +1317,23 @@
         });
         const createdType = payload?.type || null;
         closeAddTypeModal();
-        await loadContentTypes({
-          selectedTypeByFormKey: {
-            [targetFormKey]: createdType?.id ? String(createdType.id) : '',
-          },
-        });
-        setContentFormHint(targetFormKey, `타입 추가 완료: ${createdType?.name || name}`);
+        if (targetFormKey === 'manageEdit') {
+          await loadContentTypes();
+          STATE.manage.edit.selectedTypeId = createdType?.id ? String(createdType.id) : '';
+          STATE.manage.edit.selectedSourceId = '';
+          STATE.manage.edit.selectedL2Id = '';
+          renderManageEditTypeOptions();
+          renderManageEditSourceOptions();
+          renderManageEditL2Options();
+          setManageEditHint(`타입 추가 완료: ${createdType?.name || name}`);
+        } else {
+          await loadContentTypes({
+            selectedTypeByFormKey: {
+              [targetFormKey]: createdType?.id ? String(createdType.id) : '',
+            },
+          });
+          setContentFormHint(targetFormKey, `타입 추가 완료: ${createdType?.name || name}`);
+        }
         showToast('타입이 추가되었습니다.', { type: 'success' });
       });
     } catch (err) {
@@ -1625,19 +1646,34 @@
     return typeof value === 'string' ? value : '';
   };
 
+  const getMetaManualRegistrationValue = (item, key) => {
+    const meta = parseMeta(item?.meta);
+    const manualRegistration = meta?.manual_registration;
+    if (!manualRegistration || typeof manualRegistration !== 'object') return '';
+    const value = manualRegistration[key];
+    return typeof value === 'string' ? value : '';
+  };
+
   const setManageEditControlsDisabled = (disabled) => {
     const fieldIds = [
+      'manageEditTitle',
       'manageEditAuthor',
       'manageEditUrl',
       'manageEditTypeSelect',
       'manageEditSourceSelect',
+      'manageEditL2Select',
       'manageEditSaveBtn',
+      'manageEditTypeOpenBtn',
       'manageEditAddSourceBtn',
     ];
     fieldIds.forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
-      if (id === 'manageEditSaveBtn' || id === 'manageEditAddSourceBtn') {
+      if (
+        id === 'manageEditSaveBtn' ||
+        id === 'manageEditTypeOpenBtn' ||
+        id === 'manageEditAddSourceBtn'
+      ) {
         setButtonDisabled(el, disabled);
         return;
       }
@@ -1665,7 +1701,22 @@
     const selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
     const exists = STATE.addContent.types.some((entry) => String(entry.id) === selectedTypeId);
     typeSelect.value = exists ? selectedTypeId : '';
-    if (!exists) STATE.manage.edit.selectedTypeId = '';
+    if (!exists) {
+      STATE.manage.edit.selectedTypeId = '';
+      STATE.manage.edit.selectedL2Id = '';
+    }
+  };
+
+  const getManageEditL2Options = () => {
+    const selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
+    if (!selectedTypeId) return [];
+    const selectedType = STATE.addContent.types.find(
+      (entry) => String(entry.id) === selectedTypeId,
+    );
+    const normalizedType = normalizeContentTypeValue(
+      selectedType?.name || selectedType?.value || '',
+    );
+    return CONTENT_L2_OPTIONS_BY_TYPE[normalizedType] || [];
   };
 
   const renderManageEditSourceOptions = () => {
@@ -1708,6 +1759,40 @@
     setButtonDisabled(addSourceBtn, false);
   };
 
+  const renderManageEditL2Options = () => {
+    const l2Select = document.getElementById('manageEditL2Select');
+    if (!l2Select) return;
+
+    const selectedTypeId = String(STATE.manage.edit.selectedTypeId || '');
+    const options = getManageEditL2Options();
+    const hasType = !!selectedTypeId;
+    const selectedL2Id = String(STATE.manage.edit.selectedL2Id || '');
+    const selectedExists = options.some((entry) => entry.id === selectedL2Id);
+    if (!selectedExists) {
+      STATE.manage.edit.selectedL2Id = '';
+    }
+
+    l2Select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = hasType
+      ? options.length
+        ? 'L2 선택 (선택)'
+        : '선택 가능한 L2 없음'
+      : '타입을 먼저 선택하세요';
+    l2Select.appendChild(placeholder);
+
+    options.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.id;
+      option.textContent = entry.label;
+      l2Select.appendChild(option);
+    });
+
+    l2Select.value = STATE.manage.edit.selectedL2Id || '';
+    l2Select.disabled = !hasType || options.length === 0;
+  };
+
   const populateManageEditForm = (item) => {
     const titleInput = document.getElementById('manageEditTitle');
     const authorInput = document.getElementById('manageEditAuthor');
@@ -1719,8 +1804,10 @@
       if (urlInput) urlInput.value = '';
       STATE.manage.edit.selectedTypeId = '';
       STATE.manage.edit.selectedSourceId = '';
+      STATE.manage.edit.selectedL2Id = '';
       renderManageEditTypeOptions();
       renderManageEditSourceOptions();
+      renderManageEditL2Options();
       setManageEditHint('');
       setManageEditControlsDisabled(true);
       return;
@@ -1735,11 +1822,21 @@
       (entry) => normalizeContentTypeValue(entry?.name) === itemTypeValue,
     );
     STATE.manage.edit.selectedTypeId = matchedType ? String(matchedType.id) : '';
+    const itemL2Id = String(
+      getMetaManualRegistrationValue(item, 'l2_id') ||
+      getMetaManualRegistrationValue(item, 'l2Id') ||
+      '',
+    )
+      .trim()
+      .toLowerCase();
+    STATE.manage.edit.selectedL2Id = itemL2Id;
     renderManageEditTypeOptions();
     renderManageEditSourceOptions();
+    renderManageEditL2Options();
     setManageEditHint('');
     setManageEditControlsDisabled(false);
     renderManageEditSourceOptions();
+    renderManageEditL2Options();
 
     if (!STATE.manage.edit.selectedTypeId) return;
 
@@ -1762,16 +1859,24 @@
     const typeSelect = document.getElementById('manageEditTypeSelect');
     STATE.manage.edit.selectedTypeId = typeSelect?.value || '';
     STATE.manage.edit.selectedSourceId = '';
+    STATE.manage.edit.selectedL2Id = '';
     renderManageEditSourceOptions();
+    renderManageEditL2Options();
     if (STATE.manage.edit.selectedTypeId) {
       await loadContentSourcesByType(STATE.manage.edit.selectedTypeId, { silent: true });
       renderManageEditSourceOptions();
+      renderManageEditL2Options();
     }
   };
 
   const handleManageEditSourceChange = () => {
     const sourceSelect = document.getElementById('manageEditSourceSelect');
     STATE.manage.edit.selectedSourceId = sourceSelect?.value || '';
+  };
+
+  const handleManageEditL2Change = () => {
+    const l2Select = document.getElementById('manageEditL2Select');
+    STATE.manage.edit.selectedL2Id = String(l2Select?.value || '').trim().toLowerCase();
   };
 
   const moveMapKeyIfPresent = (mapObj, oldKey, newKey) => {
@@ -1789,11 +1894,17 @@
       return;
     }
 
+    const title = document.getElementById('manageEditTitle')?.value?.trim() || '';
     const authorName = document.getElementById('manageEditAuthor')?.value?.trim() || '';
     const contentUrl = document.getElementById('manageEditUrl')?.value?.trim() || '';
     const typeId = String(STATE.manage.edit.selectedTypeId || '');
     const sourceId = String(STATE.manage.edit.selectedSourceId || '');
+    const l2Id = String(STATE.manage.edit.selectedL2Id || '').trim().toLowerCase();
 
+    if (!title) {
+      showToast('제목을 입력해주세요.', { type: 'error' });
+      return;
+    }
     if (!typeId) {
       showToast('타입을 선택해주세요.', { type: 'error' });
       return;
@@ -1814,10 +1925,12 @@
         body: {
           content_id: item.content_id,
           source: item.source,
+          title,
           typeId: Number(typeId),
           sourceId: Number(sourceId),
           authorName,
           contentUrl,
+          l2Id,
         },
       });
 
@@ -3509,8 +3622,10 @@
     const detailCopyIdSourceBtn = document.getElementById('detailCopyIdSourceBtn');
     const manageEditContentForm = document.getElementById('manageEditContentForm');
     const manageEditTypeSelect = document.getElementById('manageEditTypeSelect');
+    const manageEditTypeOpenBtn = document.getElementById('manageEditTypeOpenBtn');
     const manageEditSourceSelect = document.getElementById('manageEditSourceSelect');
     const manageEditAddSourceBtn = document.getElementById('manageEditAddSourceBtn');
+    const manageEditL2Select = document.getElementById('manageEditL2Select');
     const manageEditSaveBtn = document.getElementById('manageEditSaveBtn');
     const addContentForm = document.getElementById('addContentForm');
     const addContentResetBtn = document.getElementById('addContentResetBtn');
@@ -3594,8 +3709,10 @@
       withLoading(manageEditSaveBtn, '저장 중...', saveManageContentInfo);
     });
     manageEditTypeSelect?.addEventListener('change', handleManageEditTypeChange);
+    manageEditTypeOpenBtn?.addEventListener('click', () => openAddTypeModal('manageEdit'));
     manageEditSourceSelect?.addEventListener('change', handleManageEditSourceChange);
     manageEditAddSourceBtn?.addEventListener('click', () => openAddSourceModal('manageEdit'));
+    manageEditL2Select?.addEventListener('change', handleManageEditL2Change);
     addTypeSaveBtn?.addEventListener('click', createContentTypeFromModal);
     addTypeCancelBtn?.addEventListener('click', closeAddTypeModal);
     addSourceSaveBtn?.addEventListener('click', createContentSourceFromModal);
@@ -3624,6 +3741,7 @@
     });
     renderManageEditTypeOptions();
     renderManageEditSourceOptions();
+    renderManageEditL2Options();
     populateManageEditForm(null);
 
     document.getElementById('overrideSaveBtn')?.addEventListener('click', (event) =>

@@ -955,6 +955,108 @@ def test_update_admin_content_success(monkeypatch, client, auth_headers):
     assert meta["common"]["content_url"] == "https://example.com/new"
 
 
+def test_update_admin_content_supports_title_and_l2(monkeypatch, client, auth_headers):
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (41,),
+                "fetchone": {
+                    "source_id": 41,
+                    "source_name": "티빙",
+                    "type_id": 3,
+                    "type_name": "OTT",
+                },
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("CID-9", "tving"),
+                "fetchone": {
+                    "content_id": "CID-9",
+                    "source": "tving",
+                    "title": "기존 제목",
+                    "content_type": "ott",
+                    "status": "연재중",
+                    "meta": {
+                        "manual_registration": {
+                            "type_id": 3,
+                            "type_name": "OTT",
+                            "source_id": 41,
+                            "source_name": "티빙",
+                            "l2_id": "etc",
+                            "l2_label": "기타",
+                        },
+                        "attributes": {"genres": ["etc"]},
+                    },
+                },
+            },
+            {
+                "contains": "SELECT 1",
+                "params": ("tving", "ott", "새 제목", "CID-9", "tving"),
+                "fetchone": None,
+            },
+            {
+                "contains": "UPDATE contents",
+                "fetchone": {
+                    "content_id": "CID-9",
+                    "source": "tving",
+                    "content_type": "ott",
+                    "title": "새 제목",
+                    "status": "완결",
+                    "meta": {
+                        "manual_registration": {
+                            "type_id": 3,
+                            "type_name": "OTT",
+                            "source_id": 41,
+                            "source_name": "티빙",
+                            "l2_id": "completed",
+                            "l2_label": "완결",
+                        },
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+            {"contains": "INSERT INTO admin_action_logs"},
+        ],
+    )
+    monkeypatch.setattr(audit_service, "get_cursor", lambda _conn: cursor)
+
+    response = client.post(
+        "/api/admin/contents/update",
+        json={
+            "content_id": "CID-9",
+            "source": "tving",
+            "title": "새 제목",
+            "typeId": 3,
+            "sourceId": 41,
+            "l2Id": "completed",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["content"]["title"] == "새 제목"
+    assert payload["content"]["status"] == "완결"
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 5
+
+    update_params = cursor.executed[3]["params"]
+    assert update_params[0] == "tving"
+    assert update_params[1] == "ott"
+    assert update_params[3] == "새 제목"
+    assert update_params[5] == "완결"
+    meta = json.loads(update_params[2])
+    assert meta["manual_registration"]["l2_id"] == "completed"
+    assert meta["manual_registration"]["l2_label"] == "완결"
+    assert "attributes" not in meta
+
+
 def test_update_admin_content_rejects_invalid_content_url(client, auth_headers):
     response = client.post(
         "/api/admin/contents/update",

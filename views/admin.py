@@ -827,6 +827,16 @@ def update_admin_content():
     type_id = _parse_positive_int(data.get('typeId') or data.get('type_id'))
     source_id = _parse_positive_int(data.get('sourceId') or data.get('source_id'))
 
+    has_title_input = any(key in data for key in ('title', 'contentTitle', 'content_title'))
+    title_input = None
+    if 'title' in data:
+        title_input = data.get('title')
+    elif 'contentTitle' in data:
+        title_input = data.get('contentTitle')
+    elif 'content_title' in data:
+        title_input = data.get('content_title')
+    title = _normalize_input_text(title_input) if has_title_input else None
+
     has_author_input = any(key in data for key in ('authorName', 'author_name', 'author'))
     author_input = None
     if 'authorName' in data:
@@ -845,8 +855,20 @@ def update_admin_content():
         content_url_input = data.get('content_url')
     content_url, is_valid_content_url = _parse_optional_http_url(content_url_input)
 
+    has_l2_input = any(key in data for key in ('l2Id', 'l2_id', 'l2'))
+    l2_input = None
+    if 'l2Id' in data:
+        l2_input = data.get('l2Id')
+    elif 'l2_id' in data:
+        l2_input = data.get('l2_id')
+    elif 'l2' in data:
+        l2_input = data.get('l2')
+    l2_id = _normalize_l2_id(l2_input) if has_l2_input else None
+
     if not content_id or not current_source:
         return _error_response(400, 'INVALID_REQUEST', 'content_id/contentId and source are required')
+    if has_title_input and not title:
+        return _error_response(400, 'INVALID_REQUEST', 'title is required')
     if type_id is None:
         return _error_response(400, 'INVALID_REQUEST', 'typeId is required')
     if source_id is None:
@@ -898,7 +920,15 @@ def update_admin_content():
             if existing_row is None:
                 return _error_response(404, 'CONTENT_NOT_FOUND', 'Content not found')
 
-            title = _get_row_value(existing_row, 'title')
+            current_title = _get_row_value(existing_row, 'title')
+            next_title = title if has_title_input else current_title
+            if not next_title:
+                return _error_response(400, 'INVALID_REQUEST', 'title is required')
+            existing_status = _get_row_value(existing_row, 'status')
+            l2_option = _resolve_manual_l2_option(content_type_value, l2_id) if has_l2_input else None
+            if has_l2_input and l2_id and l2_option is None:
+                return _error_response(400, 'INVALID_L2_ID', 'l2Id does not belong to typeId')
+            next_status = _resolve_manual_content_status(l2_option) if has_l2_input else existing_status
 
             cursor.execute(
                 """
@@ -911,7 +941,7 @@ def update_admin_content():
                   AND NOT (content_id = %s AND source = %s)
                 LIMIT 1
                 """,
-                (content_source_value, content_type_value, title, content_id, current_source),
+                (content_source_value, content_type_value, next_title, content_id, current_source),
             )
             if cursor.fetchone() is not None:
                 return _error_response(
@@ -963,12 +993,34 @@ def update_admin_content():
                 meta_payload.pop('common', None)
 
             manual_registration = meta_payload.get('manual_registration')
-            if isinstance(manual_registration, dict):
+            supports_manual_l2 = isinstance(manual_registration, dict)
+            if supports_manual_l2:
                 manual_registration['type_id'] = source_type_id
                 manual_registration['type_name'] = type_name
                 manual_registration['source_id'] = int(_get_row_value(source_row, 'source_id') or 0)
                 manual_registration['source_name'] = source_name
+                if has_l2_input:
+                    if l2_option:
+                        manual_registration['l2_id'] = l2_option.get('id')
+                        manual_registration['l2_label'] = l2_option.get('label')
+                    else:
+                        manual_registration.pop('l2_id', None)
+                        manual_registration.pop('l2_label', None)
                 meta_payload['manual_registration'] = manual_registration
+
+            if has_l2_input and supports_manual_l2:
+                l2_attributes = _copy_manual_l2_attributes(l2_option)
+                attributes_payload = meta_payload.get('attributes')
+                if not isinstance(attributes_payload, dict):
+                    attributes_payload = {}
+                attributes_payload.pop('weekdays', None)
+                attributes_payload.pop('genres', None)
+                if l2_attributes:
+                    attributes_payload.update(l2_attributes)
+                if attributes_payload:
+                    meta_payload['attributes'] = attributes_payload
+                else:
+                    meta_payload.pop('attributes', None)
 
             updated_meta = json.dumps(meta_payload, ensure_ascii=False)
             set_parts = [
@@ -981,6 +1033,12 @@ def update_admin_content():
                 content_type_value,
                 updated_meta,
             ]
+            if has_title_input:
+                set_parts.extend(["title = %s", "normalized_title = %s"])
+                update_params.extend([next_title, normalize_search_text(next_title)])
+            if has_l2_input and supports_manual_l2:
+                set_parts.append("status = %s")
+                update_params.append(next_status)
             if has_author_input:
                 set_parts.append("normalized_authors = %s")
                 update_params.append(normalize_search_text(author_name or ""))
@@ -1048,8 +1106,13 @@ def update_admin_content():
                 'new_source': content_source_value,
                 'previous_content_type': _get_row_value(existing_row, 'content_type'),
                 'new_content_type': content_type_value,
+                'previous_title': current_title if has_title_input else None,
+                'new_title': next_title if has_title_input else None,
+                'previous_status': existing_status if has_l2_input and supports_manual_l2 else None,
+                'new_status': next_status if has_l2_input and supports_manual_l2 else None,
                 'updated_author': author_name if has_author_input else None,
                 'updated_content_url': content_url if has_content_url_input else None,
+                'updated_l2_id': l2_id if has_l2_input and supports_manual_l2 else None,
             },
         )
         conn.commit()

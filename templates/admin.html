@@ -315,9 +315,8 @@
                   <input
                     id="manageEditTitle"
                     type="text"
-                    readonly
                     placeholder="검색 후 작품을 선택하세요"
-                    class="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80 placeholder:text-white/40 focus:outline-none"
+                    class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
                   />
                 </div>
                 <div class="grid gap-3 md:grid-cols-2">
@@ -343,12 +342,22 @@
                 <div class="grid gap-3 md:grid-cols-2">
                   <div class="space-y-1">
                     <label for="manageEditTypeSelect" class="text-xs text-white/70">작품 타입</label>
-                    <select
-                      id="manageEditTypeSelect"
-                      class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
-                    >
-                      <option value="">타입 선택</option>
-                    </select>
+                    <div class="flex items-center gap-2">
+                      <select
+                        id="manageEditTypeSelect"
+                        class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+                      >
+                        <option value="">타입 선택</option>
+                      </select>
+                      <button
+                        id="manageEditTypeOpenBtn"
+                        type="button"
+                        aria-label="타입 추가"
+                        class="h-10 w-10 rounded-xl border border-white/20 bg-white/10 text-lg text-white/90 transition hover:border-white/40"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                   <div class="space-y-1">
                     <label for="manageEditSourceSelect" class="text-xs text-white/70">소스</label>
@@ -371,6 +380,16 @@
                       </button>
                     </div>
                   </div>
+                </div>
+                <div class="space-y-1">
+                  <label for="manageEditL2Select" class="text-xs text-white/70">L2 (선택)</label>
+                  <select
+                    id="manageEditL2Select"
+                    disabled
+                    class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+                  >
+                    <option value="">타입을 먼저 선택하세요</option>
+                  </select>
                 </div>
                 <div class="flex justify-end">
                   <button
