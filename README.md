@@ -226,6 +226,18 @@ Notes:
 - KakaoPage phase controls:
   - `--kakaopage-phase {all,discovery,detail}` (default from `KAKAOPAGE_BACKFILL_PHASE`, fallback `all`).
   - `detail` phase never imports/launches Playwright and requires existing discovered IDs in state.
+- KakaoPage discovery strategy controls:
+  - `KAKAOPAGE_BACKFILL_DISCOVERY_STRATEGY` (default: `auto`)
+    - `auto`: if discovered IDs already exist in state, behaves like `refresh`; otherwise `full`.
+    - `full`: scroll until tab end-of-list (`no_tab_growth`) or max scroll cap.
+    - `refresh`: stop early when there is no global discovered-ID growth for N scrolls, even if tab-local IDs still change.
+    - `skip`: skip Playwright discovery entirely and proceed to detail phase (if requested).
+  - `KAKAOPAGE_BACKFILL_DISCOVERY_NO_GLOBAL_GROWTH_SCROLLS` (default: `8`)
+  - `KAKAOPAGE_BACKFILL_DISCOVERY_MAX_MEMORY_USAGE_RATIO` (default: `0.85`)
+    - During discovery, if container memory usage ratio exceeds this threshold, discovery stops gracefully after saving state.
+  - Discovery state metadata (in `.backfill_state/kakao_page.json`):
+    - `discovery_complete`, `discovery_seed_set`, `discovery_strategy_last`, `discovery_completed_at`
+    - When already complete for the same seed set and strategy is not `full`, discovery is skipped to avoid repeated heavy Playwright runs.
 - KakaoPage Playwright memory guard:
   - `KAKAOPAGE_BACKFILL_MIN_MEMORY_FOR_PLAYWRIGHT_MB` (default: `1024`)
   - `--kakaopage-allow-low-memory-playwright` (or env `KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT=1`) to override guard.

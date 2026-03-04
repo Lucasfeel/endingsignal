@@ -12,6 +12,7 @@ import random
 import signal
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -81,6 +82,16 @@ KAKAOPAGE_PHASE_ALL = "all"
 KAKAOPAGE_PHASE_DISCOVERY = "discovery"
 KAKAOPAGE_PHASE_DETAIL = "detail"
 KAKAOPAGE_PHASE_CHOICES = (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DISCOVERY, KAKAOPAGE_PHASE_DETAIL)
+KAKAOPAGE_DISCOVERY_STRATEGY_AUTO = "auto"
+KAKAOPAGE_DISCOVERY_STRATEGY_FULL = "full"
+KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH = "refresh"
+KAKAOPAGE_DISCOVERY_STRATEGY_SKIP = "skip"
+KAKAOPAGE_DISCOVERY_STRATEGY_CHOICES = (
+    KAKAOPAGE_DISCOVERY_STRATEGY_AUTO,
+    KAKAOPAGE_DISCOVERY_STRATEGY_FULL,
+    KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH,
+    KAKAOPAGE_DISCOVERY_STRATEGY_SKIP,
+)
 
 GENRE_FANTASY = "\ud310\ud0c0\uc9c0"
 GENRE_HYEONPAN = "\ud604\ud310"
@@ -638,6 +649,129 @@ def _resolve_kakao_phase_default() -> str:
     return KAKAOPAGE_PHASE_ALL
 
 
+def _resolve_kakao_discovery_strategy_default() -> str:
+    raw_strategy = (os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_STRATEGY") or "").strip().lower()
+    if raw_strategy in KAKAOPAGE_DISCOVERY_STRATEGY_CHOICES:
+        return raw_strategy
+    if raw_strategy:
+        LOGGER.warning(
+            "Unknown KAKAOPAGE_BACKFILL_DISCOVERY_STRATEGY=%s; falling back to %s",
+            raw_strategy,
+            KAKAOPAGE_DISCOVERY_STRATEGY_AUTO,
+        )
+    return KAKAOPAGE_DISCOVERY_STRATEGY_AUTO
+
+
+def _resolve_effective_kakao_discovery_strategy(
+    *,
+    configured_strategy: str,
+    discovered_count: int,
+) -> str:
+    strategy = str(configured_strategy or "").strip().lower()
+    if strategy not in KAKAOPAGE_DISCOVERY_STRATEGY_CHOICES:
+        strategy = KAKAOPAGE_DISCOVERY_STRATEGY_AUTO
+    if strategy == KAKAOPAGE_DISCOVERY_STRATEGY_AUTO:
+        return (
+            KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH
+            if discovered_count > 0
+            else KAKAOPAGE_DISCOVERY_STRATEGY_FULL
+        )
+    return strategy
+
+
+def _resolve_kakao_discovery_no_global_growth_scrolls() -> int:
+    return _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_NO_GLOBAL_GROWTH_SCROLLS")) or 8
+
+
+def _resolve_kakao_discovery_max_memory_usage_ratio() -> float:
+    parsed_ratio = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_MAX_MEMORY_USAGE_RATIO"))
+    if parsed_ratio is None:
+        return 0.85
+    return min(parsed_ratio, 1.0)
+
+
+def _should_stop_kakao_discovery_tab(
+    *,
+    strategy: str,
+    no_global_growth_rounds: int,
+    no_tab_growth_rounds: int,
+    no_global_growth_threshold: int,
+    stagnant_threshold: int,
+    memory_usage_ratio: Optional[float],
+    max_memory_usage_ratio: float,
+) -> Optional[str]:
+    if (
+        isinstance(memory_usage_ratio, (int, float))
+        and memory_usage_ratio > 0
+        and memory_usage_ratio >= max_memory_usage_ratio
+    ):
+        return "memory_guard"
+    if (
+        strategy == KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH
+        and no_global_growth_rounds >= max(1, no_global_growth_threshold)
+    ):
+        return "no_global_growth"
+    if no_tab_growth_rounds >= max(1, stagnant_threshold):
+        return "end_of_list"
+    return None
+
+
+def _kakao_discovery_target_ids(discovered_map: Dict[str, Any], max_items: Optional[int]) -> List[str]:
+    ids = sorted(str(content_id) for content_id in discovered_map.keys())
+    if max_items is not None:
+        ids = ids[:max_items]
+    return ids
+
+
+def _is_kakao_detail_already_complete(
+    *,
+    discovered_map: Dict[str, Any],
+    detail_done_set: Set[str],
+    max_items: Optional[int],
+) -> bool:
+    ids_to_process = _kakao_discovery_target_ids(discovered_map, max_items)
+    if not ids_to_process:
+        return False
+    return all(content_id in detail_done_set for content_id in ids_to_process)
+
+
+def _should_skip_kakao_discovery_from_state(
+    *,
+    state: Dict[str, Any],
+    seed_set: str,
+    strategy: str,
+) -> bool:
+    if strategy == KAKAOPAGE_DISCOVERY_STRATEGY_FULL:
+        return False
+    if not bool(state.get("discovery_complete")):
+        return False
+    return str(state.get("discovery_seed_set") or "").strip() == str(seed_set or "").strip()
+
+
+def _mark_kakao_discovery_complete(
+    *,
+    state: Dict[str, Any],
+    seed_set: str,
+    strategy: str,
+) -> None:
+    state["discovery_complete"] = True
+    state["discovery_seed_set"] = seed_set
+    state["discovery_strategy_last"] = strategy
+    state["discovery_completed_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _mark_kakao_discovery_incomplete(
+    *,
+    state: Dict[str, Any],
+    seed_set: str,
+    strategy: str,
+) -> None:
+    state["discovery_complete"] = False
+    state["discovery_seed_set"] = seed_set
+    state["discovery_strategy_last"] = strategy
+    state["discovery_completed_at"] = None
+
+
 def _resolve_kakao_allow_low_memory_playwright_from_env() -> bool:
     raw_value = (os.getenv("KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT") or "").strip().lower()
     return raw_value in {"1", "true", "t", "yes", "y", "on"}
@@ -1016,7 +1150,8 @@ async def _discover_kakaopage_ids(
     seed_set: str,
     summary: SourceSummary,
     stop_event: asyncio.Event,
-) -> None:
+    strategy: str,
+) -> Dict[str, Any]:
     discovered = state.setdefault("discovered", {})
     if not isinstance(discovered, dict):
         discovered = {}
@@ -1035,6 +1170,10 @@ async def _discover_kakaopage_ids(
 
     stagnant_threshold = int(os.getenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "4"))
     max_scrolls_per_tab = int(os.getenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "300"))
+    no_global_growth_threshold = _resolve_kakao_discovery_no_global_growth_scrolls()
+    max_memory_usage_ratio = _resolve_kakao_discovery_max_memory_usage_ratio()
+    if strategy not in (KAKAOPAGE_DISCOVERY_STRATEGY_FULL, KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH):
+        strategy = KAKAOPAGE_DISCOVERY_STRATEGY_FULL
     if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
         queue: List[Dict[str, Any]] = _build_webnoveldb_kakao_seeds()
     else:
@@ -1071,10 +1210,12 @@ async def _discover_kakaopage_ids(
     except Exception as exc:
         LOGGER.debug("Kakao discovery route optimization unavailable: %s", exc)
 
+    discovery_abort_reason: Optional[str] = None
     while queue:
         if stop_event.is_set():
             LOGGER.warning("Kakao discovery interrupted by stop event; saving state before exit.")
             _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+            discovery_abort_reason = "shutdown"
             break
         if max_items is not None and len(discovered) >= max_items:
             LOGGER.info("Kakao discovery reached max_items=%s", max_items)
@@ -1092,8 +1233,9 @@ async def _discover_kakaopage_ids(
             continue
 
         LOGGER.info(
-            "Kakao discovery open tab=%s genres=%s completed_seed=%s url=%s",
+            "Kakao discovery open tab=%s strategy=%s genres=%s completed_seed=%s url=%s",
             tab_name,
+            strategy,
             tab_genres,
             tab_seed_completed,
             tab_url,
@@ -1108,16 +1250,46 @@ async def _discover_kakaopage_ids(
             _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
             continue
 
-        stagnant_rounds = 0
+        no_global_growth_rounds = 0
+        no_tab_growth_rounds = 0
         tab_discovered_ids: Set[str] = set()
         last_html = ""
+        last_scroll_number = 0
+        last_global_new_count = 0
         last_tab_new_count = 0
-        stopped_due_to_stagnation = False
+        tab_entry_dirty = False
+        tab_stop_reason: Optional[str] = None
         for scroll_idx in range(max_scrolls_per_tab):
+            last_scroll_number = scroll_idx + 1
             if stop_event.is_set():
                 LOGGER.warning("Kakao discovery stop event while scrolling tab=%s; persisting state.", tab_name)
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+                discovery_abort_reason = "shutdown"
                 break
+            memory_snapshot = get_memory_snapshot()
+            usage_ratio = memory_snapshot.get("usage_ratio")
+            if (
+                isinstance(usage_ratio, (int, float))
+                and usage_ratio > 0
+                and usage_ratio >= max_memory_usage_ratio
+            ):
+                tab_stop_reason = "memory_guard"
+                discovery_abort_reason = tab_stop_reason
+                LOGGER.warning(
+                    "Kakao discovery memory guard tab=%s scroll=%s strategy=%s usage_ratio=%.3f threshold=%.3f "
+                    "usage_bytes=%s limit_bytes=%s stop_reason=%s",
+                    tab_name,
+                    scroll_idx + 1,
+                    strategy,
+                    usage_ratio,
+                    max_memory_usage_ratio,
+                    memory_snapshot.get("usage_bytes"),
+                    memory_snapshot.get("limit_bytes"),
+                    tab_stop_reason,
+                )
+                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+                break
+
             used_html_fallback = False
             fallback_tab_links: List[Dict[str, str]] = []
             try:
@@ -1157,6 +1329,16 @@ async def _discover_kakaopage_ids(
                     changed_any_entry = True
 
             global_new_count = len(discovered) - previous_count
+            last_global_new_count = global_new_count
+            if global_new_count <= 0:
+                no_global_growth_rounds += 1
+            else:
+                no_global_growth_rounds = 0
+            if tab_new_count <= 0:
+                no_tab_growth_rounds += 1
+            else:
+                no_tab_growth_rounds = 0
+            tab_entry_dirty = tab_entry_dirty or changed_any_entry
             if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
                 tab_links_to_use = discovered_tabs
                 if used_html_fallback:
@@ -1179,35 +1361,47 @@ async def _discover_kakaopage_ids(
                         }
                     )
 
-            if tab_new_count <= 0:
-                stagnant_rounds += 1
-            else:
-                stagnant_rounds = 0
-            if global_new_count > 0 or changed_any_entry:
+            if global_new_count > 0:
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
 
             LOGGER.info(
-                "Kakao discovery tab=%s scroll=%s global_total_ids=%s global_new_ids=%s tab_seen_ids=%s tab_new_ids=%s entry_changed=%s stagnant=%s",
+                "Kakao discovery tab=%s scroll=%s strategy=%s global_total_ids=%s global_new_ids=%s tab_seen_ids=%s "
+                "tab_new_ids=%s entry_changed=%s no_global_growth_rounds=%s no_tab_growth_rounds=%s "
+                "stagnant_threshold=%s no_global_growth_threshold=%s",
                 tab_name,
                 scroll_idx + 1,
+                strategy,
                 len(discovered),
                 global_new_count,
                 len(tab_discovered_ids),
                 tab_new_count,
                 changed_any_entry,
-                stagnant_rounds,
+                no_global_growth_rounds,
+                no_tab_growth_rounds,
+                stagnant_threshold,
+                no_global_growth_threshold,
             )
 
             if max_items is not None and len(discovered) >= max_items:
+                tab_stop_reason = "max_items"
                 break
-            if stagnant_rounds >= stagnant_threshold:
-                stopped_due_to_stagnation = True
+            tab_stop_reason = _should_stop_kakao_discovery_tab(
+                strategy=strategy,
+                no_global_growth_rounds=no_global_growth_rounds,
+                no_tab_growth_rounds=no_tab_growth_rounds,
+                no_global_growth_threshold=no_global_growth_threshold,
+                stagnant_threshold=stagnant_threshold,
+                memory_usage_ratio=None,
+                max_memory_usage_ratio=max_memory_usage_ratio,
+            )
+            if tab_stop_reason:
                 break
 
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await page.wait_for_timeout(_resolve_kakao_discovery_scroll_delay_ms())
         else:
-            if not stop_event.is_set() and not stopped_due_to_stagnation and (last_tab_new_count > 0 or stagnant_rounds == 0):
+            tab_stop_reason = "max_scrolls"
+            if not stop_event.is_set() and (last_tab_new_count > 0 or no_tab_growth_rounds == 0):
                 LOGGER.warning(
                     "Kakao discovery tab=%s reached max_scrolls_per_tab=%s before stagnation; discovery likely truncated. "
                     "Increase KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB.",
@@ -1215,10 +1409,29 @@ async def _discover_kakaopage_ids(
                     max_scrolls_per_tab,
                 )
 
-        if stop_event.is_set():
-            done_set.add(tab_url)
-            state["tabs_done"] = sorted(done_set)
-            _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+        if tab_stop_reason:
+            LOGGER.info(
+                "Kakao discovery tab stop tab=%s strategy=%s stop_reason=%s scrolls=%s "
+                "global_total_ids=%s global_new_ids=%s tab_seen_ids=%s tab_new_ids=%s "
+                "no_global_growth_rounds=%s no_tab_growth_rounds=%s",
+                tab_name,
+                strategy,
+                tab_stop_reason,
+                last_scroll_number,
+                len(discovered),
+                last_global_new_count,
+                len(tab_discovered_ids),
+                last_tab_new_count,
+                no_global_growth_rounds,
+                no_tab_growth_rounds,
+            )
+
+        if stop_event.is_set() or discovery_abort_reason:
+            if tab_entry_dirty:
+                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+            if stop_event.is_set():
+                state["tabs_done"] = sorted(done_set)
+                _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
             break
 
         if not tab_discovered_ids:
@@ -1239,6 +1452,12 @@ async def _discover_kakaopage_ids(
 
         if max_items is not None and len(discovered) >= max_items:
             break
+
+    return {
+        "completed": discovery_abort_reason is None and not stop_event.is_set(),
+        "abort_reason": discovery_abort_reason,
+        "strategy": strategy,
+    }
 
 
 async def _fetch_kakao_detail_and_build_record(
@@ -1320,8 +1539,20 @@ async def run_kakaopage_backfill(
     state = _load_state(
         state_dir,
         SOURCE_KAKAOPAGE,
-        default={"discovered": {}, "tabs_done": [], "detail_done": []},
+        default={
+            "discovered": {},
+            "tabs_done": [],
+            "detail_done": [],
+            "discovery_complete": False,
+            "discovery_seed_set": "",
+            "discovery_strategy_last": "",
+            "discovery_completed_at": None,
+        },
     )
+    state.setdefault("discovery_complete", False)
+    state.setdefault("discovery_seed_set", "")
+    state.setdefault("discovery_strategy_last", "")
+    state.setdefault("discovery_completed_at", None)
     if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
         pre_filtered_discovered = _filter_webnoveldb_discovered_map(state.get("discovered", {}))
         dropped_count = len(state.get("discovered", {})) - len(pre_filtered_discovered)
@@ -1333,6 +1564,27 @@ async def run_kakaopage_backfill(
             )
             state["discovered"] = pre_filtered_discovered
             _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+
+    discovered_map = state.get("discovered", {})
+    if not isinstance(discovered_map, dict):
+        discovered_map = {}
+        state["discovered"] = discovered_map
+    detail_done_list = state.get("detail_done", [])
+    if not isinstance(detail_done_list, list):
+        detail_done_list = []
+    detail_done_set: Set[str] = set(str(item) for item in detail_done_list)
+
+    configured_discovery_strategy = _resolve_kakao_discovery_strategy_default()
+    effective_discovery_strategy = _resolve_effective_kakao_discovery_strategy(
+        configured_strategy=configured_discovery_strategy,
+        discovered_count=len(discovered_map),
+    )
+    LOGGER.info(
+        "Kakao discovery strategy configured=%s effective=%s discovered=%s",
+        configured_discovery_strategy,
+        effective_discovery_strategy,
+        len(discovered_map),
+    )
 
     cookies = _cookies_from_env_for_playwright()
     cookie_header = _kakao_cookie_header()
@@ -1352,7 +1604,54 @@ async def run_kakaopage_backfill(
     bridged_cookie_header: Optional[str] = None
     should_run_discovery = phase in (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DISCOVERY)
     should_run_detail = phase in (KAKAOPAGE_PHASE_ALL, KAKAOPAGE_PHASE_DETAIL)
+    if should_run_discovery and effective_discovery_strategy == KAKAOPAGE_DISCOVERY_STRATEGY_SKIP:
+        LOGGER.info(
+            "Kakao discovery skipped by strategy=%s (configured=%s).",
+            effective_discovery_strategy,
+            configured_discovery_strategy,
+        )
+        should_run_discovery = False
 
+    if (
+        should_run_discovery
+        and _should_skip_kakao_discovery_from_state(
+            state=state,
+            seed_set=seed_set,
+            strategy=effective_discovery_strategy,
+        )
+    ):
+        LOGGER.info(
+            "Kakao discovery already complete in state; skipping Playwright discovery "
+            "(seed_set=%s strategy=%s discovered=%s detail_done=%s completed_at=%s).",
+            seed_set,
+            effective_discovery_strategy,
+            len(discovered_map),
+            len(detail_done_set),
+            state.get("discovery_completed_at"),
+        )
+        should_run_discovery = False
+
+    if (
+        phase == KAKAOPAGE_PHASE_ALL
+        and discovered_map
+        and _is_kakao_detail_already_complete(
+            discovered_map=discovered_map,
+            detail_done_set=detail_done_set,
+            max_items=max_items,
+        )
+    ):
+        LOGGER.info(
+            "Kakao backfill already complete (discovered=%s detail_done=%s). Skipping discovery+detail.",
+            len(discovered_map),
+            len(detail_done_set),
+        )
+        return summary
+
+    discovery_result = {
+        "completed": False,
+        "abort_reason": None,
+        "strategy": effective_discovery_strategy,
+    }
     if should_run_discovery:
         _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
         _guard_kakao_playwright_memory(
@@ -1383,7 +1682,8 @@ async def run_kakaopage_backfill(
                     LOGGER.warning("Failed to inject Kakao cookies into Playwright context: %s", exc)
             page = await context.new_page()
             try:
-                await _discover_kakaopage_ids(
+                discovery_result = await _discover_kakaopage_ids(
+                    strategy=effective_discovery_strategy,
                     page=page,
                     state=state,
                     dry_run=dry_run,
@@ -1409,6 +1709,25 @@ async def run_kakaopage_backfill(
                         LOGGER.warning("Failed to bridge cookies from Playwright context: %s", exc)
                 await context.close()
                 await browser.close()
+        discovered_map = state.get("discovered", {})
+        if not isinstance(discovered_map, dict):
+            discovered_map = {}
+            state["discovered"] = discovered_map
+        if discovery_result.get("completed"):
+            _mark_kakao_discovery_complete(
+                state=state,
+                seed_set=seed_set,
+                strategy=effective_discovery_strategy,
+            )
+        else:
+            _mark_kakao_discovery_incomplete(
+                state=state,
+                seed_set=seed_set,
+                strategy=effective_discovery_strategy,
+            )
+        _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
+    else:
+        state["discovery_strategy_last"] = effective_discovery_strategy
 
     if not cookie_header and bridged_cookie_header:
         cookie_header = bridged_cookie_header
@@ -1416,6 +1735,7 @@ async def run_kakaopage_backfill(
     discovered_map = state.get("discovered", {})
     if not isinstance(discovered_map, dict):
         discovered_map = {}
+        state["discovered"] = discovered_map
     if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
         for canonical_genre in sorted(KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES):
             _init_seed_stats(summary, canonical_genre)
@@ -1430,6 +1750,13 @@ async def run_kakaopage_backfill(
     if phase == KAKAOPAGE_PHASE_DISCOVERY:
         if stop_event.is_set():
             raise RuntimeError("Kakao discovery interrupted by shutdown signal. Progress saved to state file.")
+        if discovery_result.get("abort_reason"):
+            LOGGER.warning(
+                "Kakao discovery ended early stop_reason=%s strategy=%s discovered=%s",
+                discovery_result.get("abort_reason"),
+                discovery_result.get("strategy"),
+                len(discovered_map),
+            )
         return summary
 
     if phase == KAKAOPAGE_PHASE_DETAIL and not discovered_map:
@@ -1448,14 +1775,22 @@ async def run_kakaopage_backfill(
     if not should_run_detail:
         return summary
 
-    detail_done_list = state.get("detail_done", [])
-    if not isinstance(detail_done_list, list):
-        detail_done_list = []
-    detail_done_set: Set[str] = set(str(item) for item in detail_done_list)
+    if (
+        discovered_map
+        and _is_kakao_detail_already_complete(
+            discovered_map=discovered_map,
+            detail_done_set=detail_done_set,
+            max_items=max_items,
+        )
+    ):
+        LOGGER.info(
+            "Kakao detail already complete (discovered=%s detail_done=%s). Skipping detail stage.",
+            len(discovered_map),
+            len(detail_done_set),
+        )
+        return summary
 
-    ids_to_process = sorted(str(content_id) for content_id in discovered_map.keys())
-    if max_items is not None:
-        ids_to_process = ids_to_process[:max_items]
+    ids_to_process = _kakao_discovery_target_ids(discovered_map, max_items)
 
     headers = _build_headers(referer=KAKAOPAGE_LIST_URL, cookie_header=cookie_header)
     detail_concurrency = _resolve_kakao_detail_concurrency()

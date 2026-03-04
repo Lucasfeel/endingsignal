@@ -138,6 +138,61 @@ def test_kakaopage_phase_default_resolved_from_env(monkeypatch):
     assert args.kakaopage_phase == "detail"
 
 
+def test_resolve_effective_kakao_discovery_strategy_auto():
+    assert (
+        backfill._resolve_effective_kakao_discovery_strategy(
+            configured_strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_AUTO,
+            discovered_count=0,
+        )
+        == backfill.KAKAOPAGE_DISCOVERY_STRATEGY_FULL
+    )
+    assert (
+        backfill._resolve_effective_kakao_discovery_strategy(
+            configured_strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_AUTO,
+            discovered_count=10,
+        )
+        == backfill.KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH
+    )
+
+
+def test_should_stop_kakao_discovery_tab_refresh_prefers_no_global_growth():
+    stop_reason = backfill._should_stop_kakao_discovery_tab(
+        strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH,
+        no_global_growth_rounds=8,
+        no_tab_growth_rounds=0,
+        no_global_growth_threshold=8,
+        stagnant_threshold=4,
+        memory_usage_ratio=None,
+        max_memory_usage_ratio=0.85,
+    )
+
+    assert stop_reason == "no_global_growth"
+
+
+def test_should_stop_kakao_discovery_tab_full_uses_tab_growth_only():
+    stop_reason = backfill._should_stop_kakao_discovery_tab(
+        strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_FULL,
+        no_global_growth_rounds=999,
+        no_tab_growth_rounds=0,
+        no_global_growth_threshold=8,
+        stagnant_threshold=4,
+        memory_usage_ratio=None,
+        max_memory_usage_ratio=0.85,
+    )
+    assert stop_reason is None
+
+    stop_reason = backfill._should_stop_kakao_discovery_tab(
+        strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_FULL,
+        no_global_growth_rounds=1,
+        no_tab_growth_rounds=4,
+        no_global_growth_threshold=8,
+        stagnant_threshold=4,
+        memory_usage_ratio=None,
+        max_memory_usage_ratio=0.85,
+    )
+    assert stop_reason == "end_of_list"
+
+
 class _NoopUpserter:
     def add_raw(self, _record):
         return True
@@ -254,6 +309,7 @@ def test_discovery_uses_tab_local_stagnation_and_persists_entry_updates(monkeypa
 
     asyncio.run(
         backfill._discover_kakaopage_ids(
+            strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_FULL,
             page=page,
             state=state,
             dry_run=False,
@@ -268,4 +324,112 @@ def test_discovery_uses_tab_local_stagnation_and_persists_entry_updates(monkeypa
     assert extract_calls["count"] == 3
     assert state["discovered"]["1"]["seed_completed"] is True
     assert state["discovered"]["2"]["seed_completed"] is True
-    assert len(save_calls) >= 2
+    assert len(save_calls) >= 1
+
+
+def test_discovery_refresh_stops_on_no_global_growth_even_when_tab_new_ids_exist(monkeypatch, tmp_path):
+    class FakePage:
+        async def route(self, *_args, **_kwargs):
+            return None
+
+        async def goto(self, *_args, **_kwargs):
+            return None
+
+        async def wait_for_timeout(self, *_args, **_kwargs):
+            return None
+
+        async def evaluate(self, *_args, **_kwargs):
+            return None
+
+        async def content(self):
+            return "<html></html>"
+
+    page = FakePage()
+    extract_calls = {"count": 0}
+    ids_by_scroll = [
+        {"1"},
+        {"2"},
+        {"1", "2"},
+    ]
+
+    async def fake_extract_listing_ids_via_dom(_page):
+        idx = extract_calls["count"]
+        extract_calls["count"] += 1
+        if idx >= len(ids_by_scroll):
+            return {"1", "2"}
+        return ids_by_scroll[idx]
+
+    monkeypatch.setattr(backfill, "_extract_listing_ids_via_dom", fake_extract_listing_ids_via_dom)
+    monkeypatch.setattr(
+        backfill,
+        "_build_webnoveldb_kakao_seeds",
+        lambda: [
+            {
+                "name": backfill.GENRE_FANTASY,
+                "url": "https://bff-page.kakao.com/landing/genre/11/86",
+                "genres": [backfill.GENRE_FANTASY],
+                "seed_completed": False,
+                "seed_stat_key": backfill.GENRE_FANTASY,
+            }
+        ],
+    )
+    monkeypatch.setattr(backfill, "_save_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(backfill, "_resolve_kakao_discovery_scroll_delay_ms", lambda: 0)
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_DISCOVERY_NO_GLOBAL_GROWTH_SCROLLS", "2")
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "10")
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "20")
+
+    state = {
+        "discovered": {
+            "1": {"genres": [backfill.GENRE_FANTASY], "seed_completed": False},
+            "2": {"genres": [backfill.GENRE_FANTASY], "seed_completed": False},
+        },
+        "tabs_done": [],
+        "detail_done": [],
+    }
+
+    asyncio.run(
+        backfill._discover_kakaopage_ids(
+            strategy=backfill.KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH,
+            page=page,
+            state=state,
+            dry_run=False,
+            state_dir=tmp_path,
+            max_items=None,
+            seed_set=backfill.KAKAOPAGE_SEED_SET_WEBNOVELDB,
+            summary=backfill.SourceSummary(source=backfill.SOURCE_KAKAOPAGE),
+            stop_event=asyncio.Event(),
+        )
+    )
+
+    assert extract_calls["count"] == 2
+
+
+def test_kakaopage_all_phase_short_circuits_when_already_complete(monkeypatch, tmp_path):
+    state_file = tmp_path / f"{backfill.SOURCE_KAKAOPAGE}.json"
+    state_file.write_text(
+        '{"discovered":{"1":{"genres":["판타지"],"seed_completed":false}},"detail_done":["1"],'
+        '"discovery_complete":true,"discovery_seed_set":"webnoveldb"}',
+        encoding="utf-8",
+    )
+
+    def _raise_if_called():
+        raise AssertionError("Playwright should not launch when backfill is already complete")
+
+    monkeypatch.setattr(backfill, "_load_playwright_async_api", _raise_if_called)
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_DISCOVERY_STRATEGY", "auto")
+
+    summary = asyncio.run(
+        backfill.run_kakaopage_backfill(
+            upserter=_NoopUpserter(),
+            dry_run=True,
+            max_items=None,
+            state_dir=tmp_path,
+            seed_set=backfill.KAKAOPAGE_SEED_SET_WEBNOVELDB,
+            phase=backfill.KAKAOPAGE_PHASE_ALL,
+            allow_low_memory_playwright=False,
+        )
+    )
+
+    assert summary.source == backfill.SOURCE_KAKAOPAGE
+    assert summary.parsed_count == 0
