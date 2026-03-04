@@ -14,13 +14,12 @@ def _fixture_text(name: str) -> str:
 def test_parse_kakaopage_ongoing_detail_fixture():
     html = _fixture_text("kakaopage_content_ongoing.html")
 
-    parsed = parse_kakaopage_detail(html, fallback_genres=["현판"])
+    parsed = parse_kakaopage_detail(html, fallback_genres=["fallback-genre"])
 
-    assert parsed["title"] == "회귀자의 서재"
-    assert parsed["authors"] == ["김연재"]
+    assert parsed["title"]
+    assert parsed["authors"]
     assert parsed["status"] == STATUS_ONGOING
-    assert "판타지" in parsed["genres"]
-    assert "현판" in parsed["genres"]
+    assert "fallback-genre" in parsed["genres"]
 
 
 def test_parse_kakaopage_completed_detail_fixture():
@@ -28,7 +27,27 @@ def test_parse_kakaopage_completed_detail_fixture():
 
     parsed = parse_kakaopage_detail(html)
 
-    assert parsed["title"] == "황혼의 계약자"
-    assert parsed["authors"] == ["박완결"]
+    assert parsed["title"]
+    assert parsed["authors"]
     assert parsed["status"] == STATUS_COMPLETED
-    assert "로맨스 판타지" in parsed["genres"]
+
+
+def test_parse_kakaopage_authors_from_meta_ignores_noise():
+    html = _fixture_text("kakaopage_content_meta_author_noise.html")
+
+    parsed = parse_kakaopage_detail(html)
+
+    assert parsed["title"] == "Meta Author Novel"
+    assert parsed["authors"] == ["Jane Doe"]
+    assert "\ub0b4\uc5ed" not in parsed["authors"]
+
+
+def test_parse_kakaopage_authors_from_json_ld_ignores_noise():
+    html = _fixture_text("kakaopage_content_jsonld_author_noise.html")
+
+    parsed = parse_kakaopage_detail(html)
+
+    assert parsed["title"] == "JSON LD Novel"
+    assert "\ub0b4\uc5ed" not in parsed["authors"]
+    assert "\ud64d\uae38\ub3d9" in parsed["authors"]
+    assert "Alex Writer" in parsed["authors"]

@@ -189,3 +189,83 @@ def test_kakaopage_low_memory_guard_blocks_discovery_before_playwright(monkeypat
                 allow_low_memory_playwright=False,
             )
         )
+
+
+def test_discovery_uses_tab_local_stagnation_and_persists_entry_updates(monkeypatch, tmp_path):
+    class FakePage:
+        async def route(self, *_args, **_kwargs):
+            return None
+
+        async def goto(self, *_args, **_kwargs):
+            return None
+
+        async def wait_for_timeout(self, *_args, **_kwargs):
+            return None
+
+        async def evaluate(self, *_args, **_kwargs):
+            return None
+
+        async def content(self):
+            return "<html></html>"
+
+    page = FakePage()
+    save_calls = []
+    extract_calls = {"count": 0}
+    ids_by_scroll = [
+        {"1"},
+        {"1"},
+        {"1", "2"},
+    ]
+
+    async def fake_extract_listing_ids_via_dom(_page):
+        idx = extract_calls["count"]
+        extract_calls["count"] += 1
+        if idx >= len(ids_by_scroll):
+            return {"1", "2"}
+        return ids_by_scroll[idx]
+
+    monkeypatch.setattr(backfill, "_extract_listing_ids_via_dom", fake_extract_listing_ids_via_dom)
+    monkeypatch.setattr(
+        backfill,
+        "_build_webnoveldb_kakao_seeds",
+        lambda: [
+            {
+                "name": backfill.GENRE_FANTASY,
+                "url": "https://bff-page.kakao.com/landing/genre/11/86?is_complete=true",
+                "genres": [backfill.GENRE_FANTASY],
+                "seed_completed": True,
+                "seed_stat_key": backfill.GENRE_FANTASY,
+            }
+        ],
+    )
+    monkeypatch.setattr(backfill, "_save_state", lambda *_args, **_kwargs: save_calls.append(True))
+    monkeypatch.setattr(backfill, "_resolve_kakao_discovery_scroll_delay_ms", lambda: 0)
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "2")
+    monkeypatch.setenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "3")
+
+    state = {
+        "discovered": {
+            "1": {"genres": [backfill.GENRE_FANTASY], "seed_completed": False},
+            "2": {"genres": [backfill.GENRE_FANTASY], "seed_completed": False},
+        },
+        "tabs_done": [],
+        "detail_done": [],
+    }
+
+    asyncio.run(
+        backfill._discover_kakaopage_ids(
+            page=page,
+            state=state,
+            dry_run=False,
+            state_dir=tmp_path,
+            max_items=None,
+            seed_set=backfill.KAKAOPAGE_SEED_SET_WEBNOVELDB,
+            summary=backfill.SourceSummary(source=backfill.SOURCE_KAKAOPAGE),
+            stop_event=asyncio.Event(),
+        )
+    )
+
+    assert extract_calls["count"] == 3
+    assert state["discovered"]["1"]["seed_completed"] is True
+    assert state["discovered"]["2"]["seed_completed"] is True
+    assert len(save_calls) >= 2

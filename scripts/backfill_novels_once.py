@@ -1034,7 +1034,7 @@ async def _discover_kakaopage_ids(
     state["tabs_done"] = sorted(done_set)
 
     stagnant_threshold = int(os.getenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "4"))
-    max_scrolls_per_tab = int(os.getenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "120"))
+    max_scrolls_per_tab = int(os.getenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "300"))
     if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
         queue: List[Dict[str, Any]] = _build_webnoveldb_kakao_seeds()
     else:
@@ -1111,6 +1111,8 @@ async def _discover_kakaopage_ids(
         stagnant_rounds = 0
         tab_discovered_ids: Set[str] = set()
         last_html = ""
+        last_tab_new_count = 0
+        stopped_due_to_stagnation = False
         for scroll_idx in range(max_scrolls_per_tab):
             if stop_event.is_set():
                 LOGGER.warning("Kakao discovery stop event while scrolling tab=%s; persisting state.", tab_name)
@@ -1134,9 +1136,15 @@ async def _discover_kakaopage_ids(
                 used_html_fallback = True
                 discovered_tabs = []
             previous_count = len(discovered)
+            tab_new_ids = set(ids) - tab_discovered_ids
+            tab_new_count = len(tab_new_ids)
+            last_tab_new_count = tab_new_count
+            changed_any_entry = False
 
             for content_id in ids:
                 entry = _normalize_kakao_discovered_entry(discovered.get(content_id))
+                previous_genres = list(entry.get("genres", []))
+                previous_seed_completed = bool(entry.get("seed_completed"))
                 if tab_genres:
                     entry["genres"] = dedupe_strings([*entry["genres"], *tab_genres])
                 elif tab_name and tab_name != "all":
@@ -1145,8 +1153,10 @@ async def _discover_kakaopage_ids(
                     entry["seed_completed"] = bool(entry.get("seed_completed")) or True
                 discovered[content_id] = entry
                 tab_discovered_ids.add(content_id)
+                if previous_genres != entry.get("genres") or previous_seed_completed != bool(entry.get("seed_completed")):
+                    changed_any_entry = True
 
-            new_count = len(discovered) - previous_count
+            global_new_count = len(discovered) - previous_count
             if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
                 tab_links_to_use = discovered_tabs
                 if used_html_fallback:
@@ -1169,28 +1179,41 @@ async def _discover_kakaopage_ids(
                         }
                     )
 
-            if new_count <= 0:
+            if tab_new_count <= 0:
                 stagnant_rounds += 1
             else:
                 stagnant_rounds = 0
+            if global_new_count > 0 or changed_any_entry:
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
 
             LOGGER.info(
-                "Kakao discovery tab=%s scroll=%s total_ids=%s new_ids=%s stagnant=%s",
+                "Kakao discovery tab=%s scroll=%s global_total_ids=%s global_new_ids=%s tab_seen_ids=%s tab_new_ids=%s entry_changed=%s stagnant=%s",
                 tab_name,
                 scroll_idx + 1,
                 len(discovered),
-                new_count,
+                global_new_count,
+                len(tab_discovered_ids),
+                tab_new_count,
+                changed_any_entry,
                 stagnant_rounds,
             )
 
             if max_items is not None and len(discovered) >= max_items:
                 break
             if stagnant_rounds >= stagnant_threshold:
+                stopped_due_to_stagnation = True
                 break
 
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await page.wait_for_timeout(_resolve_kakao_discovery_scroll_delay_ms())
+        else:
+            if not stop_event.is_set() and not stopped_due_to_stagnation and (last_tab_new_count > 0 or stagnant_rounds == 0):
+                LOGGER.warning(
+                    "Kakao discovery tab=%s reached max_scrolls_per_tab=%s before stagnation; discovery likely truncated. "
+                    "Increase KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB.",
+                    tab_name,
+                    max_scrolls_per_tab,
+                )
 
         if stop_event.is_set():
             done_set.add(tab_url)

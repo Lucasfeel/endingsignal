@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Set
 from urllib.parse import urljoin, urlparse
@@ -16,6 +17,24 @@ KAKAOPAGE_TITLE_SUFFIX_RE = re.compile(r"\s*-\s*웹소설\s*\|\s*카카오페이
 KAKAOPAGE_TITLE_SUFFIX_FALLBACK_RE = re.compile(r"\s*-\s*카카오페이지\s*$")
 _MULTISPACE_RE = re.compile(r"\s+")
 _CONTENT_ID_RE = re.compile(r"/content/(\d+)")
+_AUTHOR_WORD_RE = re.compile(r"[A-Za-z\uac00-\ud7a3]")
+_AUTHOR_NOISE_TOKENS = {
+    "\ub0b4\uc5ed",  # 내역
+    "\uc791\ud488\uc18c\uac1c",  # 작품소개
+    "\ub9ac\ubdf0",  # 리뷰
+    "\uacf5\uc720",  # 공유
+    "\ub313\uae00",  # 댓글
+    "\ud648",  # 홈
+    "\uc54c\ub9bc",  # 알림
+    "\ub354\ubcf4\uae30",  # 더보기
+    "\uc0c1\uc138",  # 상세
+    "home",
+    "comment",
+    "comments",
+    "share",
+    "review",
+    "history",
+}
 
 
 def _clean_text(value: object) -> str:
@@ -105,9 +124,24 @@ def _strip_kakaopage_title_suffix(title: str) -> str:
 def parse_detail_title(html: str) -> str:
     soup = BeautifulSoup(html or "", "lxml")
     title_node = soup.select_one("title")
-    if not title_node:
-        return ""
-    return _strip_kakaopage_title_suffix(title_node.get_text(" ", strip=True))
+    if title_node:
+        title = _strip_kakaopage_title_suffix(title_node.get_text(" ", strip=True))
+        if title:
+            return title
+
+    og_title_node = soup.select_one('meta[property="og:title"]')
+    if og_title_node:
+        og_title = _strip_kakaopage_title_suffix(og_title_node.get("content") or "")
+        if og_title:
+            return og_title
+
+    h1_node = soup.select_one("h1")
+    if h1_node:
+        h1_title = _strip_kakaopage_title_suffix(h1_node.get_text(" ", strip=True))
+        if h1_title:
+            return h1_title
+
+    return ""
 
 
 def _author_tokens_from_text(raw_value: str) -> List[str]:
@@ -120,6 +154,83 @@ def _author_tokens_from_text(raw_value: str) -> List[str]:
         return []
     split = re.split(r"[,/&·|]", value)
     return _dedupe_strings(split)
+
+
+def _is_plausible_author_token(token: str) -> bool:
+    value = _clean_text(token)
+    if not value:
+        return False
+    if value.lower() in _AUTHOR_NOISE_TOKENS:
+        return False
+    if re.fullmatch(r"[\d\W_]+", value):
+        return False
+    if not _AUTHOR_WORD_RE.search(value):
+        return False
+    return True
+
+
+def _filter_plausible_authors(tokens: Iterable[str]) -> List[str]:
+    filtered: List[str] = []
+    for token in _dedupe_strings(tokens):
+        if _is_plausible_author_token(token):
+            filtered.append(token)
+    return filtered
+
+
+def _extract_author_names_from_json_obj(raw_value: Any) -> List[str]:
+    names: List[str] = []
+    if isinstance(raw_value, str):
+        names.extend(_author_tokens_from_text(raw_value))
+        return names
+    if isinstance(raw_value, list):
+        for item in raw_value:
+            names.extend(_extract_author_names_from_json_obj(item))
+        return names
+    if isinstance(raw_value, dict):
+        for key in ("name", "author", "creator"):
+            if key in raw_value:
+                names.extend(_extract_author_names_from_json_obj(raw_value.get(key)))
+        return names
+    return names
+
+
+def _extract_authors_from_json_ld(soup: BeautifulSoup) -> List[str]:
+    authors: List[str] = []
+    for node in soup.select('script[type="application/ld+json"]'):
+        script_text = node.string or node.get_text(strip=True) or ""
+        if not script_text:
+            continue
+        if len(script_text) > 1_000_000:
+            continue
+        try:
+            parsed = json.loads(script_text)
+        except Exception:
+            continue
+        entries = parsed if isinstance(parsed, list) else [parsed]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            authors.extend(_extract_author_names_from_json_obj(entry.get("author")))
+            authors.extend(_extract_author_names_from_json_obj(entry.get("creator")))
+    return _filter_plausible_authors(authors)
+
+
+def _extract_authors_from_meta(soup: BeautifulSoup) -> List[str]:
+    selectors = [
+        'meta[name="author"]',
+        'meta[property="author"]',
+        'meta[property="article:author"]',
+        'meta[name="article:author"]',
+        'meta[name="og:author"]',
+    ]
+    authors: List[str] = []
+    for selector in selectors:
+        for node in soup.select(selector):
+            content = _clean_text(node.get("content") or "")
+            if not content:
+                continue
+            authors.extend(_author_tokens_from_text(content))
+    return _filter_plausible_authors(authors)
 
 
 def _extract_author_by_title_prefix(soup: BeautifulSoup, title: str) -> List[str]:
@@ -139,7 +250,7 @@ def _extract_author_by_title_prefix(soup: BeautifulSoup, title: str) -> List[str
         suffix = re.sub(r"^[\s\-|:/·]+", "", suffix).strip()
         if not suffix:
             continue
-        authors = _author_tokens_from_text(suffix)
+        authors = _filter_plausible_authors(_author_tokens_from_text(suffix))
         if authors:
             return authors
     return []
@@ -156,7 +267,7 @@ def _extract_author_from_label_text(soup: BeautifulSoup) -> List[str]:
         match = re.search(r"(?:작가|글|저자)\s*[:：]?\s*(.+)$", line)
         if not match:
             continue
-        authors = _author_tokens_from_text(match.group(1))
+        authors = _filter_plausible_authors(_author_tokens_from_text(match.group(1)))
         if authors:
             return authors
     return []
@@ -164,10 +275,23 @@ def _extract_author_from_label_text(soup: BeautifulSoup) -> List[str]:
 
 def parse_detail_authors(html: str, *, title: str) -> List[str]:
     soup = BeautifulSoup(html or "", "lxml")
+    by_json_ld = _extract_authors_from_json_ld(soup)
+    if by_json_ld:
+        return by_json_ld
+
+    by_meta = _extract_authors_from_meta(soup)
+    if by_meta:
+        return by_meta
+
+    by_label = _extract_author_from_label_text(soup)
+    if by_label:
+        return _filter_plausible_authors(by_label)
+
     by_title = _extract_author_by_title_prefix(soup, title)
     if by_title:
-        return by_title
-    return _extract_author_from_label_text(soup)
+        return _filter_plausible_authors(by_title)
+
+    return []
 
 
 def parse_detail_status(html: str) -> str:
