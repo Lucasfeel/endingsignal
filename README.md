@@ -141,6 +141,24 @@ Render memory note:
   - `--kakaopage-phase detail` (detail fetch/upsert only, no Playwright import/launch)
   - `--kakaopage-phase all` (default: discovery + detail)
 
+Render Worker (quote-safe Docker Command):
+- Use image built from `Dockerfile.backfill`.
+- Attach a persistent disk mounted at `/app/.backfill_state`.
+- Set Docker Command to:
+
+  ```bash
+  python scripts/run_kakaopage_backfill_worker.py
+  ```
+
+- Worker behavior:
+  - Runs KakaoPage backfill once.
+  - Writes marker files in state dir:
+    - `/app/.backfill_state/kakaopage_backfill_done`
+    - `/app/.backfill_state/kakaopage_backfill_failed`
+  - Then idles to avoid restart loops re-running the backfill.
+- To rerun intentionally:
+  - Delete the done marker (`kakaopage_backfill_done`) from the persistent disk, then redeploy/restart worker.
+
 Docker Compose split backfill services:
 
 ```bash
