@@ -151,13 +151,15 @@ Render Worker (quote-safe Docker Command):
   ```
 
 - Worker behavior:
-  - Runs KakaoPage backfill once.
+  - Always runs KakaoPage backfill once on each worker start, even if done marker already exists.
   - Writes marker files in state dir:
     - `/app/.backfill_state/kakaopage_backfill_done`
     - `/app/.backfill_state/kakaopage_backfill_failed`
+  - On success, overwrites the done marker timestamp.
   - Then idles to avoid restart loops re-running the backfill.
 - To rerun intentionally:
-  - Delete the done marker (`kakaopage_backfill_done`) from the persistent disk, then redeploy/restart worker.
+  - Redeploy/restart worker (done marker deletion is not required anymore).
+  - Optional compatibility mode: set `BACKFILL_RESPECT_DONE_MARKER=1` to restore old behavior (skip run when done marker exists).
 
 Docker Compose split backfill services:
 

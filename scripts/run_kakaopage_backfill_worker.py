@@ -16,6 +16,7 @@ DONE_MARKER_NAME = "kakaopage_backfill_done"
 FAILED_MARKER_NAME = "kakaopage_backfill_failed"
 DEFAULT_LOG_LEVEL = "INFO"
 IDLE_SECONDS = 10**9
+_TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
 
 def _resolve_state_dir() -> Path:
@@ -30,6 +31,11 @@ def _resolve_log_level() -> str:
     if not value:
         return DEFAULT_LOG_LEVEL
     return value
+
+
+def _resolve_respect_done_marker() -> bool:
+    value = (os.getenv("BACKFILL_RESPECT_DONE_MARKER") or "").strip().lower()
+    return value in _TRUTHY_VALUES
 
 
 def _ensure_state_dir(state_dir: Path) -> None:
@@ -97,8 +103,13 @@ def run_worker_once(state_dir: Path, *, log_level: str) -> int:
     done_marker, failed_marker = _marker_paths(state_dir)
 
     if done_marker.exists():
-        print(f"[worker] done marker exists at {done_marker}; skipping backfill run.")
-        return 0
+        if _resolve_respect_done_marker():
+            print(
+                f"[worker] done marker exists at {done_marker}; "
+                "BACKFILL_RESPECT_DONE_MARKER is enabled, skipping backfill run."
+            )
+            return 0
+        print(f"[worker] done marker exists at {done_marker}; proceeding to rerun and overwrite marker.")
 
     command = _build_backfill_command(state_dir=state_dir, log_level=log_level)
     print(f"[worker] starting KakaoPage backfill once. state_dir={state_dir} log_level={log_level}")

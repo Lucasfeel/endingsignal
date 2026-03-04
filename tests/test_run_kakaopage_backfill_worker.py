@@ -3,12 +3,33 @@ from pathlib import Path
 import scripts.run_kakaopage_backfill_worker as worker
 
 
-def test_run_worker_once_skips_when_done_marker_exists(monkeypatch, tmp_path):
+def test_run_worker_once_runs_when_done_marker_exists_by_default(monkeypatch, tmp_path):
     done_marker, _failed_marker = worker._marker_paths(tmp_path)
-    done_marker.write_text("2026-01-01T00:00:00+00:00\n", encoding="utf-8")
+    done_marker.write_text("old-timestamp\n", encoding="utf-8")
+    called = {"value": False}
+    monkeypatch.delenv("BACKFILL_RESPECT_DONE_MARKER", raising=False)
+
+    def _fake_run(_command):
+        called["value"] = True
+        return 0
+
+    monkeypatch.setattr(worker, "_run_backfill_command", _fake_run)
+    monkeypatch.setattr(worker, "_utc_iso_timestamp", lambda: "2026-03-04T00:00:00+00:00")
+
+    exit_code = worker.run_worker_once(tmp_path, log_level="INFO")
+
+    assert exit_code == 0
+    assert called["value"] is True
+    assert "2026-03-04T00:00:00+00:00" in done_marker.read_text(encoding="utf-8")
+
+
+def test_run_worker_once_skips_when_done_marker_exists_in_compat_mode(monkeypatch, tmp_path):
+    done_marker, _failed_marker = worker._marker_paths(tmp_path)
+    done_marker.write_text("old-timestamp\n", encoding="utf-8")
+    monkeypatch.setenv("BACKFILL_RESPECT_DONE_MARKER", "1")
 
     def _should_not_run(_command):
-        raise AssertionError("backfill command should not run when done marker exists")
+        raise AssertionError("backfill command should not run when BACKFILL_RESPECT_DONE_MARKER=1")
 
     monkeypatch.setattr(worker, "_run_backfill_command", _should_not_run)
 
