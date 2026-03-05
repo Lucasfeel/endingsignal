@@ -29,6 +29,7 @@ from services.kakaopage_parser import (
     KAKAOPAGE_GENRE_ROOT_PATH,
     extract_listing_content_ids,
     extract_tab_links,
+    is_noise_author_token,
     parse_content_id_from_href,
     parse_kakaopage_detail,
 )
@@ -213,6 +214,11 @@ def _clean_float_limit(value: Optional[Any]) -> Optional[float]:
     if parsed <= 0:
         return None
     return parsed
+
+
+def _is_truthy_flag(raw_value: Optional[Any]) -> bool:
+    value = str(raw_value or "").strip().lower()
+    return value in {"1", "true", "t", "yes", "y", "on"}
 
 
 def _parse_sources(raw_sources: str) -> List[str]:
@@ -649,6 +655,17 @@ def _resolve_kakao_phase_default() -> str:
     return KAKAOPAGE_PHASE_ALL
 
 
+def _resolve_kakao_force_detail_refresh_from_env() -> bool:
+    return _is_truthy_flag(os.getenv("KAKAOPAGE_BACKFILL_FORCE_DETAIL_REFRESH"))
+
+
+def _resolve_kakao_canonical_fallback_enabled() -> bool:
+    raw_value = os.getenv("KAKAOPAGE_BACKFILL_CANONICAL_FALLBACK")
+    if raw_value is None:
+        return True
+    return _is_truthy_flag(raw_value)
+
+
 def _resolve_kakao_discovery_strategy_default() -> str:
     raw_strategy = (os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_STRATEGY") or "").strip().lower()
     if raw_strategy in KAKAOPAGE_DISCOVERY_STRATEGY_CHOICES:
@@ -773,8 +790,7 @@ def _mark_kakao_discovery_incomplete(
 
 
 def _resolve_kakao_allow_low_memory_playwright_from_env() -> bool:
-    raw_value = (os.getenv("KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT") or "").strip().lower()
-    return raw_value in {"1", "true", "t", "yes", "y", "on"}
+    return _is_truthy_flag(os.getenv("KAKAOPAGE_BACKFILL_ALLOW_LOW_MEMORY_PLAYWRIGHT"))
 
 
 def _resolve_kakao_playwright_args() -> List[str]:
@@ -1460,6 +1476,15 @@ async def _discover_kakaopage_ids(
     }
 
 
+def _is_kakao_suspicious_author_list(authors: Any) -> bool:
+    if not isinstance(authors, list):
+        return True
+    tokens = [str(item).strip() for item in authors if str(item).strip()]
+    if not tokens:
+        return True
+    return any(is_noise_author_token(token) for token in tokens)
+
+
 async def _fetch_kakao_detail_and_build_record(
     *,
     session: aiohttp.ClientSession,
@@ -1469,33 +1494,107 @@ async def _fetch_kakao_detail_and_build_record(
     retries: int,
     retry_base_delay_seconds: float,
     retry_max_delay_seconds: float,
+    canonical_fallback_enabled: bool = True,
 ) -> Optional[Dict[str, Any]]:
     content_urls = _build_kakaopage_content_urls(content_id)
     fetch_url = content_urls["fetch_url"]
     canonical_content_url = content_urls["canonical_url"]
-    html = await fetch_text_polite(
-        session,
-        fetch_url,
-        headers=headers,
-        retries=retries,
-        retry_base_delay_seconds=retry_base_delay_seconds,
-        retry_max_delay_seconds=retry_max_delay_seconds,
-    )
-    diagnostics = _extract_html_diagnostics(html)
-    parsed = parse_kakaopage_detail(
-        html,
-        fallback_genres=discovered_entry.get("genres", []),
-    )
-    if _is_probable_kakao_block_page(
+
+    async def _fetch_and_parse(url: str) -> Tuple[Dict[str, Any], Dict[str, str]]:
+        html = await fetch_text_polite(
+            session,
+            url,
+            headers=headers,
+            retries=retries,
+            retry_base_delay_seconds=retry_base_delay_seconds,
+            retry_max_delay_seconds=retry_max_delay_seconds,
+        )
+        diagnostics = _extract_html_diagnostics(html)
+        parsed = parse_kakaopage_detail(
+            html,
+            fallback_genres=discovered_entry.get("genres", []),
+        )
+        author_source = str(parsed.get("_author_source") or "").strip()
+        if author_source:
+            diagnostics["author_source"] = author_source
+        return parsed, diagnostics
+
+    parsed, diagnostics = await _fetch_and_parse(fetch_url)
+    parsed_authors = parsed.get("authors", []) or []
+    parsed_suspicious = _is_kakao_suspicious_author_list(parsed_authors)
+
+    canonical_attempted = False
+    fallback_diagnostics: Optional[Dict[str, str]] = None
+
+    if canonical_fallback_enabled and (not parsed_authors or parsed_suspicious):
+        canonical_attempted = True
+        LOGGER.warning(
+            "Kakao suspicious/missing authors; attempting canonical fallback content_id=%s fetch_url=%s canonical_url=%s "
+            "title=%r authors=%s author_source=%s",
+            content_id,
+            fetch_url,
+            canonical_content_url,
+            parsed.get("title"),
+            parsed_authors,
+            diagnostics.get("author_source"),
+        )
+        fallback_parsed, fallback_diagnostics = await _fetch_and_parse(canonical_content_url)
+        fallback_authors = fallback_parsed.get("authors", []) or []
+        fallback_suspicious = _is_kakao_suspicious_author_list(fallback_authors)
+        fallback_author_source = str(fallback_parsed.get("_author_source") or "").strip()
+
+        if fallback_authors and not fallback_suspicious:
+            diagnostics = fallback_diagnostics
+            diagnostics["author_source"] = "canonical_fallback"
+            diagnostics["canonical_author_source"] = fallback_author_source
+            parsed = dict(fallback_parsed)
+            parsed["_author_source"] = "canonical_fallback"
+        else:
+            if not parsed.get("title") and fallback_parsed.get("title"):
+                parsed["title"] = fallback_parsed.get("title")
+            if not parsed.get("status") and fallback_parsed.get("status"):
+                parsed["status"] = fallback_parsed.get("status")
+            if not parsed.get("genres") and fallback_parsed.get("genres"):
+                parsed["genres"] = fallback_parsed.get("genres")
+            parsed["authors"] = []
+            diagnostics["author_source"] = str(parsed.get("_author_source") or "")
+            diagnostics["canonical_fallback_attempted"] = "1"
+            diagnostics["canonical_author_source"] = fallback_author_source
+            LOGGER.warning(
+                "Kakao canonical fallback did not yield valid authors content_id=%s fetch_url=%s canonical_url=%s "
+                "title=%r authors=%s canonical_title=%r canonical_authors=%s canonical_author_source=%s",
+                content_id,
+                fetch_url,
+                canonical_content_url,
+                parsed.get("title"),
+                parsed_authors,
+                fallback_parsed.get("title"),
+                fallback_authors,
+                fallback_author_source,
+            )
+
+    blocked = _is_probable_kakao_block_page(
         title=str(parsed.get("title") or ""),
         authors=parsed.get("authors", []) or [],
         diagnostics=diagnostics,
+    )
+    if (
+        not blocked
+        and fallback_diagnostics is not None
+        and _is_probable_kakao_block_page(
+            title=str(parsed.get("title") or ""),
+            authors=parsed.get("authors", []) or [],
+            diagnostics=fallback_diagnostics,
+        )
     ):
+        blocked = True
+    if blocked:
         raise BlockedError(
             status=200,
-            url=fetch_url,
-            diagnostics=diagnostics,
+            url=canonical_content_url if canonical_attempted else fetch_url,
+            diagnostics=fallback_diagnostics or diagnostics,
         )
+
     status = _resolve_kakaopage_status(
         parsed_status=parsed.get("status"),
         seed_completed=bool(discovered_entry.get("seed_completed")),
@@ -1524,6 +1623,7 @@ async def run_kakaopage_backfill(
     seed_set: str,
     phase: str,
     allow_low_memory_playwright: bool,
+    force_detail_refresh: bool = False,
     shutdown_event: Optional[asyncio.Event] = None,
     summary: Optional[SourceSummary] = None,
 ) -> SourceSummary:
@@ -1573,6 +1673,11 @@ async def run_kakaopage_backfill(
     if not isinstance(detail_done_list, list):
         detail_done_list = []
     detail_done_set: Set[str] = set(str(item) for item in detail_done_list)
+    if force_detail_refresh:
+        LOGGER.info(
+            "Kakao force detail refresh enabled; detail_done state will be ignored for runtime skips "
+            "(KAKAOPAGE_BACKFILL_FORCE_DETAIL_REFRESH=1 or --kakaopage-force-detail-refresh)."
+        )
 
     configured_discovery_strategy = _resolve_kakao_discovery_strategy_default()
     effective_discovery_strategy = _resolve_effective_kakao_discovery_strategy(
@@ -1639,6 +1744,7 @@ async def run_kakaopage_backfill(
             detail_done_set=detail_done_set,
             max_items=max_items,
         )
+        and not force_detail_refresh
     ):
         LOGGER.info(
             "Kakao backfill already complete (discovered=%s detail_done=%s). Skipping discovery+detail.",
@@ -1782,6 +1888,7 @@ async def run_kakaopage_backfill(
             detail_done_set=detail_done_set,
             max_items=max_items,
         )
+        and not force_detail_refresh
     ):
         LOGGER.info(
             "Kakao detail already complete (discovered=%s detail_done=%s). Skipping detail stage.",
@@ -1797,6 +1904,7 @@ async def run_kakaopage_backfill(
     min_interval_seconds = _resolve_kakao_min_interval_seconds()
     detail_jitter_min, detail_jitter_max = _resolve_kakao_detail_jitter_bounds()
     retries, retry_base_delay_seconds, retry_max_delay_seconds = _resolve_kakao_http_retry_policy()
+    canonical_fallback_enabled = _resolve_kakao_canonical_fallback_enabled()
     max_consecutive_rate_limits = (
         _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_MAX_CONSECUTIVE_RATE_LIMITS")) or 5
     )
@@ -1804,13 +1912,16 @@ async def run_kakaopage_backfill(
     save_every = _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_SAVE_STATE_EVERY")) or 20
 
     LOGGER.info(
-        "Kakao detail config concurrency=%s min_interval_seconds=%.3f jitter=[%.3f, %.3f] retries=%s max_rate_limits=%s",
+        "Kakao detail config concurrency=%s min_interval_seconds=%.3f jitter=[%.3f, %.3f] retries=%s "
+        "max_rate_limits=%s canonical_fallback=%s force_refresh=%s",
         detail_concurrency,
         min_interval_seconds,
         detail_jitter_min,
         detail_jitter_max,
         retries,
         max_consecutive_rate_limits,
+        canonical_fallback_enabled,
+        force_detail_refresh,
     )
 
     timeout = aiohttp.ClientTimeout(
@@ -1830,7 +1941,7 @@ async def run_kakaopage_backfill(
 
     ids_queue: asyncio.Queue[str] = asyncio.Queue()
     for content_id in ids_to_process:
-        if content_id in detail_done_set:
+        if not force_detail_refresh and content_id in detail_done_set:
             continue
         ids_queue.put_nowait(content_id)
 
@@ -1903,7 +2014,7 @@ async def run_kakaopage_backfill(
                     return
 
                 try:
-                    if content_id in detail_done_set:
+                    if not force_detail_refresh and content_id in detail_done_set:
                         continue
                     entry = _normalize_kakao_discovered_entry(discovered_map.get(content_id))
                     seed_stat_keys = (
@@ -1929,6 +2040,7 @@ async def run_kakaopage_backfill(
                             retries=retries,
                             retry_base_delay_seconds=retry_base_delay_seconds,
                             retry_max_delay_seconds=retry_max_delay_seconds,
+                            canonical_fallback_enabled=canonical_fallback_enabled,
                         )
                     except RateLimitedError as exc:
                         summary.error_count += 1
@@ -2030,6 +2142,21 @@ async def run_kakaopage_backfill(
                         await reset_rate_limit_streak()
                         continue
 
+                    if _is_kakao_suspicious_author_list(authors):
+                        skipped_missing_author += 1
+                        summary.skipped_count += 1
+                        _bump_seed_stats(summary, seed_stat_keys, "skipped")
+                        LOGGER.warning(
+                            "Kakao skip suspicious authors content_id=%s url=%s title=%r authors=%s author_source=%s",
+                            content_id,
+                            record.get("content_url"),
+                            title,
+                            authors,
+                            diagnostics.get("author_source"),
+                        )
+                        await reset_rate_limit_streak()
+                        continue
+
                     record.pop("_diagnostics", None)
                     accepted = upserter.add_raw(record)
                     if not accepted:
@@ -2056,7 +2183,10 @@ async def run_kakaopage_backfill(
             "Backfill received shutdown signal (SIGINT/SIGTERM). Progress was saved; resume with same state file."
         )
     if skipped_missing_author:
-        LOGGER.warning("Kakao skipped %s items due to missing title/authors.", skipped_missing_author)
+        LOGGER.warning(
+            "Kakao skipped %s items due to missing title/authors or suspicious author tokens.",
+            skipped_missing_author,
+        )
     if abort_reason:
         raise RuntimeError(abort_reason)
     return summary
@@ -2105,6 +2235,15 @@ def _make_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=_resolve_kakao_allow_low_memory_playwright_from_env(),
         help="Allow running KakaoPage discovery Playwright even under low cgroup memory limits.",
+    )
+    parser.add_argument(
+        "--kakaopage-force-detail-refresh",
+        action="store_true",
+        default=_resolve_kakao_force_detail_refresh_from_env(),
+        help=(
+            "Ignore Kakao detail_done completion checks and reprocess discovered IDs "
+            "(also configurable via KAKAOPAGE_BACKFILL_FORCE_DETAIL_REFRESH=1)."
+        ),
     )
     parser.add_argument(
         "--reset-state",
@@ -2196,6 +2335,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                             seed_set=args.kakaopage_seed_set,
                             phase=args.kakaopage_phase,
                             allow_low_memory_playwright=args.kakaopage_allow_low_memory_playwright,
+                            force_detail_refresh=args.kakaopage_force_detail_refresh,
                             shutdown_event=shutdown_event,
                             summary=summary,
                         )

@@ -3,7 +3,12 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from services.kakaopage_parser import STATUS_COMPLETED, STATUS_ONGOING, parse_kakaopage_detail
+from services.kakaopage_parser import (
+    STATUS_COMPLETED,
+    STATUS_ONGOING,
+    is_noise_author_token,
+    parse_kakaopage_detail,
+)
 
 
 def _fixture_text(name: str) -> str:
@@ -51,3 +56,33 @@ def test_parse_kakaopage_authors_from_json_ld_ignores_noise():
     assert "\ub0b4\uc5ed" not in parsed["authors"]
     assert "\ud64d\uae38\ub3d9" in parsed["authors"]
     assert "Alex Writer" in parsed["authors"]
+
+
+def test_parse_kakaopage_authors_from_next_data_ignores_noise():
+    html = _fixture_text("kakaopage_content_next_data_author.html")
+
+    parsed = parse_kakaopage_detail(html)
+
+    assert parsed["title"] == "Next Data Novel"
+    assert parsed["authors"] == ["Kim Writer", "\ud64d\uae38\ub3d9"]
+    assert parsed.get("_author_source") == "next_data"
+
+
+def test_parse_kakaopage_author_noise_variants_are_rejected():
+    html = _fixture_text("kakaopage_content_meta_author_noise_variants.html")
+
+    parsed = parse_kakaopage_detail(html)
+
+    assert parsed["authors"] == ["Jane Real"]
+
+
+def test_noise_author_token_variants():
+    variants = [
+        "\ub0b4\uc5ed",
+        "\ub0b4\uc5ed\ubcf4\uae30",
+        "\ub0b4\u200b\uc5ed",
+        "\ub0b4\uc5ed\u00a0",
+    ]
+
+    for token in variants:
+        assert is_noise_author_token(token) is True

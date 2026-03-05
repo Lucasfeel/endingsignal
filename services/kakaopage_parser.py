@@ -4,37 +4,54 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set
+import unicodedata
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-STATUS_COMPLETED = "완결"
-STATUS_ONGOING = "연재중"
+STATUS_COMPLETED = "\uc644\uacb0"
+STATUS_ONGOING = "\uc5f0\uc7ac\uc911"
 KAKAOPAGE_BASE_URL = "https://bff-page.kakao.com"
 KAKAOPAGE_GENRE_ROOT_PATH = "/landing/genre/11"
-KAKAOPAGE_TITLE_SUFFIX_RE = re.compile(r"\s*-\s*웹소설\s*\|\s*카카오페이지\s*$")
-KAKAOPAGE_TITLE_SUFFIX_FALLBACK_RE = re.compile(r"\s*-\s*카카오페이지\s*$")
+KAKAOPAGE_TITLE_SUFFIX_RE = re.compile(
+    r"\s*-\s*\uc6f9\uc18c\uc124\s*\|\s*\uce74\uce74\uc624\ud398\uc774\uc9c0\s*$"
+)
+KAKAOPAGE_TITLE_SUFFIX_FALLBACK_RE = re.compile(r"\s*-\s*\uce74\uce74\uc624\ud398\uc774\uc9c0\s*$")
 _MULTISPACE_RE = re.compile(r"\s+")
 _CONTENT_ID_RE = re.compile(r"/content/(\d+)")
 _AUTHOR_WORD_RE = re.compile(r"[A-Za-z\uac00-\ud7a3]")
-_AUTHOR_NOISE_TOKENS = {
+_AUTHOR_LABEL_PREFIX_RE = re.compile(
+    r"^(?:\uc791\uac00|\uae00|\uc800\uc790|\uc6d0\uc791)\s*[:\uff1a]\s*",
+    re.IGNORECASE,
+)
+_AUTHOR_COUNT_SUFFIX_RE = re.compile(r"\s*\uc678\s*\d+\s*\uba85\s*$")
+_AUTHOR_SPLIT_RE = re.compile(r"\s*(?:,|/|&|\||\u00b7|\u318d|\u3001|;)\s*")
+_AUTHOR_NORMALIZE_PUNCT_RE = re.compile(
+    r"[!\"#$%&'()*+,./:;<=>?@[\\\]^_`{|}~\-\u00b7\u318d\u3001]"
+)
+_AUTHOR_NEXT_DATA_KEY_HINTS = ("author", "authors", "writer", "writers", "creator", "creators")
+_AUTHOR_DESC_LABEL_RE = re.compile(
+    r"(?:\uc791\uac00|\uae00|\uc800\uc790)\s*[:\uff1a]\s*([^\n\r|]+)",
+    re.IGNORECASE,
+)
+_AUTHOR_NOISE_TOKENS = (
     "\ub0b4\uc5ed",  # 내역
     "\uc791\ud488\uc18c\uac1c",  # 작품소개
     "\ub9ac\ubdf0",  # 리뷰
     "\uacf5\uc720",  # 공유
     "\ub313\uae00",  # 댓글
+    "\ub354\ubcf4\uae30",  # 더보기
     "\ud648",  # 홈
     "\uc54c\ub9bc",  # 알림
-    "\ub354\ubcf4\uae30",  # 더보기
     "\uc0c1\uc138",  # 상세
-    "home",
+    "history",
+    "review",
+    "share",
     "comment",
     "comments",
-    "share",
-    "review",
-    "history",
-}
+    "home",
+)
 
 
 def _clean_text(value: object) -> str:
@@ -56,6 +73,27 @@ def _dedupe_strings(values: Iterable[str]) -> List[str]:
         seen.add(lowered)
         deduped.append(text)
     return deduped
+
+
+def normalize_author_token(token: object) -> str:
+    value = _clean_text(token)
+    if not value:
+        return ""
+    value = value.replace("\u00a0", " ")
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
+    value = re.sub(r"\s+", "", value)
+    value = _AUTHOR_NORMALIZE_PUNCT_RE.sub("", value)
+    return value.lower().strip()
+
+
+def is_noise_author_token(token: object) -> bool:
+    normalized = normalize_author_token(token)
+    if not normalized:
+        return True
+    for noise in _AUTHOR_NOISE_TOKENS:
+        if noise in normalized:
+            return True
+    return False
 
 
 def parse_content_id_from_href(href: str) -> Optional[str]:
@@ -100,7 +138,7 @@ def extract_tab_links(html: str, *, base_url: str = KAKAOPAGE_BASE_URL) -> List[
 
         label = _clean_text(anchor.get_text(" ", strip=True) or anchor.get("aria-label") or "")
         if not label:
-            label = "전체" if normalized_path == KAKAOPAGE_GENRE_ROOT_PATH else normalized_path.split("/")[-1]
+            label = "\uc804\uccb4" if normalized_path == KAKAOPAGE_GENRE_ROOT_PATH else normalized_path.split("/")[-1]
 
         discovered.append(
             {
@@ -148,11 +186,11 @@ def _author_tokens_from_text(raw_value: str) -> List[str]:
     value = _clean_text(raw_value)
     if not value:
         return []
-    value = re.sub(r"^(작가|글|저자|원작)\s*[:：]?\s*", "", value).strip()
-    value = re.sub(r"\s+외\s*\d+\s*명$", "", value).strip()
+    value = _AUTHOR_LABEL_PREFIX_RE.sub("", value).strip()
+    value = _AUTHOR_COUNT_SUFFIX_RE.sub("", value).strip()
     if not value:
         return []
-    split = re.split(r"[,/&·|]", value)
+    split = _AUTHOR_SPLIT_RE.split(value)
     return _dedupe_strings(split)
 
 
@@ -160,7 +198,9 @@ def _is_plausible_author_token(token: str) -> bool:
     value = _clean_text(token)
     if not value:
         return False
-    if value.lower() in _AUTHOR_NOISE_TOKENS:
+    if is_noise_author_token(value):
+        return False
+    if len(value) > 80:
         return False
     if re.fullmatch(r"[\d\W_]+", value):
         return False
@@ -187,7 +227,7 @@ def _extract_author_names_from_json_obj(raw_value: Any) -> List[str]:
             names.extend(_extract_author_names_from_json_obj(item))
         return names
     if isinstance(raw_value, dict):
-        for key in ("name", "author", "creator"):
+        for key in ("name", "author", "authors", "writer", "writers", "creator", "creators"):
             if key in raw_value:
                 names.extend(_extract_author_names_from_json_obj(raw_value.get(key)))
         return names
@@ -198,9 +238,7 @@ def _extract_authors_from_json_ld(soup: BeautifulSoup) -> List[str]:
     authors: List[str] = []
     for node in soup.select('script[type="application/ld+json"]'):
         script_text = node.string or node.get_text(strip=True) or ""
-        if not script_text:
-            continue
-        if len(script_text) > 1_000_000:
+        if not script_text or len(script_text) > 2_000_000:
             continue
         try:
             parsed = json.loads(script_text)
@@ -210,8 +248,35 @@ def _extract_authors_from_json_ld(soup: BeautifulSoup) -> List[str]:
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
-            authors.extend(_extract_author_names_from_json_obj(entry.get("author")))
-            authors.extend(_extract_author_names_from_json_obj(entry.get("creator")))
+            for key in ("author", "authors", "writer", "writers", "creator", "creators"):
+                authors.extend(_extract_author_names_from_json_obj(entry.get(key)))
+    return _filter_plausible_authors(authors)
+
+
+def _extract_authors_from_next_data(soup: BeautifulSoup) -> List[str]:
+    node = soup.select_one('script[id="__NEXT_DATA__"][type="application/json"]')
+    if node is None:
+        return []
+    script_text = node.string or node.get_text(strip=True) or ""
+    if not script_text or len(script_text) > 4_000_000:
+        return []
+    try:
+        parsed = json.loads(script_text)
+    except Exception:
+        return []
+
+    authors: List[str] = []
+    stack: List[Any] = [parsed]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            for raw_key, value in current.items():
+                key = str(raw_key or "").lower()
+                if any(hint in key for hint in _AUTHOR_NEXT_DATA_KEY_HINTS):
+                    authors.extend(_extract_author_names_from_json_obj(value))
+                stack.append(value)
+        elif isinstance(current, list):
+            stack.extend(current)
     return _filter_plausible_authors(authors)
 
 
@@ -233,6 +298,39 @@ def _extract_authors_from_meta(soup: BeautifulSoup) -> List[str]:
     return _filter_plausible_authors(authors)
 
 
+def _extract_author_from_label_text(soup: BeautifulSoup) -> List[str]:
+    body = soup.body
+    if body is None:
+        return []
+    for text in body.stripped_strings:
+        line = _clean_text(text)
+        if not line:
+            continue
+        match = re.search(
+            r"(?:\uc791\uac00|\uae00|\uc800\uc790|\uc6d0\uc791)\s*[:\uff1a]\s*(.+)$",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        authors = _filter_plausible_authors(_author_tokens_from_text(match.group(1)))
+        if authors:
+            return authors
+    return []
+
+
+def _extract_authors_from_meta_description(soup: BeautifulSoup) -> List[str]:
+    authors: List[str] = []
+    for selector in ('meta[property="og:description"]', 'meta[name="description"]'):
+        for node in soup.select(selector):
+            content = _clean_text(node.get("content") or "")
+            if not content:
+                continue
+            for match in _AUTHOR_DESC_LABEL_RE.finditer(content):
+                authors.extend(_author_tokens_from_text(match.group(1)))
+    return _filter_plausible_authors(authors)
+
+
 def _extract_author_by_title_prefix(soup: BeautifulSoup, title: str) -> List[str]:
     if not title:
         return []
@@ -247,7 +345,7 @@ def _extract_author_by_title_prefix(soup: BeautifulSoup, title: str) -> List[str
         if not line.startswith(title_compact):
             continue
         suffix = line[len(title_compact) :].strip()
-        suffix = re.sub(r"^[\s\-|:/·]+", "", suffix).strip()
+        suffix = re.sub(r"^[\s\-|:/\u00b7\u318d]+", "", suffix).strip()
         if not suffix:
             continue
         authors = _filter_plausible_authors(_author_tokens_from_text(suffix))
@@ -256,42 +354,38 @@ def _extract_author_by_title_prefix(soup: BeautifulSoup, title: str) -> List[str
     return []
 
 
-def _extract_author_from_label_text(soup: BeautifulSoup) -> List[str]:
-    body = soup.body
-    if body is None:
-        return []
-    for text in body.stripped_strings:
-        line = _clean_text(text)
-        if not line:
-            continue
-        match = re.search(r"(?:작가|글|저자)\s*[:：]?\s*(.+)$", line)
-        if not match:
-            continue
-        authors = _filter_plausible_authors(_author_tokens_from_text(match.group(1)))
-        if authors:
-            return authors
-    return []
+def _parse_detail_authors_with_source(soup: BeautifulSoup, *, title: str) -> Tuple[List[str], str]:
+    by_json_ld = _extract_authors_from_json_ld(soup)
+    if by_json_ld:
+        return by_json_ld, "jsonld"
+
+    by_next_data = _extract_authors_from_next_data(soup)
+    if by_next_data:
+        return by_next_data, "next_data"
+
+    by_meta = _extract_authors_from_meta(soup)
+    if by_meta:
+        return by_meta, "meta"
+
+    by_meta_desc = _extract_authors_from_meta_description(soup)
+    if by_meta_desc:
+        return by_meta_desc, "label"
+
+    by_label = _extract_author_from_label_text(soup)
+    if by_label:
+        return _filter_plausible_authors(by_label), "label"
+
+    by_title = _extract_author_by_title_prefix(soup, title)
+    if by_title:
+        return _filter_plausible_authors(by_title), "title_prefix"
+
+    return [], ""
 
 
 def parse_detail_authors(html: str, *, title: str) -> List[str]:
     soup = BeautifulSoup(html or "", "lxml")
-    by_json_ld = _extract_authors_from_json_ld(soup)
-    if by_json_ld:
-        return by_json_ld
-
-    by_meta = _extract_authors_from_meta(soup)
-    if by_meta:
-        return by_meta
-
-    by_label = _extract_author_from_label_text(soup)
-    if by_label:
-        return _filter_plausible_authors(by_label)
-
-    by_title = _extract_author_by_title_prefix(soup, title)
-    if by_title:
-        return _filter_plausible_authors(by_title)
-
-    return []
+    authors, _source = _parse_detail_authors_with_source(soup, title=title)
+    return authors
 
 
 def parse_detail_status(html: str) -> str:
@@ -302,7 +396,7 @@ def parse_detail_status(html: str) -> str:
             continue
         if text == STATUS_COMPLETED:
             return STATUS_COMPLETED
-        if re.search(r"(?<!미)완결", text):
+        if "\uc644\uacb0" in text:
             return STATUS_COMPLETED
     return STATUS_ONGOING
 
@@ -313,22 +407,22 @@ def parse_detail_genres(html: str) -> List[str]:
 
     for text in soup.stripped_strings:
         line = _clean_text(text)
-        if "웹소설" not in line or "|" not in line:
+        if "\uc6f9\uc18c\uc124" not in line or "|" not in line:
             continue
-        match = re.search(r"웹소설\s*\|\s*(.+)$", line)
+        match = re.search(r"\uc6f9\uc18c\uc124\s*\|\s*(.+)$", line)
         if not match:
             continue
         candidate = match.group(1).strip()
-        candidate = re.sub(r"\s*(연재중|완결)\s*$", "", candidate).strip()
-        candidate = candidate.split("카카오페이지")[0].strip()
+        candidate = re.sub(r"\s*(?:\uc5f0\uc7ac\uc911|\uc644\uacb0)\s*$", "", candidate).strip()
+        candidate = candidate.split("\uce74\uce74\uc624\ud398\uc774\uc9c0")[0].strip()
         if not candidate:
             continue
-        split = re.split(r"[,/>|·]", candidate)
+        split = re.split(r"[,/>|\u00b7\u318d]", candidate)
         genres.extend(_dedupe_strings(split))
 
     for anchor in soup.select("a[href*='/landing/genre/11']"):
         label = _clean_text(anchor.get_text(" ", strip=True))
-        if label and label not in {"웹소설", "전체"}:
+        if label and label not in {"\uc6f9\uc18c\uc124", "\uc804\uccb4"}:
             genres.append(label)
 
     return _dedupe_strings(genres)
@@ -340,7 +434,8 @@ def parse_kakaopage_detail(
     fallback_genres: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     title = parse_detail_title(html)
-    authors = parse_detail_authors(html, title=title)
+    soup = BeautifulSoup(html or "", "lxml")
+    authors, author_source = _parse_detail_authors_with_source(soup, title=title)
     status = parse_detail_status(html)
     genres = parse_detail_genres(html)
     if fallback_genres:
@@ -350,4 +445,6 @@ def parse_kakaopage_detail(
         "authors": authors,
         "status": status,
         "genres": genres,
+        "_author_source": author_source,
     }
+

@@ -58,6 +58,68 @@ def test_fetch_kakaopage_detail_build_record_stores_canonical_content_url(monkey
     assert record["content_url"] == "https://page.kakao.com/content/12345"
 
 
+def test_fetch_kakaopage_detail_uses_canonical_fallback_for_suspicious_authors(monkeypatch):
+    fetched_urls = []
+    parse_calls = {"count": 0}
+
+    async def fake_fetch_text_polite(
+        _session,
+        url,
+        *,
+        headers,
+        retries=4,
+        retry_base_delay_seconds=1.0,
+        retry_max_delay_seconds=60.0,
+        jitter_min_seconds=0.05,
+        jitter_max_seconds=0.35,
+        sleep_func=asyncio.sleep,
+    ):
+        fetched_urls.append(url)
+        return "<html></html>"
+
+    def fake_parse_kakaopage_detail(_html, *, fallback_genres=None):
+        parse_calls["count"] += 1
+        if parse_calls["count"] == 1:
+            return {
+                "title": "Primary Title",
+                "authors": ["\ub0b4\uc5ed\ubcf4\uae30"],
+                "status": backfill.STATUS_ONGOING,
+                "genres": fallback_genres or [],
+                "_author_source": "meta",
+            }
+        return {
+            "title": "Canonical Title",
+            "authors": ["Real Author"],
+            "status": backfill.STATUS_ONGOING,
+            "genres": fallback_genres or [],
+            "_author_source": "next_data",
+        }
+
+    monkeypatch.setattr(backfill, "fetch_text_polite", fake_fetch_text_polite)
+    monkeypatch.setattr(backfill, "parse_kakaopage_detail", fake_parse_kakaopage_detail)
+
+    record = asyncio.run(
+        backfill._fetch_kakao_detail_and_build_record(
+            session=None,
+            content_id="12345",
+            discovered_entry={"genres": [backfill.GENRE_FANTASY], "seed_completed": False},
+            headers={},
+            retries=2,
+            retry_base_delay_seconds=0.5,
+            retry_max_delay_seconds=2.0,
+        )
+    )
+
+    assert fetched_urls == [
+        "https://bff-page.kakao.com/content/12345",
+        "https://page.kakao.com/content/12345",
+    ]
+    assert record is not None
+    assert record["title"] == "Canonical Title"
+    assert record["authors"] == ["Real Author"]
+    assert record["_diagnostics"].get("author_source") == "canonical_fallback"
+
+
 def test_normalize_kakao_discovered_entry_backfills_seed_completed_default_false():
     normalized = backfill._normalize_kakao_discovered_entry({"genres": [backfill.GENRE_FANTASY]})
 
@@ -195,6 +257,15 @@ def test_should_stop_kakao_discovery_tab_full_uses_tab_growth_only():
 
 class _NoopUpserter:
     def add_raw(self, _record):
+        return True
+
+
+class _CollectingUpserter:
+    def __init__(self):
+        self.records = []
+
+    def add_raw(self, record):
+        self.records.append(record)
         return True
 
 
@@ -433,3 +504,60 @@ def test_kakaopage_all_phase_short_circuits_when_already_complete(monkeypatch, t
 
     assert summary.source == backfill.SOURCE_KAKAOPAGE
     assert summary.parsed_count == 0
+
+
+def test_kakaopage_force_detail_refresh_ignores_detail_done_and_reprocesses(monkeypatch, tmp_path):
+    state_file = tmp_path / f"{backfill.SOURCE_KAKAOPAGE}.json"
+    state_file.write_text(
+        '{"discovered":{"1":{"genres":["\ud310\ud0c0\uc9c0"],"seed_completed":false}},"detail_done":["1"],'
+        '"discovery_complete":true,"discovery_seed_set":"webnoveldb"}',
+        encoding="utf-8",
+    )
+
+    async def fake_fetch_text_polite(
+        _session,
+        _url,
+        *,
+        headers,
+        retries=4,
+        retry_base_delay_seconds=1.0,
+        retry_max_delay_seconds=60.0,
+        jitter_min_seconds=0.05,
+        jitter_max_seconds=0.35,
+        sleep_func=asyncio.sleep,
+    ):
+        return "<html></html>"
+
+    def fake_parse_kakaopage_detail(_html, *, fallback_genres=None):
+        return {
+            "title": "Forced Refresh Title",
+            "authors": ["Forced Author"],
+            "status": backfill.STATUS_ONGOING,
+            "genres": fallback_genres or [],
+            "_author_source": "jsonld",
+        }
+
+    monkeypatch.setattr(backfill, "fetch_text_polite", fake_fetch_text_polite)
+    monkeypatch.setattr(backfill, "parse_kakaopage_detail", fake_parse_kakaopage_detail)
+    monkeypatch.setattr(backfill, "_resolve_kakao_detail_concurrency", lambda: 1)
+    monkeypatch.setattr(backfill, "_resolve_kakao_min_interval_seconds", lambda: 0.001)
+    monkeypatch.setattr(backfill, "_resolve_kakao_detail_jitter_bounds", lambda: (0.0, 0.0))
+    monkeypatch.setattr(backfill, "_resolve_kakao_http_retry_policy", lambda: (1, 0.1, 0.2))
+
+    upserter = _CollectingUpserter()
+    summary = asyncio.run(
+        backfill.run_kakaopage_backfill(
+            upserter=upserter,
+            dry_run=True,
+            max_items=None,
+            state_dir=tmp_path,
+            seed_set=backfill.KAKAOPAGE_SEED_SET_WEBNOVELDB,
+            phase=backfill.KAKAOPAGE_PHASE_ALL,
+            allow_low_memory_playwright=False,
+            force_detail_refresh=True,
+        )
+    )
+
+    assert summary.parsed_count == 1
+    assert len(upserter.records) == 1
+    assert upserter.records[0]["content_id"] == "1"
