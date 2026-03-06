@@ -136,31 +136,15 @@ class LaftelOttCrawler(ContentCrawler):
         return f"{cls.LAFTEL_WEB_BASE}/item/{content_id}"
 
     @staticmethod
-    def _extract_authors(item: Dict[str, Any]) -> List[str]:
-        names = []
-
-        def _collect(value: object):
-            if isinstance(value, str):
-                stripped = value.strip()
-                if stripped:
-                    names.append(stripped)
-                return
-            if isinstance(value, dict):
-                candidate = value.get("name")
-                if isinstance(candidate, str):
-                    stripped = candidate.strip()
-                    if stripped:
-                        names.append(stripped)
-                return
-            if isinstance(value, list):
-                for nested in value:
-                    _collect(nested)
-
-        _collect(item.get("author"))
-        _collect(item.get("authors"))
-        _collect(item.get("illustrator"))
-        _collect(item.get("illustrators"))
-        return LaftelOttCrawler._dedupe_strings(names)
+    def _extract_display_genres(item: Dict[str, Any]) -> List[str]:
+        if not isinstance(item, dict):
+            return []
+        raw_genres = item.get("genres")
+        if not isinstance(raw_genres, list):
+            return []
+        return LaftelOttCrawler._dedupe_strings(
+            [entry for entry in raw_genres if isinstance(entry, str)]
+        )
 
     @staticmethod
     def _extract_thumbnail_url(raw: object) -> Optional[str]:
@@ -252,7 +236,7 @@ class LaftelOttCrawler(ContentCrawler):
         if not title:
             return None
 
-        authors = self._extract_authors(item)
+        authors = self._extract_display_genres(item)
         thumbnail_url = self._extract_thumbnail_url(item.get("img"))
         content_url = self._normalize_content_url(item.get("url"), content_id)
         source_tags = self._extract_source_tags(item.get("main_tag"))
