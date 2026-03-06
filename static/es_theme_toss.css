@@ -191,9 +191,11 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, 'Helvetica Neue',
-    'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto,
+    'Helvetica Neue', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 ::selection {
@@ -481,6 +483,7 @@ body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer > * 
   overflow: hidden;
   word-break: keep-all;
   overflow-wrap: break-word;
+  letter-spacing: -0.015em;
 }
 
 .es-card-meta {
@@ -488,6 +491,7 @@ body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer > * 
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.01em;
 }
 
 .es-afford-overlay {

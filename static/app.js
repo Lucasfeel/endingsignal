@@ -2124,8 +2124,8 @@ const restorePaginatedViewFromCache = async (snapshot, { requestSeq, cacheKey = 
 
   if (!pg.items.length && pg.done) {
     renderEmptyState(UI.contentGrid, {
-      title: '肄섑뀗痢좉? ?놁뒿?덈떎.',
-      message: '議곌굔??留욌뒗 肄섑뀗痢좉? ?놁뒿?덈떎.',
+      title: '콘텐츠가 없습니다.',
+      message: '조건에 맞는 콘텐츠가 없습니다.',
     });
     setCountIndicatorText('');
     hideLoadMoreUI();
