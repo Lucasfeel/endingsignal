@@ -4,6 +4,7 @@ tenacity
 beautifulsoup4
 lxml
 flask
+flask-compress
 flask-cors
 gunicorn
 python-dotenv

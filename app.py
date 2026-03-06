@@ -1,4 +1,5 @@
 from flask import Flask, render_template
+from flask_compress import Compress
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -14,6 +15,7 @@ from views.status import status_bp
 from views.subscriptions import subscriptions_bp
 
 app = Flask(__name__)
+Compress(app)
 if config.CORS_ALLOW_ORIGINS:
     CORS(
         app,

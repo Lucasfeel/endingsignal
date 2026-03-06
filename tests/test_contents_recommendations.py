@@ -197,3 +197,31 @@ def test_recommendations_preserve_type_priority_when_updated_at_ties(monkeypatch
 
     assert response.status_code == 200
     assert [item["content_type"] for item in payload] == ["webtoon", "novel", "ott"]
+
+
+def test_recommendations_v2_returns_compact_card_payload(monkeypatch, client):
+    _stub_contents_db(
+        monkeypatch,
+        {
+            "webtoon": [
+                _make_row("w-1", "naver_webtoon", "webtoon", 3, status=contents_view.STATUS_HIATUS)
+            ],
+            "novel": [],
+            "ott": [],
+        },
+    )
+
+    response = client.get("/api/contents/recommendations_v2?limit=12")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["returned"] == 1
+    assert payload["limit"] == 12
+    card = payload["contents"][0]
+    assert card["content_id"] == "w-1"
+    assert card["source"] == "naver_webtoon"
+    assert card["content_type"] == "webtoon"
+    assert card["status"] == contents_view.STATUS_HIATUS
+    assert card["final_state_badge"] == contents_view.STATUS_HIATUS
+    assert card["display_meta"]["authors"] == ["a"]
+    assert card["cursor"] is not None

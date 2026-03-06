@@ -191,8 +191,8 @@ body {
 }
 
 body {
-  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto,
-    'Helvetica Neue', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, 'Helvetica Neue',
+    'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   line-height: 1.45;
 }
 
@@ -228,6 +228,53 @@ body {
 
 .spring-bounce:active {
   transform: scale(0.98);
+}
+
+body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer {
+  opacity: 0.92;
+}
+
+body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer > * {
+  pointer-events: none;
+}
+
+.es-shell-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 140;
+  height: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.es-shell-progress.is-visible {
+  opacity: 1;
+}
+
+.es-shell-progress-bar {
+  width: 32%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--blue-300), var(--blue-500), var(--blue-700));
+  box-shadow: 0 0 18px rgba(49, 130, 246, 0.38);
+  animation: es-shell-progress-slide 1.05s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.es-shell-progress.is-warm .es-shell-progress-bar {
+  width: 24%;
+  animation-duration: 0.85s;
+}
+
+@keyframes es-shell-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
 }
 
 .es-text {
@@ -907,6 +954,22 @@ body.is-ait #bottomNav {
   bottom: calc(12px + env(safe-area-inset-bottom));
 }
 
+body.is-ait .spring-bounce:active {
+  transform: none;
+}
+
+body.is-ait .fade-in {
+  animation-duration: 0.08s;
+}
+
+body.is-ait .skeleton {
+  animation-duration: 1.8s;
+}
+
+body.is-ait .es-shell-progress {
+  height: 2px;
+}
+
 #bottomNav .bottom-nav-item {
   color: var(--grey-500);
   transition: color 0.16s ease;
@@ -947,6 +1010,28 @@ body.is-ait #bottomNav {
   background: rgba(25, 31, 40, 0.38) !important;
   backdrop-filter: blur(2px) !important;
   -webkit-backdrop-filter: blur(2px) !important;
+}
+
+body.is-ait .es-modal-overlay,
+body.is-ait [data-modal-overlay='true'] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in,
+  .skeleton,
+  .es-shell-progress-bar {
+    animation: none !important;
+  }
+
+  .spring-bounce:active {
+    transform: none;
+  }
+
+  body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer {
+    opacity: 1;
+  }
 }
 
 #subscribeStateLine,

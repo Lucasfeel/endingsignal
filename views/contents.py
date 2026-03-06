@@ -445,6 +445,74 @@ def coerce_row_dict(row):
         return {}
 
 
+def _normalize_string_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(entry).strip() for entry in value if str(entry).strip()]
+    if isinstance(value, tuple):
+        return [str(entry).strip() for entry in value if str(entry).strip()]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            parsed = json.loads(stripped)
+        except Exception:
+            return [stripped]
+        if isinstance(parsed, list):
+            return [str(entry).strip() for entry in parsed if str(entry).strip()]
+        return [stripped]
+    return []
+
+
+def _extract_display_meta(meta):
+    safe_meta = normalize_meta(meta)
+    attrs = safe_get_dict(safe_meta.get("attributes"))
+    common = safe_get_dict(safe_meta.get("common"))
+    content_url = (common.get("content_url") or common.get("url") or "") if isinstance(common, dict) else ""
+    genres = _normalize_string_list(
+        attrs.get("genres")
+        or attrs.get("genre")
+        or common.get("genres")
+        or common.get("genre")
+        or safe_meta.get("genres")
+        or safe_meta.get("genre")
+    )
+    return {
+        "authors": _normalize_string_list(common.get("authors")),
+        "content_url": content_url or "",
+        "url": common.get("url") or "",
+        "thumbnail_url": common.get("thumbnail_url") or "",
+        "alt_title": common.get("alt_title") or "",
+        "title_alias": common.get("title_alias") or "",
+        "weekdays": normalize_weekdays(attrs.get("weekdays")),
+        "genres": genres,
+    }
+
+
+def _serialize_card_payload(row):
+    coerced = coerce_row_dict(row)
+    display_meta = _extract_display_meta(coerced.get("meta"))
+    status = coerced.get("status")
+    return {
+        "content_id": coerced.get("content_id"),
+        "title": coerced.get("title"),
+        "status": status,
+        "source": coerced.get("source"),
+        "content_type": coerced.get("content_type"),
+        "thumbnail_url": display_meta.get("thumbnail_url") or None,
+        "content_url": display_meta.get("content_url") or display_meta.get("url") or None,
+        "display_meta": display_meta,
+        "final_state_badge": status if status in {STATUS_COMPLETED, STATUS_HIATUS} else None,
+        "cursor": encode_cursor(
+            coerced.get("title"),
+            coerced.get("content_id"),
+            source=coerced.get("source"),
+        ),
+    }
+
+
 def encode_cursor(title, content_id, source=None):
     try:
         payload = {
@@ -563,6 +631,80 @@ def _append_cursor_filter(where_parts, params, cursor_title, cursor_source, curs
         where_parts.append("(title, content_id) > (%s, %s)")
         params.extend([cursor_title, cursor_content_id])
     return True
+
+
+def _parse_status_filter(raw_value, *, default="ongoing"):
+    normalized = str(raw_value or default).strip().lower()
+    if normalized in {"completed", "hiatus"}:
+        return normalized
+    return "ongoing"
+
+
+def _execute_recommendations_query(cursor, *, limit, meta_expr):
+    statuses = (STATUS_ONGOING, STATUS_HIATUS)
+    per_type = ((limit + 2) // 3) * 2
+    query = f"""
+        WITH ranked_by_type AS (
+            SELECT
+                content_id,
+                title,
+                status,
+                {meta_expr} AS meta,
+                source,
+                content_type,
+                updated_at,
+                CASE content_type
+                    WHEN 'webtoon' THEN 0
+                    WHEN 'novel' THEN 1
+                    WHEN 'ott' THEN 2
+                    ELSE 99
+                END AS type_priority,
+                ROW_NUMBER() OVER (
+                    PARTITION BY content_type
+                    ORDER BY updated_at DESC, content_id ASC
+                ) AS type_rank
+            FROM contents
+            WHERE content_type IN ('webtoon', 'novel', 'ott')
+              AND COALESCE(is_deleted, FALSE) = FALSE
+              AND status IN (%s, %s)
+        ),
+        limited_by_type AS (
+            SELECT
+                content_id,
+                title,
+                status,
+                meta,
+                source,
+                content_type,
+                updated_at,
+                type_priority
+            FROM ranked_by_type
+            WHERE type_rank <= %s
+        ),
+        deduped AS (
+            SELECT
+                content_id,
+                title,
+                status,
+                meta,
+                source,
+                content_type,
+                updated_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY content_id, source
+                    ORDER BY updated_at DESC, type_priority ASC, content_id ASC
+                ) AS dedupe_rank,
+                type_priority
+            FROM limited_by_type
+        )
+        SELECT content_id, title, status, meta, source, content_type
+        FROM deduped
+        WHERE dedupe_rank = 1
+        ORDER BY updated_at DESC, type_priority ASC, content_id ASC
+        LIMIT %s
+    """
+    cursor.execute(query, (statuses[0], statuses[1], per_type, limit))
+    return cursor.fetchall()
 
 
 def _parse_float_env(name):
@@ -820,76 +962,11 @@ def get_recommendations():
 
     try:
         limit = _parse_recommendation_limit(request.args.get('limit'))
-        per_type = ((limit + 2) // 3) * 2
 
         conn = get_db()
         cursor = get_cursor(conn)
-        statuses = (STATUS_ONGOING, STATUS_HIATUS)
         meta_expr = _meta_select_expr()
-
-        query = f"""
-            WITH ranked_by_type AS (
-                SELECT
-                    content_id,
-                    title,
-                    status,
-                    {meta_expr} AS meta,
-                    source,
-                    content_type,
-                    updated_at,
-                    CASE content_type
-                        WHEN 'webtoon' THEN 0
-                        WHEN 'novel' THEN 1
-                        WHEN 'ott' THEN 2
-                        ELSE 99
-                    END AS type_priority,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY content_type
-                        ORDER BY updated_at DESC, content_id ASC
-                    ) AS type_rank
-                FROM contents
-                WHERE content_type IN ('webtoon', 'novel', 'ott')
-                  AND COALESCE(is_deleted, FALSE) = FALSE
-                  AND status IN (%s, %s)
-            ),
-            limited_by_type AS (
-                SELECT
-                    content_id,
-                    title,
-                    status,
-                    meta,
-                    source,
-                    content_type,
-                    updated_at,
-                    type_priority
-                FROM ranked_by_type
-                WHERE type_rank <= %s
-            ),
-            deduped AS (
-                SELECT
-                    content_id,
-                    title,
-                    status,
-                    meta,
-                    source,
-                    content_type,
-                    updated_at,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY content_id, source
-                        ORDER BY updated_at DESC, type_priority ASC, content_id ASC
-                    ) AS dedupe_rank,
-                    type_priority
-                FROM limited_by_type
-            )
-            SELECT content_id, title, status, meta, source, content_type
-            FROM deduped
-            WHERE dedupe_rank = 1
-            ORDER BY updated_at DESC, type_priority ASC, content_id ASC
-            LIMIT %s
-        """
-
-        cursor.execute(query, (statuses[0], statuses[1], per_type, limit))
-        rows = cursor.fetchall()
+        rows = _execute_recommendations_query(cursor, limit=limit, meta_expr=meta_expr)
 
         deduped = []
         for row in rows:
@@ -910,6 +987,43 @@ def get_recommendations():
 
     except Exception:
         current_app.logger.exception("Unhandled error in get_recommendations")
+        return _json_response({
+            "success": False,
+            "error": {"code": "INTERNAL", "message": "Internal Server Error"}
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
+@contents_bp.route('/api/contents/recommendations_v2', methods=['GET'])
+def get_recommendations_v2():
+    cursor = None
+    cache_enabled, cache_key, cached_payload = _cache_lookup(cacheable=True)
+    if cached_payload is not None:
+        return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
+
+    try:
+        limit = _parse_recommendation_limit(request.args.get('limit'))
+        conn = get_db()
+        cursor = get_cursor(conn)
+        rows = _execute_recommendations_query(cursor, limit=limit, meta_expr="meta")
+
+        payload = {
+            "contents": [_serialize_card_payload(row) for row in rows],
+            "returned": len(rows),
+            "limit": limit,
+        }
+
+        if cache_key:
+            _cache_store(cache_key, payload)
+
+        return _json_response(payload, cache_enabled=cache_enabled, cache_hit=False)
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_recommendations_v2")
         return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}
@@ -1180,6 +1294,233 @@ def get_ongoing_contents_v2():
         return _json_response(response_payload, cache_enabled=cache_enabled, cache_hit=False)
     except Exception:
         current_app.logger.exception("Unhandled error in get_ongoing_contents_v2")
+        return _json_response({
+            "success": False,
+            "error": {"code": "INTERNAL", "message": "Internal Server Error"}
+        }, cache_enabled=cache_enabled, cache_hit=False, status_code=500)
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+
+@contents_bp.route('/api/contents/browse_v3', methods=['GET'])
+def get_browse_contents_v3():
+    """Compact browse endpoint optimized for public card rendering."""
+    cursor = None
+    cache_enabled = False
+    try:
+        raw_type = request.args.get("type", "webtoon")
+        content_type = str(raw_type).strip().lower() if raw_type is not None else "webtoon"
+        if content_type not in ALLOWED_CONTENT_TYPES:
+            content_type = "webtoon"
+
+        source_filter = _parse_sources_args()
+        requested_status = _parse_status_filter(request.args.get("status"), default="ongoing")
+        if content_type == "novel" and requested_status == "hiatus":
+            requested_status = "ongoing"
+
+        raw_cursor = request.args.get("cursor")
+        cursor_title, cursor_source, cursor_content_id = decode_cursor(raw_cursor)
+        per_page = _parse_per_page_arg(
+            request.args.get("per_page"),
+            default=80,
+            min_value=1,
+            max_value=200,
+        )
+        cache_enabled, cache_key, cached_payload = _cache_lookup(cacheable=not raw_cursor)
+        if cached_payload is not None:
+            return _json_response(cached_payload, cache_enabled=cache_enabled, cache_hit=True)
+
+        conn = get_db()
+        cursor = get_cursor(conn)
+        next_cursor = None
+        filters = {
+            "type": content_type,
+            "status": requested_status,
+        }
+
+        if content_type == "novel":
+            raw_genre_groups = request.args.getlist("genre_group")
+            raw_genre_groups.extend(request.args.getlist("genreGroup"))
+            genre_groups = _resolve_genre_groups(raw_genre_groups)
+            genre_group = _select_compat_genre_group(genre_groups)
+
+            raw_is_completed = request.args.get("is_completed")
+            if raw_is_completed is None:
+                raw_is_completed = request.args.get("isCompleted")
+            is_completed = requested_status == "completed" or _parse_bool_arg(raw_is_completed, default=False)
+
+            def _build_base_query(limit_value, scan_title, scan_source, scan_content_id):
+                where_parts = [
+                    "content_type = %s",
+                    "COALESCE(is_deleted, FALSE) = FALSE",
+                ]
+                query_params = ["novel"]
+
+                if is_completed:
+                    where_parts.append("status = %s")
+                    query_params.append(STATUS_COMPLETED)
+                else:
+                    where_parts.append("status IN (%s, %s)")
+                    query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
+
+                _append_source_filter(where_parts, query_params, source_filter)
+                _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
+
+                return f"""
+                    SELECT content_id, title, status, meta, source, content_type
+                    FROM contents
+                    WHERE {' AND '.join(where_parts)}
+                    ORDER BY title ASC, source ASC, content_id ASC
+                    LIMIT %s
+                """, (*query_params, limit_value)
+
+            result_rows = []
+            if "ALL" in genre_groups:
+                query, params = _build_base_query(
+                    per_page,
+                    cursor_title,
+                    cursor_source,
+                    cursor_content_id,
+                )
+                cursor.execute(query, params)
+                result_rows = [coerce_row_dict(row) for row in cursor.fetchall()]
+
+                if len(result_rows) == per_page and result_rows:
+                    last_row = result_rows[-1]
+                    next_cursor = encode_cursor(
+                        last_row.get("title"),
+                        last_row.get("content_id"),
+                        source=last_row.get("source"),
+                    )
+            else:
+                chunk_size = min(per_page * 4, 500)
+                scan_title = cursor_title
+                scan_source = cursor_source
+                scan_content_id = cursor_content_id
+                has_more_rows = False
+                last_scanned_row = None
+
+                while len(result_rows) < per_page:
+                    query, params = _build_base_query(
+                        chunk_size,
+                        scan_title,
+                        scan_source,
+                        scan_content_id,
+                    )
+                    cursor.execute(query, params)
+                    raw_rows = cursor.fetchall()
+                    if not raw_rows:
+                        has_more_rows = False
+                        break
+
+                    normalized_rows = []
+                    for row in raw_rows:
+                        coerced = coerce_row_dict(row)
+                        coerced["meta"] = normalize_meta(coerced.get("meta"))
+                        normalized_rows.append(coerced)
+
+                    last_scanned_row = normalized_rows[-1]
+                    scan_title = last_scanned_row.get("title")
+                    scan_source = last_scanned_row.get("source")
+                    scan_content_id = last_scanned_row.get("content_id")
+
+                    matched_rows = _filter_novel_rows_by_genre_groups(normalized_rows, genre_groups)
+                    if matched_rows:
+                        remaining = per_page - len(result_rows)
+                        result_rows.extend(matched_rows[:remaining])
+
+                    has_more_rows = len(raw_rows) == chunk_size
+                    if len(result_rows) >= per_page:
+                        break
+                    if len(raw_rows) < chunk_size:
+                        has_more_rows = False
+                        break
+
+                if has_more_rows and last_scanned_row:
+                    next_cursor = encode_cursor(
+                        last_scanned_row.get("title"),
+                        last_scanned_row.get("content_id"),
+                        source=last_scanned_row.get("source"),
+                    )
+
+            filters.update({
+                "genre_group": genre_group,
+                "genre_groups": genre_groups,
+                "is_completed": is_completed,
+            })
+        else:
+            where_parts = [
+                "content_type = %s",
+                "COALESCE(is_deleted, FALSE) = FALSE",
+            ]
+            query_params = [content_type]
+
+            if requested_status == "completed":
+                where_parts.append("status = %s")
+                query_params.append(STATUS_COMPLETED)
+            elif requested_status == "hiatus":
+                where_parts.append("status = %s")
+                query_params.append(STATUS_HIATUS)
+            else:
+                where_parts.append("status IN (%s, %s)")
+                query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
+
+            _append_source_filter(where_parts, query_params, source_filter)
+            _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
+
+            if content_type == "webtoon" and requested_status == "ongoing":
+                days = _parse_browse_days_args()
+                day = "all" if days == ["all"] else ",".join(days)
+                filters["day"] = day
+                filters["days"] = days
+                if days != ["all"]:
+                    if len(days) == 1:
+                        where_parts.append("(meta->'attributes'->'weekdays') ? %s")
+                        query_params.append(days[0])
+                    else:
+                        day_placeholders = ", ".join(["%s"] * len(days))
+                        where_parts.append(f"(meta->'attributes'->'weekdays') ?| ARRAY[{day_placeholders}]")
+                        query_params.extend(days)
+
+            cursor.execute(
+                f"""
+                SELECT content_id, title, status, meta, source, content_type
+                FROM contents
+                WHERE {' AND '.join(where_parts)}
+                ORDER BY title ASC, source ASC, content_id ASC
+                LIMIT %s
+                """,
+                (*query_params, per_page),
+            )
+            result_rows = [coerce_row_dict(row) for row in cursor.fetchall()]
+
+            if len(result_rows) == per_page and result_rows:
+                last_row = result_rows[-1]
+                next_cursor = encode_cursor(
+                    last_row.get("title"),
+                    last_row.get("content_id"),
+                    source=last_row.get("source"),
+                )
+
+        serialized = [_serialize_card_payload(row) for row in result_rows]
+        payload = {
+            "contents": serialized,
+            "next_cursor": next_cursor,
+            "page_size": per_page,
+            "returned": len(serialized),
+            "filters": filters,
+        }
+
+        if cache_key:
+            _cache_store(cache_key, payload)
+
+        return _json_response(payload, cache_enabled=cache_enabled, cache_hit=False)
+    except Exception:
+        current_app.logger.exception("Unhandled error in get_browse_contents_v3")
         return _json_response({
             "success": False,
             "error": {"code": "INTERNAL", "message": "Internal Server Error"}

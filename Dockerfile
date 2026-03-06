@@ -1,3 +1,16 @@
+FROM node:24-alpine AS frontend-build
+
+WORKDIR /app
+
+COPY package.json tsconfig.json tailwind.config.cjs postcss.config.cjs vite.config.ts ./
+COPY frontend ./frontend
+COPY templates/index.html ./templates/index.html
+COPY static/app.js ./static/app.js
+COPY static/es_theme_toss.css ./static/es_theme_toss.css
+
+RUN npm install \
+    && npm run build
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,6 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && python -m playwright install --with-deps chromium
 
 COPY . .
+COPY --from=frontend-build /app/static/build ./static/build
 
 EXPOSE 5000
 

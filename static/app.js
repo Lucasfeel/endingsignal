@@ -16,8 +16,30 @@ const DEBUG_TOOLS = false;
 const DEBUG_RUNTIME = typeof window !== 'undefined' && Boolean(window.ES_DEBUG);
 const USE_BROWSE_PAGINATION_V2 = true;
 const PAGE_SIZE = 80;
+const BROWSE_ENDPOINT_V3 = '/api/contents/browse_v3';
+const RECOMMENDATIONS_ENDPOINT_V2 = '/api/contents/recommendations_v2';
 const THEME_STORAGE_KEY = 'es_theme';
 const DARK_MODE_MEDIA_QUERY = '(prefers-color-scheme: dark)';
+const PAGE_QUERY = new URLSearchParams(window.location.search);
+const IS_TOSS_WEBVIEW =
+  document.body?.classList.contains('is-ait') ||
+  PAGE_QUERY.get('host') === 'toss' ||
+  PAGE_QUERY.get('in_toss') === '1' ||
+  PAGE_QUERY.get('in_toss') === 'true';
+const CONNECTION_INFO = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+const PREFERS_REDUCED_MOTION = (() => {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_err) {
+    return false;
+  }
+})();
+const DEVICE_MEMORY_GB = Number(navigator.deviceMemory || 0);
+const PREFETCH_DISABLED =
+  PREFERS_REDUCED_MOTION ||
+  CONNECTION_INFO?.saveData === true ||
+  /(^|-)2g$/i.test(String(CONNECTION_INFO?.effectiveType || '')) ||
+  (IS_TOSS_WEBVIEW && DEVICE_MEMORY_GB > 0 && DEVICE_MEMORY_GB <= 2);
 
 function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
@@ -1222,11 +1244,19 @@ const STATE = {
   rendering: {
     list: [],
     index: 0,
-    batchSize: 60,
+    batchSize: IS_TOSS_WEBVIEW ? 42 : 60,
     scheduled: false,
     requestSeq: 0,
     aspectClass: 'aspect-[3/4]',
     tabId: 'webtoon',
+  },
+  perf: {
+    activeLabel: '',
+    retained: false,
+  },
+  prefetch: {
+    inflight: new Set(),
+    scheduled: null,
   },
   renderAbortController: null,
   gridRenderAbort: null,
@@ -1235,6 +1265,41 @@ const STATE = {
   tabAbortController: null,
   isMySubOpen: false,
   hasBootstrapped: false,
+};
+
+const dispatchPerfEvent = (name, detail = {}) => {
+  try {
+    window.dispatchEvent(new CustomEvent(`es:perf:${name}`, { detail }));
+  } catch (_err) {}
+};
+
+const setRouteLoadingState = (isLoading, { retained = false, label = '' } = {}) => {
+  STATE.perf.activeLabel = isLoading ? label : '';
+  STATE.perf.retained = isLoading ? retained : false;
+  document.body.dataset.routeLoading = isLoading ? '1' : '0';
+  document.body.dataset.routeRetained = retained ? '1' : '0';
+  dispatchPerfEvent(isLoading ? 'transition-start' : 'transition-end', {
+    warm: retained,
+    label,
+  });
+};
+
+const markPerf = (name) => {
+  try {
+    performance.mark(name);
+  } catch (_err) {}
+};
+
+const measurePerf = (name, startMark, endMark, detail = {}) => {
+  try {
+    performance.mark(endMark);
+    performance.measure(name, startMark, endMark);
+    const entries = performance.getEntriesByName(name);
+    const latest = entries[entries.length - 1];
+    if (DEBUG_RUNTIME && latest) {
+      console.info('[perf]', name, Math.round(latest.duration), detail);
+    }
+  } catch (_err) {}
 };
 
 const getOverlayStackTop = () => STATE.overlayStack[STATE.overlayStack.length - 1] || null;
@@ -1495,12 +1560,14 @@ async function renderInBatches({
   batchSize = 24,
   yieldMs = 8,
   signal,
+  onFirstPaint,
 }) {
   if (!container) return;
   container.innerHTML = '';
 
   const safeItems = Array.isArray(items) ? items : [];
   let i = 0;
+  let firstPaintDone = false;
 
   while (i < safeItems.length) {
     if (signal?.aborted) return;
@@ -1513,6 +1580,10 @@ async function renderInBatches({
     container.appendChild(frag);
 
     await new Promise((r) => requestAnimationFrame(r));
+    if (!firstPaintDone) {
+      firstPaintDone = true;
+      if (typeof onFirstPaint === 'function') onFirstPaint();
+    }
     const start = performance.now();
     if (yieldMs > 0) {
       while (performance.now() - start < yieldMs) {
@@ -1952,7 +2023,7 @@ const buildHomeViewCacheKey = (limit = HOME_RECOMMENDATIONS_LIMIT) => ({
   tabId: 'home',
   key: serializeViewCacheKey({
     tabId: 'home',
-    endpointPath: '/api/contents/recommendations',
+    endpointPath: RECOMMENDATIONS_ENDPOINT_V2,
     baseQuery: { limit },
     filters: { limit },
   }),
@@ -2480,6 +2551,35 @@ const normalizeMeta = (input) => {
   }
   if (typeof input === 'object') return input;
   return {};
+};
+
+const buildMetaFromDisplayMeta = (displayMeta) => {
+  const safeDisplayMeta = safeObj(displayMeta);
+  const authors = Array.isArray(safeDisplayMeta.authors)
+    ? safeDisplayMeta.authors.filter(Boolean)
+    : typeof safeDisplayMeta.authors === 'string' && safeDisplayMeta.authors.trim()
+      ? [safeDisplayMeta.authors.trim()]
+      : [];
+  const weekdays = Array.isArray(safeDisplayMeta.weekdays)
+    ? safeDisplayMeta.weekdays.filter(Boolean)
+    : [];
+  const genres = Array.isArray(safeDisplayMeta.genres) ? safeDisplayMeta.genres.filter(Boolean) : [];
+
+  return {
+    common: {
+      authors,
+      content_url: safeString(safeDisplayMeta.content_url, ''),
+      url: safeString(safeDisplayMeta.url, ''),
+      thumbnail_url: safeString(safeDisplayMeta.thumbnail_url, ''),
+      alt_title: safeString(safeDisplayMeta.alt_title, ''),
+      title_alias: safeString(safeDisplayMeta.title_alias, ''),
+      genres,
+    },
+    attributes: {
+      weekdays,
+      genres,
+    },
+  };
 };
 
 /* =========================
@@ -3050,6 +3150,13 @@ async function initApp() {
   applyThemePreference(getThemePreference());
   ensureEnhancedThemeAssets();
   applyDataUiClasses();
+  window.__esPerfContext = {
+    isTossWebview: IS_TOSS_WEBVIEW,
+    prefersReducedMotion: PREFERS_REDUCED_MOTION,
+    deviceMemoryGb: DEVICE_MEMORY_GB || null,
+    effectiveConnectionType: safeString(CONNECTION_INFO?.effectiveType, ''),
+    saveData: CONNECTION_INFO?.saveData === true,
+  };
   updateThemeToggleLabel();
   ensureKakaoThumbStyles();
   setupThemePreferenceListeners();
@@ -3088,22 +3195,26 @@ async function initApp() {
   runDevSelfCheck();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  (function boot() {
-    try {
-      const maybePromise = initApp();
-      if (maybePromise && typeof maybePromise.catch === 'function') {
-        maybePromise.catch((err) => {
-          console.error('[BOOT ERROR]', err);
-          showFatalBanner();
-        });
-      }
-    } catch (e) {
-      console.error('[BOOT ERROR]', e);
-      showFatalBanner();
+const bootApp = () => {
+  try {
+    const maybePromise = initApp();
+    if (maybePromise && typeof maybePromise.catch === 'function') {
+      maybePromise.catch((err) => {
+        console.error('[BOOT ERROR]', err);
+        showFatalBanner();
+      });
     }
-  })();
-});
+  } catch (e) {
+    console.error('[BOOT ERROR]', e);
+    showFatalBanner();
+  }
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => queueMicrotask(bootApp), { once: true });
+} else {
+  queueMicrotask(bootApp);
+}
 
 function setupScrollEffect() {
   if (!UI.filtersWrapper) return;
@@ -3521,7 +3632,13 @@ const removeRecentSearch = (query) => {
 };
 
 const normalizeContentForGrid = (content, fallbackSource) => {
-  const normalizedMeta = normalizeMeta(content?.meta);
+  const displayMeta = safeObj(content?.display_meta);
+  const normalizedMeta = (() => {
+    const meta = normalizeMeta(content?.meta);
+    if (Object.keys(meta).length) return meta;
+    if (Object.keys(displayMeta).length) return buildMetaFromDisplayMeta(displayMeta);
+    return {};
+  })();
   const normalizedType = safeString(content?.content_type || content?.contentType || content?.type, '');
   const normalized = {
     ...content,
@@ -3532,6 +3649,9 @@ const normalizeContentForGrid = (content, fallbackSource) => {
     id: content?.id || content?.content_id || content?.contentId,
     source: content?.source || fallbackSource || '',
     content_type: normalizedType || undefined,
+    thumbnail_url:
+      safeString(content?.thumbnail_url, '') || safeString(displayMeta.thumbnail_url, ''),
+    content_url: safeString(content?.content_url, '') || safeString(displayMeta.content_url, ''),
   };
   normalized.__search_title_n = normalizeSearchText(normalized.title);
   normalized.__search_alt_n = normalizeSearchText(
@@ -4802,6 +4922,7 @@ async function updateTab(tabId, { preserveScroll = true } = {}) {
   }
 
   STATE.hasBootstrapped = true;
+  scheduleLikelyPrefetch(tabId);
 }
 
 function updateFilterVisibility(tabId) {
@@ -5174,22 +5295,22 @@ const getPaginatedBrowseRequest = (tabId, aspectClass) => {
         tabId,
         aspectClass,
         sourceConfig,
-        endpointPath: `/api/contents/${statusKey}`,
-        baseQuery: applySourceQuery({ type: tabId }, sourceConfig),
+        endpointPath: BROWSE_ENDPOINT_V3,
+        baseQuery: applySourceQuery({ type: tabId, status: statusKey }, sourceConfig),
       };
     }
 
     if (shouldUsePaginatedOngoing) {
       const ongoingBaseQuery =
         tabId === 'webtoon'
-          ? { type: 'webtoon', day: webtoonOngoingDayParam }
-          : { type: 'ott' };
+          ? { type: 'webtoon', status: 'ongoing', day: webtoonOngoingDayParam }
+          : { type: 'ott', status: 'ongoing' };
       return {
         category: 'ongoing',
         tabId,
         aspectClass,
         sourceConfig,
-        endpointPath: '/api/contents/ongoing_v2',
+        endpointPath: BROWSE_ENDPOINT_V3,
         baseQuery: applySourceQuery(ongoingBaseQuery, sourceConfig),
       };
     }
@@ -5208,6 +5329,8 @@ const getPaginatedBrowseRequest = (tabId, aspectClass) => {
       DEFAULT_NOVEL_IS_COMPLETED,
     );
     const query = {
+      type: 'novel',
+      status: isNovelCompleted ? 'completed' : 'ongoing',
       genre_group: isNovelCompleted || selectedGenreGroups.includes(EXCLUSIVE_MULTI_ALL_ID)
         ? EXCLUSIVE_MULTI_ALL_ID
         : selectedGenreGroups.join(','),
@@ -5221,7 +5344,7 @@ const getPaginatedBrowseRequest = (tabId, aspectClass) => {
       tabId,
       aspectClass,
       sourceConfig,
-      endpointPath: '/api/contents/novels_v2',
+      endpointPath: BROWSE_ENDPOINT_V3,
       baseQuery: applySourceQuery(query, sourceConfig),
     };
   }
@@ -5229,20 +5352,113 @@ const getPaginatedBrowseRequest = (tabId, aspectClass) => {
   return null;
 };
 
+const buildPrefetchedSnapshotFromResponse = (request, response) => {
+  const incoming = Array.isArray(response?.contents)
+    ? response.contents.map((item) => normalizeContentForGrid(item, item?.source))
+    : [];
+  let filteredIncoming = filterItemsBySources(incoming, request.sourceConfig?.filterSources || []);
+  if (request.tabId === 'ott') {
+    filteredIncoming = filterOttItemsByGenres(
+      filteredIncoming,
+      STATE.filters?.ott?.genres || DEFAULT_OTT_GENRES,
+    );
+  }
+
+  const hasExplicitNextCursor =
+    response &&
+    typeof response === 'object' &&
+    Object.prototype.hasOwnProperty.call(response, 'next_cursor');
+  const next = response?.next_cursor ?? null;
+  const legacyNext = !hasExplicitNextCursor && !next ? response?.last_title ?? null : null;
+  const parsedPageSize = Number(response?.page_size);
+  const responsePageSize = Number.isFinite(parsedPageSize) ? parsedPageSize : PAGE_SIZE;
+  const missingCursor = !Boolean(next || legacyNext);
+  const reachedEndByCount = incoming.length < responsePageSize;
+
+  return {
+    type: 'paginated',
+    category: request.category,
+    tabId: request.tabId,
+    source: request.sourceConfig?.source || 'all',
+    filterSources: Array.isArray(request.sourceConfig?.filterSources)
+      ? [...request.sourceConfig.filterSources]
+      : [],
+    aspectClass: request.aspectClass,
+    endpointPath: request.endpointPath,
+    baseQuery: safeObj(request.baseQuery),
+    cursor: next ?? null,
+    legacyCursor: legacyNext ?? null,
+    done: missingCursor && reachedEndByCount,
+    totalLoaded: filteredIncoming.length,
+    items: filteredIncoming,
+  };
+};
+
+const chooseLikelyPrefetchTab = (tabId) => {
+  if (tabId === 'home') return 'webtoon';
+  if (tabId === 'webtoon') return 'novel';
+  if (tabId === 'novel') return 'ott';
+  if (tabId === 'ott') return 'webtoon';
+  return null;
+};
+
+const prefetchBrowseTab = async (tabId) => {
+  if (PREFETCH_DISABLED || !['webtoon', 'novel', 'ott'].includes(tabId)) return;
+
+  const request = getPaginatedBrowseRequest(tabId, getAspectByType(tabId));
+  if (!request) return;
+
+  const cacheKey = buildBrowseViewCacheKey({
+    tabId,
+    endpointPath: request.endpointPath,
+    baseQuery: request.baseQuery,
+  });
+  if (getViewCacheEntry(cacheKey)) return;
+  if (STATE.prefetch.inflight.has(cacheKey.key)) return;
+
+  STATE.prefetch.inflight.add(cacheKey.key);
+  try {
+    const response = await apiRequest('GET', request.endpointPath, {
+      query: { ...request.baseQuery, per_page: PAGE_SIZE },
+    });
+    const snapshot = buildPrefetchedSnapshotFromResponse(request, response);
+    setViewCacheEntry(cacheKey, snapshot);
+  } catch (err) {
+    console.warn('Browse prefetch skipped', tabId, err);
+  } finally {
+    STATE.prefetch.inflight.delete(cacheKey.key);
+  }
+};
+
+const scheduleLikelyPrefetch = (tabId) => {
+  if (PREFETCH_DISABLED) return;
+
+  const nextTab = chooseLikelyPrefetchTab(tabId);
+  if (!nextTab) return;
+
+  cancelIdle(STATE.prefetch.scheduled);
+  STATE.prefetch.scheduled = scheduleIdle(() => {
+    STATE.prefetch.scheduled = null;
+    void prefetchBrowseTab(nextTab);
+  }, IS_TOSS_WEBVIEW ? 420 : 260);
+};
+
 async function fetchHomeRecommendations({
   limit = HOME_RECOMMENDATIONS_LIMIT,
   signal,
   cacheKey = null,
 } = {}) {
-  const response = await apiRequest('GET', '/api/contents/recommendations', {
+  const response = await apiRequest('GET', RECOMMENDATIONS_ENDPOINT_V2, {
     query: { limit },
     signal,
   });
-  const list = Array.isArray(response?.data)
-    ? response.data
-    : Array.isArray(response)
-      ? response
-      : [];
+  const list = Array.isArray(response?.contents)
+    ? response.contents
+    : Array.isArray(response?.data)
+      ? response.data
+      : Array.isArray(response)
+        ? response
+        : [];
   const normalized = list
     .map((item) => normalizeContentForGrid(item, item?.source))
     .filter((item) => item?.content_id && item?.source)
@@ -5439,6 +5655,8 @@ async function loadNextPage(category, { signal } = {}) {
 
   const endpointPath = pg.endpointPath || `/api/contents/${category}`;
   const url = buildUrl(endpointPath, query);
+  const appendPerfStartMark = `es-append:${category}:${pg.totalLoaded}:start`;
+  markPerf(appendPerfStartMark);
 
   try {
     const json = await apiRequest('GET', url, { signal: effectiveSignal });
@@ -5514,6 +5732,12 @@ async function loadNextPage(category, { signal } = {}) {
       aspectClass: pg.aspectClass,
       clearBeforeAppend: pg.items.length === toAppend.length,
     });
+    measurePerf(
+      `es-append:${category}:paint`,
+      appendPerfStartMark,
+      `es-append:${category}:${pg.totalLoaded}:paint`,
+      { appended: toAppend.length, totalLoaded: pg.totalLoaded },
+    );
 
     updateCountIndicator(category);
     updateLoadMoreUI(category);
@@ -5558,6 +5782,11 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   const requestSeq = ++STATE.contentRequestSeq;
   const isRenderStale = () => renderToken && renderToken !== STATE.renderToken;
   const isStale = () => STATE.contentRequestSeq !== requestSeq || signal.aborted || isRenderStale();
+  const navPerfStartMark = `es-tab:${tabId}:${requestSeq}:start`;
+  markPerf(navPerfStartMark);
+  const hadVisibleCards = UI.contentGrid.childElementCount > 0;
+  const retainExistingView =
+    hadVisibleCards && VIEW_CACHEABLE_TABS.has(tabId) && !['my', 'search'].includes(tabId);
 
   STATE.isLoading = true;
   setContentGridLayout(tabId === 'home' ? 'home' : 'grid');
@@ -5570,12 +5799,19 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
     const homeCacheKey = buildHomeViewCacheKey();
     const cachedHome = getViewCacheEntry(homeCacheKey);
     try {
+      if (!cachedHome) {
+        setRouteLoadingState(true, { retained: retainExistingView, label: tabId });
+      }
       const homeResult = await renderHomeFeed({
         signal,
         recommendationsOverride: cachedHome?.type === 'home' ? cachedHome.recommendations : null,
         cacheKey: cachedHome ? null : homeCacheKey,
       });
       if (isStale()) return { stale: true };
+      measurePerf(`es-tab:${tabId}:paint`, navPerfStartMark, `es-tab:${tabId}:${requestSeq}:paint`, {
+        itemCount: homeResult?.itemCount || 0,
+        cached: Boolean(cachedHome),
+      });
       return { itemCount: homeResult?.itemCount || 0, aspectClass };
     } catch (e) {
       if (signal.aborted) return { stale: true };
@@ -5593,6 +5829,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       return { itemCount: 0, aspectClass };
     } finally {
       STATE.isLoading = false;
+      setRouteLoadingState(false);
     }
   }
 
@@ -5612,14 +5849,17 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       });
       if (restored) {
         STATE.isLoading = false;
+        measurePerf(`es-tab:${tabId}:paint`, navPerfStartMark, `es-tab:${tabId}:${requestSeq}:paint`, {
+          itemCount: restored?.itemCount || 0,
+          cached: true,
+        });
         return restored;
       }
     }
   }
 
-  UI.contentGrid.innerHTML = '';
   const showSkeleton = () => {
-    if (isStale() || skeletonShown) return;
+    if (isStale() || skeletonShown || retainExistingView) return;
     skeletonShown = true;
     UI.contentGrid.innerHTML = '';
     for (let i = 0; i < 8; i++) {
@@ -5628,7 +5868,8 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       UI.contentGrid.appendChild(skel);
     }
   };
-  const skeletonTimer = setTimeout(showSkeleton, 120);
+  setRouteLoadingState(true, { retained: retainExistingView, label: tabId });
+  const skeletonTimer = retainExistingView ? null : setTimeout(showSkeleton, IS_TOSS_WEBVIEW ? 180 : 120);
 
   let data = [];
   let emptyStateConfig = null;
@@ -5789,6 +6030,10 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           cacheKey: browseCacheKey.key,
         });
         if (pagedResult?.stale) return { stale: true };
+        measurePerf(`es-tab:${tabId}:paint`, navPerfStartMark, `es-tab:${tabId}:${requestSeq}:paint`, {
+          itemCount: pagedResult?.itemCount || 0,
+          cached: false,
+        });
         return { itemCount: pagedResult?.itemCount || 0, aspectClass };
       }
 
@@ -5866,8 +6111,9 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
     console.error('Fetch error', e);
     showToast(e?.message || '오류가 발생했습니다.', { type: 'error' });
   } finally {
-    clearTimeout(skeletonTimer);
+    if (skeletonTimer) clearTimeout(skeletonTimer);
     STATE.isLoading = false;
+    setRouteLoadingState(false);
   }
 
   if (isStale()) return { stale: true };
@@ -5892,6 +6138,12 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
     items: data,
     container: UI.contentGrid,
     signal: renderController.signal,
+    onFirstPaint: () => {
+      measurePerf(`es-tab:${tabId}:paint`, navPerfStartMark, `es-tab:${tabId}:${requestSeq}:paint`, {
+        itemCount: data.length,
+        cached: false,
+      });
+    },
     renderItem: (item) => createCard(item, tabId, aspectClass),
   });
 

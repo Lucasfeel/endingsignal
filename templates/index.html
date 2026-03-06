@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>콘텐츠 완결 알리미</title>
     <meta name="color-scheme" content="light dark">
+    <link rel="stylesheet" href="{{ url_for('static', filename='build/public-app.css') }}" />
     <script>
       (function () {
         var resolvedTheme = 'light';
@@ -19,14 +20,12 @@
         document.documentElement.dataset.theme = resolvedTheme;
       })();
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='es_theme_toss.css') }}" />
 </head>
 {% set in_toss_arg = request.args.get('in_toss', '')|string|lower %}
 {% set host_arg = request.args.get('host', '')|string|lower %}
 {% set is_ait = in_toss_arg in ['1', 'true'] or host_arg == 'toss' %}
 <body class="es-main-page antialiased{% if is_ait %} is-ait{% endif %}">
+    <div id="esPerfRoot"></div>
 
     <div id="app-root">
         <!-- 3.1 Sticky Header -->
@@ -307,7 +306,7 @@
             </div>
         </div>
     </div>
-
+    <script type="module" src="{{ url_for('static', filename='build/public-app.js') }}"></script>
     <script src="/static/app.js" defer></script>
 </body>
 </html>
