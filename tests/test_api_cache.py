@@ -6,24 +6,63 @@ from app import app as flask_app
 import views.contents as contents_view
 
 
+TYPE_PRIORITY = {
+    "webtoon": 0,
+    "novel": 1,
+    "ott": 2,
+}
+
+
 class RecordingCursor:
     def __init__(self, rows_by_type):
         self.rows_by_type = rows_by_type
         self.executed = []
         self.closed = False
-        self._last_type = None
-        self._last_limit = None
+        self._rows = []
 
     def execute(self, query, params=None):
         self.executed.append((query, params))
-        self._last_type = params[0] if params else None
-        self._last_limit = params[3] if params and len(params) > 3 else None
+        per_type = params[2] if params and len(params) > 2 else None
+        limit = params[3] if params and len(params) > 3 else None
+        self._rows = self._materialize_rows(per_type=per_type, limit=limit)
+
+    def _materialize_rows(self, *, per_type, limit):
+        merged = []
+        for content_type in ("webtoon", "novel", "ott"):
+            rows = list(self.rows_by_type.get(content_type, []))
+            rows.sort(
+                key=lambda row: (
+                    -row["updated_at"].timestamp(),
+                    row["content_id"],
+                )
+            )
+            if isinstance(per_type, int):
+                rows = rows[:per_type]
+            merged.extend(rows)
+
+        merged.sort(
+            key=lambda row: (
+                -row["updated_at"].timestamp(),
+                TYPE_PRIORITY.get(row["content_type"], 99),
+                row["content_id"],
+            )
+        )
+
+        deduped = []
+        seen_keys = set()
+        for row in merged:
+            key = (row["content_id"], row["source"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(row)
+            if isinstance(limit, int) and len(deduped) >= limit:
+                break
+
+        return deduped
 
     def fetchall(self):
-        rows = list(self.rows_by_type.get(self._last_type, []))
-        if isinstance(self._last_limit, int):
-            return rows[: self._last_limit]
-        return rows
+        return list(self._rows)
 
     def close(self):
         self.closed = True
@@ -72,5 +111,5 @@ def test_recommendations_cache_hits_on_second_request(monkeypatch, client):
     assert second.status_code == 200
     assert first.headers.get("X-Cache") == "MISS"
     assert second.headers.get("X-Cache") == "HIT"
-    assert len(fake_cursor.executed) == 3
+    assert len(fake_cursor.executed) == 1
     assert first.get_json() == second.get_json()

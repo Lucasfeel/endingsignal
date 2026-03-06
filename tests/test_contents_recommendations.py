@@ -6,24 +6,63 @@ from app import app as flask_app
 import views.contents as contents_view
 
 
+TYPE_PRIORITY = {
+    "webtoon": 0,
+    "novel": 1,
+    "ott": 2,
+}
+
+
 class FakeCursor:
     def __init__(self, rows_by_type):
         self.rows_by_type = rows_by_type
         self.executed = []
         self.closed = False
-        self._last_type = None
-        self._last_limit = None
+        self._rows = []
 
     def execute(self, query, params=None):
         self.executed.append((query, params))
-        self._last_type = params[0] if params else None
-        self._last_limit = params[3] if params and len(params) > 3 else None
+        per_type = params[2] if params and len(params) > 2 else None
+        limit = params[3] if params and len(params) > 3 else None
+        self._rows = self._materialize_rows(per_type=per_type, limit=limit)
+
+    def _materialize_rows(self, *, per_type, limit):
+        merged = []
+        for content_type in ("webtoon", "novel", "ott"):
+            rows = list(self.rows_by_type.get(content_type, []))
+            rows.sort(
+                key=lambda row: (
+                    -row["updated_at"].timestamp(),
+                    row["content_id"],
+                )
+            )
+            if isinstance(per_type, int):
+                rows = rows[:per_type]
+            merged.extend(rows)
+
+        merged.sort(
+            key=lambda row: (
+                -row["updated_at"].timestamp(),
+                TYPE_PRIORITY.get(row["content_type"], 99),
+                row["content_id"],
+            )
+        )
+
+        deduped = []
+        seen_keys = set()
+        for row in merged:
+            key = (row["content_id"], row["source"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(row)
+            if isinstance(limit, int) and len(deduped) >= limit:
+                break
+
+        return deduped
 
     def fetchall(self):
-        rows = list(self.rows_by_type.get(self._last_type, []))
-        if isinstance(self._last_limit, int):
-            return rows[: self._last_limit]
-        return rows
+        return list(self._rows)
 
     def close(self):
         self.closed = True
@@ -35,12 +74,12 @@ def client():
     return flask_app.test_client()
 
 
-def _make_row(content_id, source, content_type, updated_rank, *, status="연재중"):
+def _make_row(content_id, source, content_type, updated_rank, *, status=None):
     updated_at = datetime(2026, 1, 1, 0, 0, 0) + timedelta(minutes=updated_rank)
     return {
         "content_id": content_id,
         "title": f"title-{content_id}",
-        "status": status,
+        "status": status or contents_view.STATUS_ONGOING,
         "meta": {"common": {"authors": ["a"]}},
         "source": source,
         "content_type": content_type,
@@ -75,6 +114,7 @@ def test_recommendations_returns_list_with_required_fields(monkeypatch, client):
     assert required_keys.issubset(payload[0].keys())
     assert all(isinstance(item.get("meta"), dict) for item in payload)
     assert fake_cursor.closed is True
+    assert len(fake_cursor.executed) == 1
 
 
 def test_recommendations_limit_clamps_low(monkeypatch, client):
@@ -139,3 +179,21 @@ def test_recommendations_dedupes_by_content_and_source(monkeypatch, client):
     assert len({(item["content_id"], item["source"]) for item in payload}) == 2
     duplicate_item = next(item for item in payload if item["content_id"] == "dup-1")
     assert duplicate_item["content_type"] == "novel"
+
+
+def test_recommendations_preserve_type_priority_when_updated_at_ties(monkeypatch, client):
+    shared_rank = 100
+    _stub_contents_db(
+        monkeypatch,
+        {
+            "webtoon": [_make_row("w-1", "naver_webtoon", "webtoon", shared_rank)],
+            "novel": [_make_row("n-1", "ridi", "novel", shared_rank)],
+            "ott": [_make_row("o-1", "netflix", "ott", shared_rank)],
+        },
+    )
+
+    response = client.get("/api/contents/recommendations?limit=3")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert [item["content_type"] for item in payload] == ["webtoon", "novel", "ott"]

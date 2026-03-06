@@ -1097,6 +1097,7 @@ const STATE = {
   activeTab: 'home',
   lastBrowseTab: 'webtoon',
   renderToken: 0,
+  viewCache: new Map(),
   filters: {
     webtoon: { sources: [], day: [...DEFAULT_WEBTOON_DAYS] },
     novel: {
@@ -1166,6 +1167,7 @@ const STATE = {
       aspectClass: 'aspect-[3/4]',
       endpointPath: '',
       baseQuery: {},
+      cacheKey: '',
     },
     novels: {
       cursor: null,
@@ -1181,6 +1183,7 @@ const STATE = {
       aspectClass: 'aspect-[3/4]',
       endpointPath: '',
       baseQuery: {},
+      cacheKey: '',
     },
     completed: {
       cursor: null,
@@ -1196,6 +1199,7 @@ const STATE = {
       aspectClass: 'aspect-[3/4]',
       endpointPath: '',
       baseQuery: {},
+      cacheKey: '',
     },
     hiatus: {
       cursor: null,
@@ -1211,6 +1215,7 @@ const STATE = {
       aspectClass: 'aspect-[3/4]',
       endpointPath: '',
       baseQuery: {},
+      cacheKey: '',
     },
   },
   activePaginationCategory: null,
@@ -1824,9 +1829,148 @@ const contentKey = (c) => {
   return `${src}:${cid}`;
 };
 
+const cloneViewCacheValue = (value) => {
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch (e) {
+      console.warn('structuredClone failed for view cache payload', e);
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneViewCacheValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    const next = {};
+    Object.keys(value).forEach((key) => {
+      const entry = value[key];
+      if (entry === undefined || typeof entry === 'function') return;
+      next[key] = cloneViewCacheValue(entry);
+    });
+    return next;
+  }
+
+  return value;
+};
+
+const normalizeViewCacheKeyPart = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeViewCacheKeyPart(entry));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        const entry = value[key];
+        if (entry === undefined) return acc;
+        acc[key] = normalizeViewCacheKeyPart(entry);
+        return acc;
+      }, {});
+  }
+
+  return value;
+};
+
+const serializeViewCacheKey = (value) => JSON.stringify(normalizeViewCacheKeyPart(value));
+
+const pruneExpiredViewCacheEntries = () => {
+  if (!(STATE.viewCache instanceof Map)) {
+    STATE.viewCache = new Map();
+  }
+
+  const now = Date.now();
+  for (const [key, entry] of STATE.viewCache.entries()) {
+    if (!entry || now - Number(entry.createdAt || 0) > VIEW_CACHE_TTL_MS) {
+      STATE.viewCache.delete(key);
+    }
+  }
+};
+
+const getViewCacheEntry = (cacheKey) => {
+  if (!cacheKey || !VIEW_CACHEABLE_TABS.has(String(cacheKey.tabId || '').trim())) return null;
+
+  pruneExpiredViewCacheEntries();
+  const cached = STATE.viewCache.get(cacheKey.key);
+  if (!cached?.payload) return null;
+  return cloneViewCacheValue(cached.payload);
+};
+
+const setViewCacheEntry = (cacheKey, payload) => {
+  if (!cacheKey || !VIEW_CACHEABLE_TABS.has(String(cacheKey.tabId || '').trim())) return;
+
+  pruneExpiredViewCacheEntries();
+  STATE.viewCache.set(cacheKey.key, {
+    createdAt: Date.now(),
+    payload: cloneViewCacheValue(payload),
+  });
+};
+
+const buildViewFilterState = (tabId) => {
+  if (tabId === 'home') {
+    return { limit: HOME_RECOMMENDATIONS_LIMIT };
+  }
+
+  if (tabId === 'webtoon') {
+    return {
+      sources: getSelectedSourcesForTab(tabId),
+      day: getSelectedWebtoonDays(),
+    };
+  }
+
+  if (tabId === 'novel') {
+    return {
+      sources: getSelectedSourcesForTab(tabId),
+      genreGroups: sanitizeNovelGenreGroups(
+        STATE.filters?.novel?.genreGroups,
+        DEFAULT_NOVEL_GENRE_GROUPS,
+      ),
+      isCompleted: coerceBooleanFilter(
+        STATE.filters?.novel?.isCompleted,
+        DEFAULT_NOVEL_IS_COMPLETED,
+      ),
+    };
+  }
+
+  if (tabId === 'ott') {
+    return {
+      sources: getSelectedSourcesForTab(tabId),
+      genres: sanitizeOttGenres(STATE.filters?.ott?.genres, DEFAULT_OTT_GENRES),
+      status: safeString(
+        STATE.filters?.ott?.status || STATE.filters?.ott?.day || 'ongoing',
+        'ongoing',
+      ).toLowerCase(),
+    };
+  }
+
+  return {};
+};
+
+const buildHomeViewCacheKey = (limit = HOME_RECOMMENDATIONS_LIMIT) => ({
+  tabId: 'home',
+  key: serializeViewCacheKey({
+    tabId: 'home',
+    endpointPath: '/api/contents/recommendations',
+    baseQuery: { limit },
+    filters: { limit },
+  }),
+});
+
+const buildBrowseViewCacheKey = ({ tabId, endpointPath, baseQuery }) => ({
+  tabId,
+  key: serializeViewCacheKey({
+    tabId,
+    endpointPath: safeString(endpointPath, ''),
+    baseQuery: safeObj(baseQuery),
+    filters: buildViewFilterState(tabId),
+  }),
+});
+
 const resetPaginationState = (
   category,
-  { tabId, source, filterSources, aspectClass, requestSeq, endpointPath, baseQuery }
+  { tabId, source, filterSources, aspectClass, requestSeq, endpointPath, baseQuery, cacheKey }
 ) => {
   const target = STATE.pagination?.[category];
   if (!target) return;
@@ -1845,6 +1989,91 @@ const resetPaginationState = (
   target.endpointPath = typeof endpointPath === 'string' ? endpointPath : '';
   target.baseQuery =
     baseQuery && typeof baseQuery === 'object' && !Array.isArray(baseQuery) ? { ...baseQuery } : {};
+  target.cacheKey = typeof cacheKey === 'string' ? cacheKey : '';
+};
+
+const createPaginatedViewSnapshot = (category) => {
+  const pg = STATE.pagination?.[category];
+  if (!pg) return null;
+
+  return {
+    type: 'paginated',
+    category,
+    tabId: pg.tabId,
+    source: pg.source,
+    filterSources: Array.isArray(pg.filterSources) ? [...pg.filterSources] : [],
+    aspectClass: pg.aspectClass,
+    endpointPath: pg.endpointPath,
+    baseQuery: safeObj(pg.baseQuery),
+    cursor: pg.cursor ?? null,
+    legacyCursor: pg.legacyCursor ?? null,
+    done: Boolean(pg.done),
+    totalLoaded: Number.isFinite(pg.totalLoaded) ? pg.totalLoaded : (pg.items || []).length,
+    items: Array.isArray(pg.items)
+      ? pg.items.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
+      : [],
+  };
+};
+
+const restorePaginatedViewFromCache = async (snapshot, { requestSeq, cacheKey = '' } = {}) => {
+  if (!snapshot || snapshot.type !== 'paginated' || !snapshot.category) return null;
+
+  const category = snapshot.category;
+  const tabId = snapshot.tabId || STATE.activeTab || 'webtoon';
+  const aspectClass = snapshot.aspectClass || 'aspect-[3/4]';
+
+  resetPaginationState(category, {
+    tabId,
+    source: snapshot.source || 'all',
+    filterSources: snapshot.filterSources || [],
+    aspectClass,
+    requestSeq,
+    endpointPath: snapshot.endpointPath || '',
+    baseQuery: snapshot.baseQuery || {},
+    cacheKey,
+  });
+
+  const pg = STATE.pagination?.[category];
+  if (!pg) return null;
+
+  pg.cursor = snapshot.cursor ?? null;
+  pg.legacyCursor = snapshot.legacyCursor ?? null;
+  pg.done = Boolean(snapshot.done);
+  pg.totalLoaded = Number.isFinite(snapshot.totalLoaded)
+    ? snapshot.totalLoaded
+    : Array.isArray(snapshot.items)
+      ? snapshot.items.length
+      : 0;
+  pg.items = Array.isArray(snapshot.items)
+    ? snapshot.items.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
+    : [];
+
+  setActivePaginationCategory(category);
+  UI.contentGrid.innerHTML = '';
+
+  if (!pg.items.length && pg.done) {
+    renderEmptyState(UI.contentGrid, {
+      title: '肄섑뀗痢좉? ?놁뒿?덈떎.',
+      message: '議곌굔??留욌뒗 肄섑뀗痢좉? ?놁뒿?덈떎.',
+    });
+    setCountIndicatorText('');
+    hideLoadMoreUI();
+    disconnectInfiniteObserver();
+    return { itemCount: 0, aspectClass };
+  }
+
+  appendCardsToGrid(pg.items, {
+    tabId,
+    aspectClass,
+    clearBeforeAppend: true,
+  });
+
+  updateCountIndicator(category);
+  updateLoadMoreUI(category);
+  if (pg.done) disconnectInfiniteObserver();
+  else setupInfiniteObserver(category);
+
+  return { itemCount: pg.items.length, aspectClass };
 };
 
 const setActivePaginationCategory = (category) => {
@@ -2266,6 +2495,8 @@ const SUBS_SOFT_REFRESH_DEBOUNCE_MS = 1500;
 const SUBS_SOFT_REFRESH_MIN_INTERVAL_MS = 10000;
 const SUBS_MY_TAB_EXPEDITE_MS = 500;
 const SUBS_IDLE_TIMEOUT_MS = 2000;
+const VIEW_CACHE_TTL_MS = 30 * 1000;
+const VIEW_CACHEABLE_TABS = new Set(['home', 'webtoon', 'novel', 'ott']);
 
 function normalizeSearchText(s) {
   return (s || '')
@@ -4901,7 +5132,108 @@ const filterOttItemsByGenres = (items, genreFilters) => {
   });
 };
 
-async function fetchHomeRecommendations({ limit = HOME_RECOMMENDATIONS_LIMIT, signal } = {}) {
+const getPaginatedBrowseRequest = (tabId, aspectClass) => {
+  if (tabId === 'webtoon' || tabId === 'ott') {
+    let statusKey = 'ongoing';
+    const selectedWebtoonDays = tabId === 'webtoon' ? getSelectedWebtoonDays() : ['all'];
+    const webtoonPrimaryDay =
+      tabId === 'webtoon' && selectedWebtoonDays.length === 1
+        ? selectedWebtoonDays[0]
+        : 'all';
+    const webtoonOngoingDayParam =
+      tabId === 'webtoon'
+        ? selectedWebtoonDays.includes('all')
+          ? 'all'
+          : selectedWebtoonDays.join(',')
+        : 'all';
+
+    if (tabId === 'webtoon') {
+      statusKey =
+        webtoonPrimaryDay === 'completed' || webtoonPrimaryDay === 'hiatus'
+          ? webtoonPrimaryDay
+          : 'ongoing';
+    } else if (tabId === 'ott') {
+      const ottStatusRaw = safeString(
+        STATE.filters?.ott?.status || STATE.filters?.ott?.day || 'ongoing',
+        'ongoing',
+      ).toLowerCase();
+      statusKey = ['ongoing', 'completed', 'hiatus'].includes(ottStatusRaw)
+        ? ottStatusRaw
+        : 'ongoing';
+    }
+
+    const shouldUsePaginatedStatus = statusKey === 'completed' || statusKey === 'hiatus';
+    const shouldUsePaginatedOngoing = USE_BROWSE_PAGINATION_V2 && statusKey === 'ongoing';
+    const sourceConfig = getSourceRequestConfig(tabId, {
+      preferServerMulti: shouldUsePaginatedStatus || shouldUsePaginatedOngoing,
+    });
+
+    if (shouldUsePaginatedStatus) {
+      return {
+        category: statusKey,
+        tabId,
+        aspectClass,
+        sourceConfig,
+        endpointPath: `/api/contents/${statusKey}`,
+        baseQuery: applySourceQuery({ type: tabId }, sourceConfig),
+      };
+    }
+
+    if (shouldUsePaginatedOngoing) {
+      const ongoingBaseQuery =
+        tabId === 'webtoon'
+          ? { type: 'webtoon', day: webtoonOngoingDayParam }
+          : { type: 'ott' };
+      return {
+        category: 'ongoing',
+        tabId,
+        aspectClass,
+        sourceConfig,
+        endpointPath: '/api/contents/ongoing_v2',
+        baseQuery: applySourceQuery(ongoingBaseQuery, sourceConfig),
+      };
+    }
+  }
+
+  if (tabId === 'novel' && USE_BROWSE_PAGINATION_V2) {
+    const sourceConfig = getSourceRequestConfig(tabId, {
+      preferServerMulti: true,
+    });
+    const selectedGenreGroups = sanitizeNovelGenreGroups(
+      STATE.filters?.novel?.genreGroups,
+      DEFAULT_NOVEL_GENRE_GROUPS,
+    );
+    const isNovelCompleted = coerceBooleanFilter(
+      STATE.filters?.novel?.isCompleted,
+      DEFAULT_NOVEL_IS_COMPLETED,
+    );
+    const query = {
+      genre_group: isNovelCompleted || selectedGenreGroups.includes(EXCLUSIVE_MULTI_ALL_ID)
+        ? EXCLUSIVE_MULTI_ALL_ID
+        : selectedGenreGroups.join(','),
+    };
+    if (isNovelCompleted) {
+      query.is_completed = 'true';
+    }
+
+    return {
+      category: 'novels',
+      tabId,
+      aspectClass,
+      sourceConfig,
+      endpointPath: '/api/contents/novels_v2',
+      baseQuery: applySourceQuery(query, sourceConfig),
+    };
+  }
+
+  return null;
+};
+
+async function fetchHomeRecommendations({
+  limit = HOME_RECOMMENDATIONS_LIMIT,
+  signal,
+  cacheKey = null,
+} = {}) {
   const response = await apiRequest('GET', '/api/contents/recommendations', {
     query: { limit },
     signal,
@@ -4911,10 +5243,17 @@ async function fetchHomeRecommendations({ limit = HOME_RECOMMENDATIONS_LIMIT, si
     : Array.isArray(response)
       ? response
       : [];
-  return list
+  const normalized = list
     .map((item) => normalizeContentForGrid(item, item?.source))
     .filter((item) => item?.content_id && item?.source)
     .slice(0, HOME_RECOMMENDATIONS_LIMIT);
+  if (cacheKey) {
+    setViewCacheEntry(cacheKey, {
+      type: 'home',
+      recommendations: normalized,
+    });
+  }
+  return normalized;
 }
 
 const renderHomeSection = ({
@@ -4980,15 +5319,23 @@ const renderHomeSection = ({
   return section;
 };
 
-async function renderHomeFeed({ signal } = {}) {
+async function renderHomeFeed({
+  signal,
+  recommendationsOverride = null,
+  cacheKey = null,
+} = {}) {
   if (!UI.contentGrid) return { itemCount: 0 };
 
-  let recommendations = [];
-  try {
-    recommendations = await fetchHomeRecommendations({ signal });
-  } catch (err) {
-    if (!signal?.aborted) {
-      console.warn('Failed to load home recommendations', err);
+  let recommendations = Array.isArray(recommendationsOverride)
+    ? recommendationsOverride.map((item) => normalizeContentForGrid(item, item?.source))
+    : [];
+  if (!Array.isArray(recommendationsOverride)) {
+    try {
+      recommendations = await fetchHomeRecommendations({ signal, cacheKey });
+    } catch (err) {
+      if (!signal?.aborted) {
+        console.warn('Failed to load home recommendations', err);
+      }
     }
   }
   if (signal?.aborted) return { itemCount: 0 };
@@ -5170,6 +5517,12 @@ async function loadNextPage(category, { signal } = {}) {
 
     updateCountIndicator(category);
     updateLoadMoreUI(category);
+    if (pg.cacheKey) {
+      const snapshot = createPaginatedViewSnapshot(category);
+      if (snapshot) {
+        setViewCacheEntry({ tabId: pg.tabId, key: pg.cacheKey }, snapshot);
+      }
+    }
 
     if (pg.done && getActivePaginationCategory() === category) {
       disconnectInfiniteObserver();
@@ -5206,7 +5559,6 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   const isRenderStale = () => renderToken && renderToken !== STATE.renderToken;
   const isStale = () => STATE.contentRequestSeq !== requestSeq || signal.aborted || isRenderStale();
 
-  UI.contentGrid.innerHTML = '';
   STATE.isLoading = true;
   setContentGridLayout(tabId === 'home' ? 'home' : 'grid');
 
@@ -5215,8 +5567,14 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   if (tabId === 'ott') aspectClass = 'aspect-[2/3]';
 
   if (tabId === 'home') {
+    const homeCacheKey = buildHomeViewCacheKey();
+    const cachedHome = getViewCacheEntry(homeCacheKey);
     try {
-      const homeResult = await renderHomeFeed({ signal });
+      const homeResult = await renderHomeFeed({
+        signal,
+        recommendationsOverride: cachedHome?.type === 'home' ? cachedHome.recommendations : null,
+        cacheKey: cachedHome ? null : homeCacheKey,
+      });
       if (isStale()) return { stale: true };
       return { itemCount: homeResult?.itemCount || 0, aspectClass };
     } catch (e) {
@@ -5239,6 +5597,27 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   }
 
   let skeletonShown = false;
+  const paginatedRequest = getPaginatedBrowseRequest(tabId, aspectClass);
+  if (paginatedRequest) {
+    const browseCacheKey = buildBrowseViewCacheKey({
+      tabId,
+      endpointPath: paginatedRequest.endpointPath,
+      baseQuery: paginatedRequest.baseQuery,
+    });
+    const cachedBrowse = getViewCacheEntry(browseCacheKey);
+    if (cachedBrowse?.type === 'paginated') {
+      const restored = await restorePaginatedViewFromCache(cachedBrowse, {
+        requestSeq,
+        cacheKey: browseCacheKey.key,
+      });
+      if (restored) {
+        STATE.isLoading = false;
+        return restored;
+      }
+    }
+  }
+
+  UI.contentGrid.innerHTML = '';
   const showSkeleton = () => {
     if (isStale() || skeletonShown) return;
     skeletonShown = true;
@@ -5361,7 +5740,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
       let sourceFilter = [];
       let responsePayload = null;
 
-      const runPaginatedBrowse = async ({ category, sourceConfig, endpointPath, baseQuery }) => {
+      const runPaginatedBrowse = async ({ category, sourceConfig, endpointPath, baseQuery, cacheKey }) => {
         resetPaginationState(category, {
           tabId,
           source: sourceConfig?.querySource || 'all',
@@ -5370,6 +5749,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
           requestSeq,
           endpointPath,
           baseQuery,
+          cacheKey,
         });
         setActivePaginationCategory(category);
         updateLoadMoreUI(category);
@@ -5394,73 +5774,31 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         return { itemCount: pg?.items?.length || 0 };
       };
 
-      if (tabId === 'webtoon' || tabId === 'ott') {
-        let statusKey = 'ongoing';
-        const selectedWebtoonDays = tabId === 'webtoon' ? getSelectedWebtoonDays() : ['all'];
-        const webtoonPrimaryDay =
-          tabId === 'webtoon' && selectedWebtoonDays.length === 1
-            ? selectedWebtoonDays[0]
-            : 'all';
-        const webtoonOngoingDayParam =
-          tabId === 'webtoon'
-            ? selectedWebtoonDays.includes('all')
-              ? 'all'
-              : selectedWebtoonDays.join(',')
-            : 'all';
-        if (tabId === 'webtoon') {
-          statusKey =
-            webtoonPrimaryDay === 'completed' || webtoonPrimaryDay === 'hiatus'
-              ? webtoonPrimaryDay
-              : 'ongoing';
-        } else if (tabId === 'ott') {
-          const ottStatusRaw = safeString(
-            STATE.filters?.ott?.status || STATE.filters?.ott?.day || 'ongoing',
-            'ongoing',
-          ).toLowerCase();
-          statusKey = ['ongoing', 'completed', 'hiatus'].includes(ottStatusRaw)
-            ? ottStatusRaw
-            : 'ongoing';
-        }
-
-        const shouldUsePaginatedStatus = statusKey === 'completed' || statusKey === 'hiatus';
-        const shouldUsePaginatedOngoing = USE_BROWSE_PAGINATION_V2 && statusKey === 'ongoing';
-        const sourceConfig = getSourceRequestConfig(tabId, {
-          preferServerMulti: shouldUsePaginatedStatus || shouldUsePaginatedOngoing,
+      if (paginatedRequest) {
+        sourceFilter = paginatedRequest.sourceConfig?.filterSources || [];
+        const browseCacheKey = buildBrowseViewCacheKey({
+          tabId,
+          endpointPath: paginatedRequest.endpointPath,
+          baseQuery: paginatedRequest.baseQuery,
         });
+        const pagedResult = await runPaginatedBrowse({
+          category: paginatedRequest.category,
+          sourceConfig: paginatedRequest.sourceConfig,
+          endpointPath: paginatedRequest.endpointPath,
+          baseQuery: paginatedRequest.baseQuery,
+          cacheKey: browseCacheKey.key,
+        });
+        if (pagedResult?.stale) return { stale: true };
+        return { itemCount: pagedResult?.itemCount || 0, aspectClass };
+      }
+
+      if (tabId === 'webtoon' || tabId === 'ott') {
+        const sourceConfig = getSourceRequestConfig(tabId, { preferServerMulti: false });
         sourceFilter = sourceConfig.filterSources;
-
-        if (shouldUsePaginatedStatus) {
-          const pagedResult = await runPaginatedBrowse({
-            category: statusKey,
-            sourceConfig,
-            endpointPath: `/api/contents/${statusKey}`,
-            baseQuery: applySourceQuery({ type: tabId }, sourceConfig),
-          });
-          if (pagedResult?.stale) return { stale: true };
-          return { itemCount: pagedResult?.itemCount || 0, aspectClass };
-        }
-
-        if (shouldUsePaginatedOngoing) {
-          const ongoingBaseQuery =
-            tabId === 'webtoon'
-              ? { type: 'webtoon', day: webtoonOngoingDayParam }
-              : { type: 'ott' };
-          const pagedResult = await runPaginatedBrowse({
-            category: 'ongoing',
-            sourceConfig,
-            endpointPath: '/api/contents/ongoing_v2',
-            baseQuery: applySourceQuery(ongoingBaseQuery, sourceConfig),
-          });
-          if (pagedResult?.stale) return { stale: true };
-          return { itemCount: pagedResult?.itemCount || 0, aspectClass };
-        }
-
         const query = applySourceQuery({ type: tabId }, sourceConfig);
         url = buildUrl('/api/contents/ongoing', query);
       } else if (tabId === 'novel') {
-        const sourceConfig = getSourceRequestConfig(tabId, {
-          preferServerMulti: USE_BROWSE_PAGINATION_V2,
-        });
+        const sourceConfig = getSourceRequestConfig(tabId, { preferServerMulti: false });
         sourceFilter = sourceConfig.filterSources;
         const selectedGenreGroups = sanitizeNovelGenreGroups(
           STATE.filters?.novel?.genreGroups,
@@ -5477,17 +5815,6 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         };
         if (isNovelCompleted) {
           query.is_completed = 'true';
-        }
-
-        if (USE_BROWSE_PAGINATION_V2) {
-          const pagedResult = await runPaginatedBrowse({
-            category: 'novels',
-            sourceConfig,
-            endpointPath: '/api/contents/novels_v2',
-            baseQuery: applySourceQuery(query, sourceConfig),
-          });
-          if (pagedResult?.stale) return { stale: true };
-          return { itemCount: pagedResult?.itemCount || 0, aspectClass };
         }
 
         url = buildUrl('/api/contents/novels', applySourceQuery(query, sourceConfig));

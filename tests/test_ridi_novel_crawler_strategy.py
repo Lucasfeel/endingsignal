@@ -141,6 +141,8 @@ def test_next_data_listing_stops_on_repeated_page_signature(monkeypatch):
     assert meta["stopped_reason"] == "repeated_page_signature"
     assert meta["unique_contents"] == 4
     assert meta["pages_fetched"] == 3
+    assert meta["errors"] == []
+    assert meta["health_notes"] == ["REPEATED_PAGE_SIGNATURE:page=3"]
     assert set(entries.keys()) == {"1", "2", "3", "4"}
 
 
@@ -173,4 +175,52 @@ def test_next_data_listing_stops_on_no_new_ids_when_signature_changes(monkeypatc
     assert meta["stopped_reason"] == "no_new_ids"
     assert meta["unique_contents"] == 4
     assert meta["pages_fetched"] == 3
+    assert meta["errors"] == []
+    assert meta["health_notes"] == ["NO_NEW_IDS:page=3:count=1:threshold=1"]
     assert set(entries.keys()) == {"1", "2", "3", "4"}
+
+
+def test_fetch_all_data_treats_best_effort_listing_guards_as_health_notes(monkeypatch):
+    crawler = RidiNovelCrawler()
+
+    async def fake_webnovel_listing(_session, *, root_key, category_id, completed_only):
+        return (
+            {},
+            {
+                "strategy": "next_data",
+                "root_key": root_key,
+                "category_id": category_id,
+                "completed_only": completed_only,
+                "unique_contents": 0,
+                "errors": [],
+                "health_notes": [
+                    "REPEATED_PAGE_SIGNATURE:page=27" if not completed_only else "NO_NEW_IDS:page=28:count=1:threshold=1"
+                ],
+                "stopped_reason": "repeated_page_signature" if not completed_only else "no_new_ids",
+            },
+        )
+
+    async def fake_lightnovel_listing(_session, *, completed_only):
+        return (
+            {},
+            {
+                "strategy": "api",
+                "root_key": "light_novel",
+                "category_id": crawler.LIGHTNOVEL_ROOT[1],
+                "completed_only": completed_only,
+                "unique_contents": 0,
+                "errors": [],
+                "health_notes": [],
+                "stopped_reason": "no_next_page",
+            },
+        )
+
+    monkeypatch.setattr(crawler, "_fetch_webnovel_listing", fake_webnovel_listing)
+    monkeypatch.setattr(crawler, "_fetch_lightnovel_listing", fake_lightnovel_listing)
+
+    _, _, _, all_content, fetch_meta = asyncio.run(crawler.fetch_all_data())
+
+    assert all_content == {}
+    assert fetch_meta["errors"] == ["SUSPICIOUS_EMPTY_RESULT:RIDI"]
+    assert "romance:all:REPEATED_PAGE_SIGNATURE:page=27" in fetch_meta["health_notes"]
+    assert "romance:completed:NO_NEW_IDS:page=28:count=1:threshold=1" in fetch_meta["health_notes"]

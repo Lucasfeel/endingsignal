@@ -820,55 +820,88 @@ def get_recommendations():
 
     try:
         limit = _parse_recommendation_limit(request.args.get('limit'))
-        # Fetch extra per type so we can merge/sort and still keep a mixed top-N.
         per_type = ((limit + 2) // 3) * 2
 
         conn = get_db()
         cursor = get_cursor(conn)
-
-        merged_rows = []
-        content_types = ('webtoon', 'novel', 'ott')
         statuses = (STATUS_ONGOING, STATUS_HIATUS)
         meta_expr = _meta_select_expr()
 
         query = f"""
-            SELECT content_id, title, status, {meta_expr} AS meta, source, content_type, updated_at
-            FROM contents
-            WHERE content_type = %s
-              AND COALESCE(is_deleted, FALSE) = FALSE
-              AND status IN (%s, %s)
-            ORDER BY updated_at DESC, content_id ASC
+            WITH ranked_by_type AS (
+                SELECT
+                    content_id,
+                    title,
+                    status,
+                    {meta_expr} AS meta,
+                    source,
+                    content_type,
+                    updated_at,
+                    CASE content_type
+                        WHEN 'webtoon' THEN 0
+                        WHEN 'novel' THEN 1
+                        WHEN 'ott' THEN 2
+                        ELSE 99
+                    END AS type_priority,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY content_type
+                        ORDER BY updated_at DESC, content_id ASC
+                    ) AS type_rank
+                FROM contents
+                WHERE content_type IN ('webtoon', 'novel', 'ott')
+                  AND COALESCE(is_deleted, FALSE) = FALSE
+                  AND status IN (%s, %s)
+            ),
+            limited_by_type AS (
+                SELECT
+                    content_id,
+                    title,
+                    status,
+                    meta,
+                    source,
+                    content_type,
+                    updated_at,
+                    type_priority
+                FROM ranked_by_type
+                WHERE type_rank <= %s
+            ),
+            deduped AS (
+                SELECT
+                    content_id,
+                    title,
+                    status,
+                    meta,
+                    source,
+                    content_type,
+                    updated_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY content_id, source
+                        ORDER BY updated_at DESC, type_priority ASC, content_id ASC
+                    ) AS dedupe_rank,
+                    type_priority
+                FROM limited_by_type
+            )
+            SELECT content_id, title, status, meta, source, content_type
+            FROM deduped
+            WHERE dedupe_rank = 1
+            ORDER BY updated_at DESC, type_priority ASC, content_id ASC
             LIMIT %s
         """
 
-        for content_type in content_types:
-            cursor.execute(query, (content_type, statuses[0], statuses[1], per_type))
-            rows = cursor.fetchall()
-            for row in rows:
-                merged_rows.append(coerce_row_dict(row))
-
-        merged_rows.sort(
-            key=lambda row: _updated_at_sort_value(row.get('updated_at')),
-            reverse=True,
-        )
+        cursor.execute(query, (statuses[0], statuses[1], per_type, limit))
+        rows = cursor.fetchall()
 
         deduped = []
-        seen_keys = set()
-        for row in merged_rows:
-            key = (row.get('content_id'), row.get('source'))
-            if not key[0] or not key[1] or key in seen_keys:
-                continue
-            seen_keys.add(key)
+        for row in rows:
+            coerced = coerce_row_dict(row)
             deduped.append({
-                'content_id': row.get('content_id'),
-                'title': row.get('title'),
-                'status': row.get('status'),
-                'meta': normalize_meta(row.get('meta')),
-                'source': row.get('source'),
-                'content_type': row.get('content_type'),
+                'content_id': coerced.get('content_id'),
+                'title': coerced.get('title'),
+                'status': coerced.get('status'),
+                'meta': normalize_meta(coerced.get('meta')),
+                'source': coerced.get('source'),
+                'content_type': coerced.get('content_type'),
             })
-            if len(deduped) >= limit:
-                break
 
         if cache_key:
             _cache_store(cache_key, deduped)

@@ -1067,6 +1067,7 @@ class RidiNovelCrawler(ContentCrawler):
             "unique_contents": 0,
             "completion_missing": 0,
             "errors": [],
+            "health_notes": [],
             "request_errors": [],
             "stopped_reason": None,
         }
@@ -1151,7 +1152,7 @@ class RidiNovelCrawler(ContentCrawler):
                 )
 
             if prev_page_signature is not None and page_signature == prev_page_signature:
-                meta["errors"].append(f"REPEATED_PAGE_SIGNATURE:page={page}")
+                meta["health_notes"].append(f"REPEATED_PAGE_SIGNATURE:page={page}")
                 meta["stopped_reason"] = "repeated_page_signature"
                 print(
                     f"[RIDI][NEXT] stop=repeated_page_signature root={endpoint.key} "
@@ -1166,7 +1167,7 @@ class RidiNovelCrawler(ContentCrawler):
                 consecutive_no_new_pages = 0
 
             if consecutive_no_new_pages >= no_new_ids_threshold:
-                meta["errors"].append(
+                meta["health_notes"].append(
                     f"NO_NEW_IDS:page={page}:count={consecutive_no_new_pages}:threshold={no_new_ids_threshold}"
                 )
                 meta["stopped_reason"] = "no_new_ids"
@@ -1286,6 +1287,8 @@ class RidiNovelCrawler(ContentCrawler):
                 for label, meta in (("all", all_meta), ("completed", completed_meta)):
                     for error in meta.get("errors", []):
                         fetch_meta["errors"].append(f"{root_key}:{label}:{error}")
+                    for note in meta.get("health_notes", []):
+                        fetch_meta["health_notes"].append(f"{root_key}:{label}:{note}")
                     for request_error in meta.get("request_errors", []):
                         if isinstance(request_error, dict):
                             entry = {
@@ -1325,6 +1328,8 @@ class RidiNovelCrawler(ContentCrawler):
             for label, meta in (("all", light_all_meta), ("completed", light_completed_meta)):
                 for error in meta.get("errors", []):
                     fetch_meta["errors"].append(f"{light_root}:{label}:{error}")
+                for note in meta.get("health_notes", []):
+                    fetch_meta["health_notes"].append(f"{light_root}:{label}:{note}")
                 for request_error in meta.get("request_errors", []):
                     if isinstance(request_error, dict):
                         entry = {
