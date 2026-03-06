@@ -229,9 +229,12 @@ Notes:
 - KakaoPage discovery strategy controls:
   - `KAKAOPAGE_BACKFILL_DISCOVERY_STRATEGY` (default: `auto`)
     - `auto`: if discovered IDs already exist in state, behaves like `refresh`; otherwise `full`.
-    - `full`: scroll until tab end-of-list (`no_tab_growth`) or max scroll cap.
+    - `full`: keep scrolling the current tab while each scroll reveals at least one new tab-local ID; stop the tab when a scroll yields no new tab-local IDs.
     - `refresh`: stop early when there is no global discovered-ID growth for N scrolls, even if tab-local IDs still change.
     - `skip`: skip Playwright discovery entirely and proceed to detail phase (if requested).
+  - `KAKAOPAGE_BACKFILL_NO_NEW_IDS_SCROLLS` (default: `1`)
+    - Stop the current tab after N consecutive scrolls that yield zero new tab-local IDs.
+    - Backward-compatible fallback: `KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS`
   - `KAKAOPAGE_BACKFILL_DISCOVERY_NO_GLOBAL_GROWTH_SCROLLS` (default: `8`)
   - `KAKAOPAGE_BACKFILL_DISCOVERY_MAX_MEMORY_USAGE_RATIO` (default: `0.85`)
     - During discovery, if container memory usage ratio exceeds this threshold, discovery stops gracefully after saving state.
@@ -267,14 +270,28 @@ Notes:
   - State checkpoint cadence during detail stage:
     - `KAKAOPAGE_BACKFILL_SAVE_STATE_EVERY` (default: `20`)
 
+WebNovelDB Kakao coverage baselines:
+- Final summary output always prints per-genre Kakao coverage lines for `--kakaopage-seed-set webnoveldb`, including `discovered`, `expected`, `coverage`, `target90`, `target97`, and `status`.
+- Coverage targets:
+  - `판타지`: expected `12242`, 90% `11018`, 97% `11875`
+  - `현판`: expected `9378`, 90% `8441`, 97% `9097`
+  - `로맨스`: expected `22188`, 90% `19970`, 97% `21523`
+  - `로판`: expected `10652`, 90% `9587`, 97% `10333`
+  - `무협`: expected `4624`, 90% `4162`, 97% `4486`
+  - `BL`: expected `3786`, 90% `3408`, 97% `3673`
+- The summary also prints a diagnostic `total` row based on the summed expected baseline (`62870`; 90% `56583`; 97% `60984`), but per-genre coverage is the primary validation signal because cross-genre overlap can reduce deduped unique totals.
+
 Manual validation checklist (KakaoPage WebNovelDB seed mode):
 
 ```bash
-python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-seed-set webnoveldb --max-items 20 --dry-run
+python scripts/backfill_novels_once.py --sources kakao_page --kakaopage-seed-set webnoveldb --kakaopage-phase discovery --log-level INFO
 ```
 
-- Confirm dry-run samples include `title`, `authors`, `status`, `genres`, and canonical `content_url` (`https://page.kakao.com/content/<id>`).
-- Confirm dry-run logs/summary include per-seed stats (`discovered`, `parsed`, `skipped`, `errors`).
+- Confirm Kakao discovery does not terminate normally because of a fixed max-scroll cap.
+- Confirm exhausted tabs log `stop_reason=no_new_ids`.
+- Confirm progress logs expose both `global_new_ids` and `tab_local_new_ids`.
+- Confirm the final summary includes one coverage line per canonical WebNovelDB genre plus the diagnostic `total` row.
+- Compare the printed coverage lines against the targets above; `90%+` is the minimum goal and `97%+` is the stretch target per genre.
 
 ```sql
 SELECT

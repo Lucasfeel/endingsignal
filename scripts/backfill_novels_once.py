@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from math import ceil
 import os
 import random
 import signal
@@ -100,14 +101,15 @@ GENRE_ROMANCE = "\ub85c\ub9e8\uc2a4"
 GENRE_ROMANCE_FANTASY = "\ub85c\ud310"
 GENRE_WUXIA = "\ubb34\ud611"
 GENRE_BL = "BL"
-KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES = {
+KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER = (
     GENRE_FANTASY,
     GENRE_HYEONPAN,
     GENRE_ROMANCE,
     GENRE_ROMANCE_FANTASY,
     GENRE_WUXIA,
     GENRE_BL,
-}
+)
+KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES = set(KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER)
 KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID = {
     "86": GENRE_FANTASY,
     "120": GENRE_HYEONPAN,
@@ -154,6 +156,15 @@ KAKAOPAGE_WEBNOVELDB_SEED_INPUTS = (
         "url": "https://page.kakao.com/landing/genre/11/123?is_complete=true",
     },
 )
+KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS = {
+    GENRE_FANTASY: 12242,
+    GENRE_HYEONPAN: 9378,
+    GENRE_ROMANCE: 22188,
+    GENRE_ROMANCE_FANTASY: 10652,
+    GENRE_WUXIA: 4624,
+    GENRE_BL: 3786,
+}
+KAKAOPAGE_WEBNOVELDB_EXPECTED_TOTAL = sum(KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS.values())
 
 KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS = (
     "로그인",
@@ -182,6 +193,7 @@ class SourceSummary:
     error_count: int = 0
     sample_records: List[Dict[str, Any]] = field(default_factory=list)
     seed_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    final_discovered_count: int = 0
 
 
 def _setup_logging(level: str) -> None:
@@ -700,6 +712,14 @@ def _resolve_kakao_discovery_no_global_growth_scrolls() -> int:
     return _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_NO_GLOBAL_GROWTH_SCROLLS")) or 8
 
 
+def _resolve_kakao_discovery_no_new_ids_scrolls() -> int:
+    return (
+        _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_NO_NEW_IDS_SCROLLS"))
+        or _clean_int_limit(os.getenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS"))
+        or 1
+    )
+
+
 def _resolve_kakao_discovery_max_memory_usage_ratio() -> float:
     parsed_ratio = _clean_float_limit(os.getenv("KAKAOPAGE_BACKFILL_DISCOVERY_MAX_MEMORY_USAGE_RATIO"))
     if parsed_ratio is None:
@@ -711,9 +731,9 @@ def _should_stop_kakao_discovery_tab(
     *,
     strategy: str,
     no_global_growth_rounds: int,
-    no_tab_growth_rounds: int,
+    no_new_ids_rounds: int,
     no_global_growth_threshold: int,
-    stagnant_threshold: int,
+    no_new_ids_threshold: int,
     memory_usage_ratio: Optional[float],
     max_memory_usage_ratio: float,
 ) -> Optional[str]:
@@ -728,9 +748,132 @@ def _should_stop_kakao_discovery_tab(
         and no_global_growth_rounds >= max(1, no_global_growth_threshold)
     ):
         return "no_global_growth"
-    if no_tab_growth_rounds >= max(1, stagnant_threshold):
-        return "end_of_list"
+    if no_new_ids_rounds >= max(1, no_new_ids_threshold):
+        return "no_new_ids"
     return None
+
+
+def _collect_kakao_webnoveldb_discovered_counts(raw_discovered_map: Any) -> Dict[str, int]:
+    counts = {
+        canonical_genre: 0
+        for canonical_genre in KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER
+    }
+    if not isinstance(raw_discovered_map, dict):
+        return counts
+    for raw_entry in raw_discovered_map.values():
+        discovered_entry = _normalize_kakao_discovered_entry(raw_entry)
+        for canonical_genre in _seed_stat_keys_from_discovered_entry(discovered_entry):
+            counts[canonical_genre] += 1
+    return counts
+
+
+def _build_kakao_webnoveldb_coverage_metrics(*, discovered: int, expected: int) -> Dict[str, Any]:
+    target90 = ceil(expected * 0.90)
+    target97 = ceil(expected * 0.97)
+    coverage_ratio = (discovered / expected) if expected > 0 else 0.0
+    if discovered >= target97:
+        status = "meets97"
+    elif discovered >= target90:
+        status = "meets90"
+    else:
+        status = "below90"
+    return {
+        "discovered": discovered,
+        "expected": expected,
+        "coverage_ratio": coverage_ratio,
+        "target90": target90,
+        "target97": target97,
+        "status": status,
+    }
+
+
+def _build_kakao_webnoveldb_coverage_rows(
+    *,
+    discovered_counts: Dict[str, int],
+    unique_discovered_count: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    discovered_total = 0
+    for canonical_genre in KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER:
+        discovered = int(discovered_counts.get(canonical_genre, 0) or 0)
+        expected = KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS[canonical_genre]
+        discovered_total += discovered
+        rows.append(
+            {
+                "label": canonical_genre,
+                **_build_kakao_webnoveldb_coverage_metrics(
+                    discovered=discovered,
+                    expected=expected,
+                ),
+            }
+        )
+    rows.append(
+        {
+            "label": "total",
+            "diagnostic_only": True,
+            "unique_discovered": unique_discovered_count,
+            **_build_kakao_webnoveldb_coverage_metrics(
+                discovered=discovered_total,
+                expected=KAKAOPAGE_WEBNOVELDB_EXPECTED_TOTAL,
+            ),
+        }
+    )
+    return rows
+
+
+def _render_kakao_webnoveldb_coverage_lines(summary: SourceSummary) -> List[str]:
+    discovered_counts = {
+        canonical_genre: int(summary.seed_stats.get(canonical_genre, {}).get("discovered", 0) or 0)
+        for canonical_genre in KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER
+    }
+    rows = _build_kakao_webnoveldb_coverage_rows(
+        discovered_counts=discovered_counts,
+        unique_discovered_count=summary.final_discovered_count or None,
+    )
+    rendered: List[str] = []
+    for row in rows:
+        line = (
+            f"[{summary.source}][{row['label']}] discovered={row['discovered']} expected={row['expected']} "
+            f"coverage={row['coverage_ratio'] * 100:.1f}% target90={row['target90']} "
+            f"target97={row['target97']} status={row['status']}"
+        )
+        unique_discovered = row.get("unique_discovered")
+        if unique_discovered is not None:
+            line += f" unique_discovered={unique_discovered}"
+        if row.get("diagnostic_only"):
+            line += " diagnostic_only=true"
+        rendered.append(line)
+    return rendered
+
+
+def _render_source_summary_lines(
+    summary: SourceSummary,
+    *,
+    dry_run: bool,
+    kakaopage_seed_set: str,
+) -> List[str]:
+    lines = [
+        (
+            f"[{summary.source}] fetched={summary.fetched_count} parsed={summary.parsed_count} "
+            f"inserted={summary.inserted_count} updated={summary.updated_count} "
+            f"skipped={summary.skipped_count} errors={summary.error_count}"
+        )
+    ]
+    if dry_run and summary.sample_records:
+        lines.append(f"[{summary.source}] dry-run samples:")
+        for sample in summary.sample_records:
+            lines.append(json.dumps(sample, ensure_ascii=False))
+    if dry_run and summary.seed_stats:
+        lines.append(f"[{summary.source}] dry-run seed stats:")
+        for seed_key in sorted(summary.seed_stats.keys()):
+            stat = summary.seed_stats[seed_key]
+            lines.append(
+                f"[{summary.source}][{seed_key}] discovered={stat.get('discovered', 0)} "
+                f"parsed={stat.get('parsed', 0)} skipped={stat.get('skipped', 0)} errors={stat.get('errors', 0)}"
+            )
+    if summary.source == SOURCE_KAKAOPAGE and kakaopage_seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
+        lines.extend(_render_kakao_webnoveldb_coverage_lines(summary))
+    return lines
 
 
 def _kakao_discovery_target_ids(discovered_map: Dict[str, Any], max_items: Optional[int]) -> List[str]:
@@ -1184,8 +1327,7 @@ async def _discover_kakaopage_ids(
         done_set.update(str(url) for url in tabs_done_raw if isinstance(url, str))
     state["tabs_done"] = sorted(done_set)
 
-    stagnant_threshold = int(os.getenv("KAKAOPAGE_BACKFILL_STAGNANT_SCROLLS", "4"))
-    max_scrolls_per_tab = int(os.getenv("KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB", "300"))
+    no_new_ids_threshold = _resolve_kakao_discovery_no_new_ids_scrolls()
     no_global_growth_threshold = _resolve_kakao_discovery_no_global_growth_scrolls()
     max_memory_usage_ratio = _resolve_kakao_discovery_max_memory_usage_ratio()
     if strategy not in (KAKAOPAGE_DISCOVERY_STRATEGY_FULL, KAKAOPAGE_DISCOVERY_STRATEGY_REFRESH):
@@ -1267,16 +1409,18 @@ async def _discover_kakaopage_ids(
             continue
 
         no_global_growth_rounds = 0
-        no_tab_growth_rounds = 0
+        no_new_ids_rounds = 0
         tab_discovered_ids: Set[str] = set()
         last_html = ""
         last_scroll_number = 0
         last_global_new_count = 0
-        last_tab_new_count = 0
+        last_tab_local_new_count = 0
         tab_entry_dirty = False
         tab_stop_reason: Optional[str] = None
-        for scroll_idx in range(max_scrolls_per_tab):
-            last_scroll_number = scroll_idx + 1
+        scroll_idx = 0
+        while True:
+            scroll_idx += 1
+            last_scroll_number = scroll_idx
             if stop_event.is_set():
                 LOGGER.warning("Kakao discovery stop event while scrolling tab=%s; persisting state.", tab_name)
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
@@ -1295,7 +1439,7 @@ async def _discover_kakaopage_ids(
                     "Kakao discovery memory guard tab=%s scroll=%s strategy=%s usage_ratio=%.3f threshold=%.3f "
                     "usage_bytes=%s limit_bytes=%s stop_reason=%s",
                     tab_name,
-                    scroll_idx + 1,
+                    scroll_idx,
                     strategy,
                     usage_ratio,
                     max_memory_usage_ratio,
@@ -1315,7 +1459,7 @@ async def _discover_kakaopage_ids(
                 else:
                     discovered_tabs = []
             except Exception as exc:
-                LOGGER.debug("Kakao discovery DOM extraction failed tab=%s scroll=%s: %s", tab_name, scroll_idx + 1, exc)
+                LOGGER.debug("Kakao discovery DOM extraction failed tab=%s scroll=%s: %s", tab_name, scroll_idx, exc)
                 html = await page.content()
                 last_html = html
                 ids = extract_listing_content_ids(html)
@@ -1324,9 +1468,9 @@ async def _discover_kakaopage_ids(
                 used_html_fallback = True
                 discovered_tabs = []
             previous_count = len(discovered)
-            tab_new_ids = set(ids) - tab_discovered_ids
-            tab_new_count = len(tab_new_ids)
-            last_tab_new_count = tab_new_count
+            tab_local_new_ids = set(ids) - tab_discovered_ids
+            tab_local_new_count = len(tab_local_new_ids)
+            last_tab_local_new_count = tab_local_new_count
             changed_any_entry = False
 
             for content_id in ids:
@@ -1350,10 +1494,10 @@ async def _discover_kakaopage_ids(
                 no_global_growth_rounds += 1
             else:
                 no_global_growth_rounds = 0
-            if tab_new_count <= 0:
-                no_tab_growth_rounds += 1
+            if tab_local_new_count <= 0:
+                no_new_ids_rounds += 1
             else:
-                no_tab_growth_rounds = 0
+                no_new_ids_rounds = 0
             tab_entry_dirty = tab_entry_dirty or changed_any_entry
             if seed_set != KAKAOPAGE_SEED_SET_WEBNOVELDB:
                 tab_links_to_use = discovered_tabs
@@ -1381,20 +1525,21 @@ async def _discover_kakaopage_ids(
                 _save_state(state_dir, SOURCE_KAKAOPAGE, state, dry_run=dry_run)
 
             LOGGER.info(
-                "Kakao discovery tab=%s scroll=%s strategy=%s global_total_ids=%s global_new_ids=%s tab_seen_ids=%s "
-                "tab_new_ids=%s entry_changed=%s no_global_growth_rounds=%s no_tab_growth_rounds=%s "
-                "stagnant_threshold=%s no_global_growth_threshold=%s",
+                "Kakao discovery tab=%s scroll=%s strategy=%s global_total_ids=%s global_new_ids=%s "
+                "tab_local_seen_ids=%s tab_local_new_ids=%s entry_changed=%s "
+                "no_global_growth_rounds=%s no_new_ids_rounds=%s "
+                "no_new_ids_threshold=%s no_global_growth_threshold=%s",
                 tab_name,
-                scroll_idx + 1,
+                scroll_idx,
                 strategy,
                 len(discovered),
                 global_new_count,
                 len(tab_discovered_ids),
-                tab_new_count,
+                tab_local_new_count,
                 changed_any_entry,
                 no_global_growth_rounds,
-                no_tab_growth_rounds,
-                stagnant_threshold,
+                no_new_ids_rounds,
+                no_new_ids_threshold,
                 no_global_growth_threshold,
             )
 
@@ -1404,9 +1549,9 @@ async def _discover_kakaopage_ids(
             tab_stop_reason = _should_stop_kakao_discovery_tab(
                 strategy=strategy,
                 no_global_growth_rounds=no_global_growth_rounds,
-                no_tab_growth_rounds=no_tab_growth_rounds,
+                no_new_ids_rounds=no_new_ids_rounds,
                 no_global_growth_threshold=no_global_growth_threshold,
-                stagnant_threshold=stagnant_threshold,
+                no_new_ids_threshold=no_new_ids_threshold,
                 memory_usage_ratio=None,
                 max_memory_usage_ratio=max_memory_usage_ratio,
             )
@@ -1415,21 +1560,12 @@ async def _discover_kakaopage_ids(
 
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await page.wait_for_timeout(_resolve_kakao_discovery_scroll_delay_ms())
-        else:
-            tab_stop_reason = "max_scrolls"
-            if not stop_event.is_set() and (last_tab_new_count > 0 or no_tab_growth_rounds == 0):
-                LOGGER.warning(
-                    "Kakao discovery tab=%s reached max_scrolls_per_tab=%s before stagnation; discovery likely truncated. "
-                    "Increase KAKAOPAGE_BACKFILL_MAX_SCROLLS_PER_TAB.",
-                    tab_name,
-                    max_scrolls_per_tab,
-                )
 
         if tab_stop_reason:
             LOGGER.info(
                 "Kakao discovery tab stop tab=%s strategy=%s stop_reason=%s scrolls=%s "
-                "global_total_ids=%s global_new_ids=%s tab_seen_ids=%s tab_new_ids=%s "
-                "no_global_growth_rounds=%s no_tab_growth_rounds=%s",
+                "global_total_ids=%s global_new_ids=%s tab_local_seen_ids=%s tab_local_new_ids=%s "
+                "no_global_growth_rounds=%s no_new_ids_rounds=%s",
                 tab_name,
                 strategy,
                 tab_stop_reason,
@@ -1437,9 +1573,9 @@ async def _discover_kakaopage_ids(
                 len(discovered),
                 last_global_new_count,
                 len(tab_discovered_ids),
-                last_tab_new_count,
+                last_tab_local_new_count,
                 no_global_growth_rounds,
-                no_tab_growth_rounds,
+                no_new_ids_rounds,
             )
 
         if stop_event.is_set() or discovery_abort_reason:
@@ -1842,17 +1978,12 @@ async def run_kakaopage_backfill(
     if not isinstance(discovered_map, dict):
         discovered_map = {}
         state["discovered"] = discovered_map
+    summary.final_discovered_count = len(discovered_map)
     if seed_set == KAKAOPAGE_SEED_SET_WEBNOVELDB:
-        for canonical_genre in sorted(KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES):
+        discovered_counts = _collect_kakao_webnoveldb_discovered_counts(discovered_map)
+        for canonical_genre in KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER:
             _init_seed_stats(summary, canonical_genre)
-            summary.seed_stats[canonical_genre]["discovered"] = 0
-        for raw_entry in discovered_map.values():
-            discovered_entry = _normalize_kakao_discovered_entry(raw_entry)
-            _bump_seed_stats(
-                summary,
-                _seed_stat_keys_from_discovered_entry(discovered_entry),
-                "discovered",
-            )
+            summary.seed_stats[canonical_genre]["discovered"] = discovered_counts[canonical_genre]
     if phase == KAKAOPAGE_PHASE_DISCOVERY:
         if stop_event.is_set():
             raise RuntimeError("Kakao discovery interrupted by shutdown signal. Progress saved to state file.")
@@ -2376,23 +2507,12 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     print("\n=== Backfill Summary ===")
     for summary in summaries:
-        print(
-            f"[{summary.source}] fetched={summary.fetched_count} parsed={summary.parsed_count} "
-            f"inserted={summary.inserted_count} updated={summary.updated_count} "
-            f"skipped={summary.skipped_count} errors={summary.error_count}"
-        )
-        if args.dry_run and summary.sample_records:
-            print(f"[{summary.source}] dry-run samples:")
-            for sample in summary.sample_records:
-                print(json.dumps(sample, ensure_ascii=False))
-        if args.dry_run and summary.seed_stats:
-            print(f"[{summary.source}] dry-run seed stats:")
-            for seed_key in sorted(summary.seed_stats.keys()):
-                stat = summary.seed_stats[seed_key]
-                print(
-                    f"[{summary.source}][{seed_key}] discovered={stat.get('discovered', 0)} "
-                    f"parsed={stat.get('parsed', 0)} skipped={stat.get('skipped', 0)} errors={stat.get('errors', 0)}"
-                )
+        for line in _render_source_summary_lines(
+            summary,
+            dry_run=args.dry_run,
+            kakaopage_seed_set=args.kakaopage_seed_set,
+        ):
+            print(line)
 
     print(
         f"[overall] fetched={overall.fetched_count} parsed={overall.parsed_count} "
