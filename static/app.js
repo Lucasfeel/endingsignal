@@ -5664,7 +5664,7 @@ async function loadNextPage(category, { signal } = {}) {
     if (effectiveSignal?.aborted) return;
 
     const incoming = Array.isArray(json?.contents)
-      ? json.contents.map((item) => ({ ...item, meta: normalizeMeta(item?.meta) }))
+      ? json.contents.map((item) => normalizeContentForGrid(item, item?.source || pg.source))
       : [];
     let filteredIncoming = filterItemsBySources(incoming, pg.filterSources);
     if (pg.tabId === 'ott') {
