@@ -629,6 +629,81 @@ def test_create_admin_content_saves_novel_l2_hyeonpan(monkeypatch, client, auth_
     assert meta["attributes"]["genres"] == ["현판"]
 
 
+def test_create_admin_content_saves_novel_l2_mystery(monkeypatch, client, auth_headers):
+    class FakeUuid:
+        hex = "manualmysterynovelid"
+
+    monkeypatch.setattr(admin_view, "uuid4", lambda: FakeUuid())
+
+    now = datetime(2026, 2, 19, 11, 30, 0)
+    conn, cursor = _patch_db(
+        monkeypatch,
+        [
+            {
+                "contains": "FROM content_sources s",
+                "params": (31,),
+                "fetchall": [
+                    {
+                        "source_id": 31,
+                        "source_name": "리디",
+                        "type_id": 2,
+                        "type_name": "웹소설",
+                    }
+                ],
+            },
+            {
+                "contains": "FROM contents",
+                "params": ("ridi", "novel", "미스터리 수동 등록"),
+                "fetchone": None,
+            },
+            {
+                "contains": "INSERT INTO contents",
+                "fetchone": {
+                    "content_id": "manual:manualmysterynovelid",
+                    "source": "ridi",
+                    "content_type": "novel",
+                    "title": "미스터리 수동 등록",
+                    "status": "연재중",
+                    "meta": {
+                        "manual_registration": {"source_id": 31, "l2_id": "mystery"},
+                        "attributes": {"genres": ["mystery"]},
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            },
+        ],
+    )
+
+    response = client.post(
+        "/api/admin/contents",
+        json={
+            "title": "미스터리 수동 등록",
+            "typeId": 2,
+            "sourceId": 31,
+            "l2Id": "mystery",
+        },
+        headers=auth_headers,
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 201
+    assert payload["success"] is True
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    assert cursor.step_index == 3
+
+    insert_params = cursor.executed[2]["params"]
+    assert insert_params[0] == "manual:manualmysterynovelid"
+    assert insert_params[1] == "ridi"
+    assert insert_params[2] == "novel"
+    assert insert_params[4] == "연재중"
+    meta = json.loads(insert_params[5])
+    assert meta["manual_registration"]["l2_id"] == "mystery"
+    assert meta["manual_registration"]["l2_label"] == "미스터리"
+    assert meta["attributes"]["genres"] == ["mystery"]
+
+
 def test_create_admin_content_sets_ott_completed_status_from_l2(monkeypatch, client, auth_headers):
     class FakeUuid:
         hex = "manuall2ottid"

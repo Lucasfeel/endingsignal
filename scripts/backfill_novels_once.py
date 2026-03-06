@@ -35,7 +35,6 @@ from services.kakaopage_parser import (
     parse_kakaopage_detail,
 )
 from services.naver_series_parser import (
-    DEFAULT_NOVEL_GENRE,
     NAVER_SERIES_DETAIL_URL,
     STATUS_ONGOING,
     parse_naver_series_list,
@@ -64,15 +63,6 @@ SOURCE_NAVER_SERIES = "naver_series"
 SOURCE_KAKAOPAGE = "kakao_page"
 SUPPORTED_SOURCES = (SOURCE_NAVER_SERIES, SOURCE_KAKAOPAGE)
 
-NAVER_LIST_URL_ONGOING = (
-    "https://series.naver.com/novel/categoryProductList.series"
-    "?OSType=pc&categoryTypeCode=series&genreCode=&orderTypeCode=new&is=&isFinished=false"
-)
-NAVER_LIST_URL_COMPLETED = (
-    "https://series.naver.com/novel/categoryProductList.series"
-    "?OSType=pc&categoryTypeCode=series&genreCode=&orderTypeCode=new&is=&isFinished=true"
-)
-
 KAKAOPAGE_LIST_URL = f"{KAKAOPAGE_BASE_URL}{KAKAOPAGE_GENRE_ROOT_PATH}"
 KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE = f"{KAKAOPAGE_BASE_URL}/content/{{content_id}}"
 KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE = "https://page.kakao.com/content/{content_id}"
@@ -99,8 +89,20 @@ GENRE_FANTASY = "\ud310\ud0c0\uc9c0"
 GENRE_HYEONPAN = "\ud604\ud310"
 GENRE_ROMANCE = "\ub85c\ub9e8\uc2a4"
 GENRE_ROMANCE_FANTASY = "\ub85c\ud310"
+GENRE_MYSTERY = "\ubbf8\uc2a4\ud130\ub9ac"
+GENRE_LIGHT_NOVEL = "\ub77c\uc774\ud2b8\ub178\ubca8"
 GENRE_WUXIA = "\ubb34\ud611"
 GENRE_BL = "BL"
+NAVER_SERIES_GENRE_SEED_DEFINITIONS = (
+    {"key": "romance", "genre": GENRE_ROMANCE, "genre_code": "201"},
+    {"key": "romance_fantasy", "genre": GENRE_ROMANCE_FANTASY, "genre_code": "207"},
+    {"key": "fantasy", "genre": GENRE_FANTASY, "genre_code": "202"},
+    {"key": "hyeonpan", "genre": GENRE_HYEONPAN, "genre_code": "208"},
+    {"key": "wuxia", "genre": GENRE_WUXIA, "genre_code": "206"},
+    {"key": "mystery", "genre": GENRE_MYSTERY, "genre_code": "203"},
+    {"key": "light_novel", "genre": GENRE_LIGHT_NOVEL, "genre_code": "205"},
+    {"key": "bl", "genre": GENRE_BL, "genre_code": "209"},
+)
 KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER = (
     GENRE_FANTASY,
     GENRE_HYEONPAN,
@@ -180,6 +182,38 @@ KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS = (
     "verify",
     "age",
 )
+
+
+def _build_naver_series_genre_url(genre_code: str, *, completed: bool) -> str:
+    base_url = (
+        "https://series.naver.com/novel/categoryProductList.series"
+        f"?categoryTypeCode=genre&genreCode={genre_code}"
+    )
+    if completed:
+        return f"{base_url}&orderTypeCode=new&is&isFinished=true"
+    return base_url
+
+
+def _build_naver_series_seeds() -> Tuple[Dict[str, Any], ...]:
+    seeds: List[Dict[str, Any]] = []
+    for definition in NAVER_SERIES_GENRE_SEED_DEFINITIONS:
+        for completed in (False, True):
+            suffix = "completed" if completed else "ongoing"
+            seeds.append(
+                {
+                    "key": f"{definition['key']}_{suffix}",
+                    "genre": definition["genre"],
+                    "base_url": _build_naver_series_genre_url(
+                        definition["genre_code"],
+                        completed=completed,
+                    ),
+                    "is_finished_page": completed,
+                }
+            )
+    return tuple(seeds)
+
+
+NAVER_SERIES_SEEDS = _build_naver_series_seeds()
 
 
 @dataclass
@@ -273,29 +307,59 @@ def _rewind_naver_state(state: Dict[str, Any], rewind_pages: int) -> bool:
     if rewind_pages <= 0:
         return False
 
+    _ensure_naver_seed_state(state)
     changed = False
-    modes_state = state.setdefault("modes", {})
-    for mode_name in ("ongoing", "completed"):
-        mode_state = modes_state.setdefault(mode_name, {"next_page": 1, "done": False})
+    seeds_state = state.setdefault("seeds", {})
+    for seed in NAVER_SERIES_SEEDS:
+        seed_key = str(seed["key"])
+        seed_state = seeds_state.setdefault(seed_key, {"next_page": 1, "done": False})
         try:
-            next_page = int(mode_state.get("next_page", 1) or 1)
+            next_page = int(seed_state.get("next_page", 1) or 1)
         except (TypeError, ValueError):
             next_page = 1
         next_page = max(1, next_page)
         rewound_page = max(1, next_page - rewind_pages)
-        was_done = bool(mode_state.get("done"))
+        was_done = bool(seed_state.get("done"))
         if rewound_page != next_page or was_done:
-            mode_state["next_page"] = rewound_page
-            mode_state["done"] = False
+            seed_state["next_page"] = rewound_page
+            seed_state["done"] = False
             changed = True
             LOGGER.info(
-                "Rewound Naver state mode=%s next_page=%s->%s done=%s rewind_pages=%s",
-                mode_name,
+                "Rewound Naver state seed=%s next_page=%s->%s done=%s rewind_pages=%s",
+                seed_key,
                 next_page,
                 rewound_page,
                 was_done,
                 rewind_pages,
             )
+    return changed
+
+
+def _build_naver_seed_state_template() -> Dict[str, Any]:
+    return {
+        "seeds": {
+            str(seed["key"]): {"next_page": 1, "done": False}
+            for seed in NAVER_SERIES_SEEDS
+        }
+    }
+
+
+def _ensure_naver_seed_state(state: Dict[str, Any]) -> bool:
+    changed = False
+    seeds_state = state.get("seeds")
+    if not isinstance(seeds_state, dict):
+        seeds_state = {}
+        state["seeds"] = seeds_state
+        changed = True
+
+    for seed in NAVER_SERIES_SEEDS:
+        seed_key = str(seed["key"])
+        seed_state = seeds_state.get(seed_key)
+        if isinstance(seed_state, dict):
+            continue
+        seeds_state[seed_key] = {"next_page": 1, "done": False}
+        changed = True
+
     return changed
 
 
@@ -1124,20 +1188,13 @@ async def run_naver_series_backfill(
     state = _load_state(
         state_dir,
         SOURCE_NAVER_SERIES,
-        default={
-            "modes": {
-                "ongoing": {"next_page": 1, "done": False},
-                "completed": {"next_page": 1, "done": False},
-            }
-        },
+        default=_build_naver_seed_state_template(),
     )
+    state_changed = _ensure_naver_seed_state(state)
     if _rewind_naver_state(state, rewind_pages):
+        state_changed = True
+    if state_changed:
         _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
-
-    modes = [
-        ("ongoing", NAVER_LIST_URL_ONGOING, False),
-        ("completed", NAVER_LIST_URL_COMPLETED, True),
-    ]
 
     headers = _build_headers(referer="https://series.naver.com/novel")
     no_new_pages_threshold = _clean_int_limit(
@@ -1147,16 +1204,20 @@ async def run_naver_series_backfill(
         os.getenv("NAVER_SERIES_BACKFILL_REPEAT_PAGE_THRESHOLD")
     ) or 2
 
-    for mode_name, base_url, is_finished_page in modes:
-        mode_state = state.setdefault("modes", {}).setdefault(
-            mode_name, {"next_page": 1, "done": False}
+    for seed in NAVER_SERIES_SEEDS:
+        seed_key = str(seed["key"])
+        base_url = str(seed["base_url"])
+        is_finished_page = bool(seed["is_finished_page"])
+        default_genres = [str(seed["genre"])]
+        seed_state = state.setdefault("seeds", {}).setdefault(
+            seed_key, {"next_page": 1, "done": False}
         )
-        if mode_state.get("done"):
-            LOGGER.info("Naver mode=%s already marked done in state file; skipping.", mode_name)
+        if seed_state.get("done"):
+            LOGGER.info("Naver seed=%s already marked done in state file; skipping.", seed_key)
             continue
 
         try:
-            page = int(mode_state.get("next_page", 1) or 1)
+            page = int(seed_state.get("next_page", 1) or 1)
         except (TypeError, ValueError):
             page = 1
         page = max(1, page)
@@ -1169,40 +1230,40 @@ async def run_naver_series_backfill(
         while True:
             if shutdown_event is not None and shutdown_event.is_set():
                 LOGGER.warning(
-                    "Naver backfill interrupted by stop event mode=%s page=%s; state will be saved for resume.",
-                    mode_name,
+                    "Naver backfill interrupted by stop event seed=%s page=%s; state will be saved for resume.",
+                    seed_key,
                     page,
                 )
-                mode_state["next_page"] = page
+                seed_state["next_page"] = page
                 _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
                 break
             if max_items is not None and summary.parsed_count >= max_items:
                 LOGGER.info("Naver reached max_items=%s; stopping.", max_items)
                 break
             if max_pages is not None and pages_processed >= max_pages:
-                LOGGER.info("Naver reached max_pages=%s for mode=%s; stopping mode.", max_pages, mode_name)
+                LOGGER.info("Naver reached max_pages=%s for seed=%s; stopping seed.", max_pages, seed_key)
                 break
 
             page_url = _append_query(base_url, page=page)
-            LOGGER.info("Naver fetch mode=%s page=%s url=%s", mode_name, page, page_url)
+            LOGGER.info("Naver fetch seed=%s page=%s url=%s", seed_key, page, page_url)
             try:
                 html = await _fetch_text_with_retry(session, page_url, headers=headers)
             except Exception:
                 summary.error_count += 1
-                LOGGER.error("Naver fetch error mode=%s page=%s", mode_name, page, exc_info=True)
+                LOGGER.error("Naver fetch error seed=%s page=%s", seed_key, page, exc_info=True)
                 break
 
             parsed_items = parse_naver_series_list(
                 html,
                 is_finished_page=is_finished_page,
-                default_genres=[DEFAULT_NOVEL_GENRE],
+                default_genres=default_genres,
             )
             summary.fetched_count += len(parsed_items)
             if not parsed_items:
-                mode_state["done"] = True
-                mode_state["next_page"] = page
+                seed_state["done"] = True
+                seed_state["next_page"] = page
                 _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
-                LOGGER.info("Naver mode=%s page=%s produced 0 items; marking done.", mode_name, page)
+                LOGGER.info("Naver seed=%s page=%s produced 0 items; marking done.", seed_key, page)
                 break
 
             page_ids: List[str] = []
@@ -1229,24 +1290,24 @@ async def run_naver_series_backfill(
             previous_page_signature = page_signature
 
             if consecutive_no_new_pages >= no_new_pages_threshold:
-                mode_state["done"] = True
-                mode_state["next_page"] = page
+                seed_state["done"] = True
+                seed_state["next_page"] = page
                 _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
                 LOGGER.warning(
-                    "Naver stopping mode=%s page=%s due to no-new pages threshold=%s (consecutive_no_new_pages=%s).",
-                    mode_name,
+                    "Naver stopping seed=%s page=%s due to no-new pages threshold=%s (consecutive_no_new_pages=%s).",
+                    seed_key,
                     page,
                     no_new_pages_threshold,
                     consecutive_no_new_pages,
                 )
                 break
             if repeated_page_run >= repeat_page_threshold:
-                mode_state["done"] = True
-                mode_state["next_page"] = page
+                seed_state["done"] = True
+                seed_state["next_page"] = page
                 _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
                 LOGGER.warning(
-                    "Naver stopping mode=%s page=%s due to repeat-page threshold=%s (repeat_page_run=%s).",
-                    mode_name,
+                    "Naver stopping seed=%s page=%s due to repeat-page threshold=%s (repeat_page_run=%s).",
+                    seed_key,
                     page,
                     repeat_page_threshold,
                     repeated_page_run,
@@ -1267,7 +1328,7 @@ async def run_naver_series_backfill(
                     ),
                     "content_url": item.get("content_url")
                     or NAVER_SERIES_DETAIL_URL.format(product_no=item.get("content_id")),
-                    "genres": item.get("genres") or [DEFAULT_NOVEL_GENRE],
+                    "genres": item.get("genres") or default_genres,
                 }
                 accepted = upserter.add_raw(record)
                 summary.parsed_count += 1
@@ -1278,11 +1339,11 @@ async def run_naver_series_backfill(
 
             page += 1
             pages_processed += 1
-            mode_state["next_page"] = page
+            seed_state["next_page"] = page
             _save_state(state_dir, SOURCE_NAVER_SERIES, state, dry_run=dry_run)
             LOGGER.info(
-                "Naver progress mode=%s pages=%s fetched=%s parsed=%s skipped=%s",
-                mode_name,
+                "Naver progress seed=%s pages=%s fetched=%s parsed=%s skipped=%s",
+                seed_key,
                 pages_processed,
                 summary.fetched_count,
                 summary.parsed_count,

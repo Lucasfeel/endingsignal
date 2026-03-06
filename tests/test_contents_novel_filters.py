@@ -144,6 +144,29 @@ def test_novel_genre_group_filters_light_novel(monkeypatch, client):
     assert "wuxia-1" not in ids
 
 
+def test_novel_genre_group_filters_mystery(monkeypatch, client):
+    rows = [
+        _row(
+            "mystery-1",
+            meta={"attributes": {"genres": ["\uBBF8\uC2A4\uD130\uB9AC"]}},
+        ),
+        _row(
+            "romance-1",
+            meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+        ),
+    ]
+    _stub_db(monkeypatch, rows)
+
+    response = client.get("/api/contents/novels?genre_group=mystery")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    ids = {item["content_id"] for item in payload["contents"]}
+    assert ids == {"mystery-1"}
+    assert payload["filters"]["genre_groups"] == ["MYSTERY"]
+    assert payload["filters"]["genre_group"] == "MYSTERY"
+
+
 def test_novel_genre_group_does_not_hide_all_when_genre_metadata_missing(monkeypatch, client):
     rows = [
         _row("no-genre-1", meta={"attributes": {}}),

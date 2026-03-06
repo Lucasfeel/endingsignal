@@ -219,6 +219,7 @@ const NOVEL_GENRE_GROUP_OPTIONS = [
   { id: 'hyeonpan', label: '\uD604\uD310' },
   { id: 'romance', label: '\uB85C\uB9E8\uC2A4' },
   { id: 'romance_fantasy', label: '\uB85C\uD310' },
+  { id: 'mystery', label: '\uBBF8\uC2A4\uD130\uB9AC' },
   { id: 'light_novel', label: '\uB77C\uC774\uD2B8\uB178\uBCA8' },
   { id: 'wuxia', label: '\uBB34\uD611' },
   { id: 'bl', label: 'BL' },

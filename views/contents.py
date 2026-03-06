@@ -190,6 +190,10 @@ GENRE_GROUP_MAPPING = {
         "romance fantasy",
         "romance_fantasy",
     ],
+    "MYSTERY": [
+        "\uBBF8\uC2A4\uD130\uB9AC",
+        "mystery",
+    ],
     "LIGHT_NOVEL": [
         "\uB77C\uC774\uD2B8\uB178\uBCA8",
         "\uB77C\uB178\uBCA8",
@@ -221,6 +225,7 @@ GENRE_GROUP_ALIASES = {
         "\uB85C\uD310",
         "\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0",
     ),
+    "MYSTERY": ("mystery", "\uBBF8\uC2A4\uD130\uB9AC"),
     "LIGHT_NOVEL": (
         "lightnovel",
         "light_novel",

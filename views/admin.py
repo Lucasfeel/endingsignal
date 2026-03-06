@@ -79,6 +79,7 @@ MANUAL_CONTENT_L2_OPTIONS = {
             'label': '로판',
             'attributes': {'genres': ['romance_fantasy']},
         },
+        'mystery': {'id': 'mystery', 'label': '미스터리', 'attributes': {'genres': ['mystery']}},
         'light_novel': {
             'id': 'light_novel',
             'label': '라이트노벨',

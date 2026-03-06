@@ -381,6 +381,7 @@
       { id: 'hyeonpan', label: '현판' },
       { id: 'romance', label: '로맨스' },
       { id: 'romance_fantasy', label: '로판' },
+      { id: 'mystery', label: '\uBBF8\uC2A4\uD130\uB9AC' },
       { id: 'light_novel', label: '라이트노벨' },
       { id: 'wuxia', label: '무협' },
       { id: 'bl', label: 'BL' },
