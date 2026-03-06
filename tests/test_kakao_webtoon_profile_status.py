@@ -4,6 +4,8 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+import asyncio
+import config
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
 
 
@@ -61,3 +63,53 @@ def test_needs_profile_lookup_ttl_logic():
     assert crawler._needs_profile_lookup("1", db_info_missing, now, ttl_days=7)
 
     assert crawler._needs_profile_lookup("1", None, now, ttl_days=7)
+
+
+class StubProfileLookupFailureCrawler(KakaoWebtoonCrawler):
+    def __init__(self):
+        super().__init__()
+        self._entry = {
+            "content_id": "9001",
+            "title": "title-9001",
+            "authors": ["author"],
+            "thumbnail_url": "https://example.com/thumb.webp",
+            "content_url": "https://webtoon.kakao.com/content/test/9001",
+            "kakao_ongoing_status": None,
+        }
+
+    async def _fetch_placement_entries(self, session, placement, headers):
+        entries = [dict(self._entry)] if placement == "timetable_completed" else []
+        meta = {
+            "http_status": 200,
+            "count": len(entries),
+            "stopped_reason": None if entries else "no_data",
+        }
+        return entries, meta, None
+
+    def _load_completed_candidate_db_info(self, content_ids):
+        return {}
+
+    async def _fetch_profile_statuses(self, session, content_ids, headers):
+        return [(content_id, None, "http_404", False) for content_id in content_ids]
+
+
+def test_profile_lookup_failures_are_best_effort_and_not_fetch_errors(monkeypatch):
+    monkeypatch.setattr(config, "KAKAOWEBTOON_PLACEMENTS_WEEKDAYS", ["timetable_mon"])
+    monkeypatch.setattr(config, "KAKAOWEBTOON_PLACEMENT_COMPLETED", "timetable_completed")
+    monkeypatch.setattr(config, "KAKAOWEBTOON_PROFILE_LOOKUP_BUDGET", 10)
+
+    crawler = StubProfileLookupFailureCrawler()
+
+    ongoing_today, hiatus_today, finished_today, all_content_today, fetch_meta = asyncio.run(
+        crawler.fetch_all_data()
+    )
+
+    assert ongoing_today == {}
+    assert hiatus_today == {}
+    assert "9001" in finished_today
+    assert all_content_today["9001"]["kakao_unverified_completed_candidate"] is True
+    assert fetch_meta["errors"] == []
+    assert fetch_meta["profile_lookup_failed"] == 1
+    assert fetch_meta["profile_lookup_errors"] == ["profile:9001:http_404"]
+    assert fetch_meta["profile_status_counts"]["FETCH_FAILED"] == 1
+    assert "profile_lookup_partial_failure" in fetch_meta["health_notes"]

@@ -1,5 +1,6 @@
 import asyncio
 
+import crawlers.base_crawler as base_crawler_module
 from crawlers.base_crawler import ContentCrawler
 
 
@@ -85,6 +86,22 @@ class FailingCrawler(DummyCrawler):
         raise RuntimeError("network failure")
 
 
+class BestEffortProfileLookupCrawler(DummyCrawler):
+    async def fetch_all_data(self):
+        assert self.conn.rollback_calls == 1
+        assert self.conn.snapshot_cursor.closed is True
+        self.conn.events.append("fetch_all_data")
+        item = {"title": "title-1"}
+        fetch_meta = {
+            "force_no_ratio": True,
+            "errors": [],
+            "health_notes": ["profile_lookup_partial_failure"],
+            "profile_lookup_failed": 1,
+            "profile_lookup_errors": ["profile:1:http_404"],
+        }
+        return {}, {}, {"1": item}, {"1": item}, fetch_meta
+
+
 def test_run_daily_check_ends_snapshot_transaction_before_fetch():
     conn = FakeConnection()
     crawler = DummyCrawler(conn)
@@ -133,3 +150,37 @@ def test_run_daily_check_still_ends_snapshot_transaction_when_fetch_fails():
         "fetch_all_data",
         "rollback",
     ]
+
+
+def test_run_daily_check_does_not_skip_cdc_for_best_effort_profile_lookup_failures(monkeypatch):
+    conn = FakeConnection()
+    crawler = BestEffortProfileLookupCrawler(conn)
+    recorded_events = []
+
+    def _record_content_completed_event(conn, content_id, source, final_completed_at, resolved_by):
+        recorded_events.append(
+            {
+                "content_id": content_id,
+                "source": source,
+                "final_completed_at": final_completed_at,
+                "resolved_by": resolved_by,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(
+        base_crawler_module,
+        "record_content_completed_event",
+        _record_content_completed_event,
+    )
+
+    added, newly_completed_items, cdc_info = asyncio.run(crawler.run_daily_check(conn))
+
+    assert added == 0
+    assert len(newly_completed_items) == 1
+    assert newly_completed_items[0][0] == "1"
+    assert cdc_info["cdc_skipped"] is False
+    assert cdc_info["cdc_events_inserted_count"] == 1
+    assert recorded_events[0]["content_id"] == "1"
+    assert cdc_info["fetch_meta"]["profile_lookup_errors"] == ["profile:1:http_404"]
+    assert conn.commit_calls == 1

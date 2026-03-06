@@ -542,12 +542,14 @@ class KakaoWebtoonCrawler(ContentCrawler):
             "finished": {},
             "errors": [],
             "health_warnings": [],
+            "health_notes": [],
             "status_counts": {},
             "placement_status_counts": {},
             "completed_candidate_total": 0,
             "profile_lookup_total": 0,
             "profile_lookup_ok": 0,
             "profile_lookup_failed": 0,
+            "profile_lookup_errors": [],
             "profile_status_counts": {},
             "lookup_skipped_due_to_budget": 0,
             "completed_placement_processed": 0,
@@ -703,7 +705,10 @@ class KakaoWebtoonCrawler(ContentCrawler):
                 for content_id, status, error, ok in results:
                     if error:
                         fetch_meta["profile_lookup_failed"] += 1
-                        fetch_meta["errors"].append(f"profile:{content_id}:{error}")
+                        # Profile badge lookups are best-effort and must not block completion CDC.
+                        fetch_meta["profile_lookup_errors"].append(
+                            f"profile:{content_id}:{error}"
+                        )
                         fetch_meta["profile_status_counts"]["FETCH_FAILED"] = (
                             fetch_meta["profile_status_counts"].get("FETCH_FAILED", 0) + 1
                         )
@@ -723,6 +728,9 @@ class KakaoWebtoonCrawler(ContentCrawler):
                         profile_status_verified_ids.add(content_id)
                     elif status_key in {"SEASON_COMPLETED", "PAUSE"}:
                         profile_status_verified_ids.add(content_id)
+
+            if fetch_meta["profile_lookup_failed"]:
+                fetch_meta["health_notes"].append("profile_lookup_partial_failure")
 
             for content_id in completed_candidate_list:
                 entry = combined_map.get(content_id)
