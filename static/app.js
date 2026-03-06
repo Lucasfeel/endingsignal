@@ -5108,8 +5108,14 @@ async function loadNextPage(category, { signal } = {}) {
       );
     }
 
+    const hasExplicitNextCursor =
+      json &&
+      typeof json === 'object' &&
+      Object.prototype.hasOwnProperty.call(json, 'next_cursor');
     const next = json?.next_cursor ?? null;
-    const legacyNext = !next ? json?.last_title ?? null : null;
+    // Legacy endpoints may only expose last_title pagination. When next_cursor is
+    // present (even as null on the last page), prefer it and do not fall back.
+    const legacyNext = !hasExplicitNextCursor && !next ? json?.last_title ?? null : null;
     const parsedPageSize = Number(json?.page_size);
     const responsePageSize = Number.isFinite(parsedPageSize) ? parsedPageSize : perPage;
 
