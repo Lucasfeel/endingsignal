@@ -11,15 +11,17 @@ services:
       FLASK_ENV: production
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
-      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-}
       DB_NAME: ${DB_NAME:-}
       DB_USER: ${DB_USER:-}
       DB_PASSWORD: ${DB_PASSWORD:-}
-      DB_HOST: ${DB_HOST:-}
+      DB_HOST: ${DOCKER_DB_HOST:-}
       DB_PORT: ${DB_PORT:-}
       DB_TIMEZONE: ${DB_TIMEZONE:-Asia/Seoul}
       RUN_DB_INIT: ${RUN_DB_INIT:-0}
       SKIP_DB_INIT: ${SKIP_DB_INIT:-0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   backfill-naver-series:
@@ -29,15 +31,17 @@ services:
     image: endingsignal-web:latest
     profiles: ["backfill"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-}
       DB_NAME: ${DB_NAME:-}
       DB_USER: ${DB_USER:-}
       DB_PASSWORD: ${DB_PASSWORD:-}
-      DB_HOST: ${DB_HOST:-}
+      DB_HOST: ${DOCKER_DB_HOST:-}
       DB_PORT: ${DB_PORT:-}
       DB_TIMEZONE: ${DB_TIMEZONE:-Asia/Seoul}
     volumes:
       - ./.backfill_state:/app/.backfill_state
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     entrypoint: ["python", "scripts/backfill_naver_series_only.py"]
     command: []
     restart: "no"
@@ -49,11 +53,11 @@ services:
     image: endingsignal-backfill:latest
     profiles: ["backfill"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-}
       DB_NAME: ${DB_NAME:-}
       DB_USER: ${DB_USER:-}
       DB_PASSWORD: ${DB_PASSWORD:-}
-      DB_HOST: ${DB_HOST:-}
+      DB_HOST: ${DOCKER_DB_HOST:-}
       DB_PORT: ${DB_PORT:-}
       DB_TIMEZONE: ${DB_TIMEZONE:-Asia/Seoul}
       KAKAOPAGE_COOKIE_HEADER: ${KAKAOPAGE_COOKIE_HEADER:-}
@@ -73,6 +77,8 @@ services:
     volumes:
       - ./.backfill_state:/app/.backfill_state
     shm_size: "1gb"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     entrypoint: ["python", "scripts/backfill_kakao_page_only.py"]
     command: []
     restart: "no"

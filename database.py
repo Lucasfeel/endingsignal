@@ -11,10 +11,13 @@ from typing import Callable
 
 import psycopg2
 import psycopg2.extras
+from dotenv import load_dotenv
 from flask import g, has_request_context
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2 import sql
 from utils.perf import add_db_borrow_or_connect_ms, add_db_fetch_ms, add_db_sql_ms
+
+load_dotenv()
 
 REQUIRED_DB_ENV_VARS = ('DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT')
 DB_INIT_APPLICATION_NAME = "endingsignal_init_db"

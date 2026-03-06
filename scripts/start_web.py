@@ -2,6 +2,11 @@ import os
 import subprocess
 import sys
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 REQUIRED_DB_ENV_VARS = ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT")
