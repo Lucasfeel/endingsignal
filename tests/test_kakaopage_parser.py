@@ -7,6 +7,7 @@ from services.kakaopage_parser import (
     STATUS_COMPLETED,
     STATUS_ONGOING,
     is_noise_author_token,
+    parse_kakaopage_listing_items,
     parse_kakaopage_detail,
 )
 
@@ -86,3 +87,48 @@ def test_noise_author_token_variants():
 
     for token in variants:
         assert is_noise_author_token(token) is True
+
+
+def test_parse_kakaopage_listing_items_prefers_next_data_and_merges_dom_status():
+    html = """
+    <html>
+      <head>
+        <script id="__NEXT_DATA__" type="application/json">
+          {
+            "props": {
+              "pageProps": {
+                "items": [
+                  {
+                    "seriesId": "68646313",
+                    "title": "삼국지 여포",
+                    "subcategory": "판타지",
+                    "statusBadge": "신작"
+                  }
+                ]
+              }
+            }
+          }
+        </script>
+      </head>
+      <body>
+        <a
+          href="/content/68646313"
+          data-t-obj="{&quot;name&quot;:&quot;삼국지 여포&quot;,&quot;subcategory&quot;:&quot;판타지&quot;}"
+          aria-label="작품, 삼국지 여포, 완결, 버튼"
+        >삼국지 여포</a>
+      </body>
+    </html>
+    """
+
+    parsed = parse_kakaopage_listing_items(html, default_genres=["현판"], seed_completed=False)
+
+    assert parsed == [
+        {
+            "content_id": "68646313",
+            "content_url": "https://page.kakao.com/content/68646313",
+            "title": "삼국지 여포",
+            "authors": [],
+            "status": STATUS_COMPLETED,
+            "genres": ["현판", "판타지"],
+        }
+    ]

@@ -16,6 +16,14 @@ class ContentCrawler(ABC):
 
     def __init__(self, source_name):
         self.source_name = source_name
+        self._prefetch_context = {}
+
+    def build_prefetch_context(self, conn, cursor, db_status_map, override_map, db_state_before_sync):
+        """Optional hook for crawler-specific DB snapshot context before fetch."""
+        return {}
+
+    def get_prefetch_context(self):
+        return self._prefetch_context
 
     def seed_webtoon_publication_dates(self, cursor):
         """
@@ -122,6 +130,14 @@ class ContentCrawler(ABC):
                 db_state_before_sync[content_id] = resolve_final_state(
                     db_status_map.get(content_id), override_map.get(content_id)
                 )
+            prefetch_context = self.build_prefetch_context(
+                conn,
+                read_cursor,
+                db_status_map,
+                override_map,
+                db_state_before_sync,
+            )
+            self._prefetch_context = prefetch_context if isinstance(prefetch_context, dict) else {}
 
             # End the read phase before any network I/O so no transaction is left open.
             conn.rollback()
@@ -250,6 +266,7 @@ class ContentCrawler(ABC):
                 notes = fetch_meta.get("health_notes")
                 if isinstance(notes, list):
                     health_info["notes"] = notes
+            skip_database_sync = bool(fetch_meta.get("skip_database_sync")) if isinstance(fetch_meta, dict) else False
 
             fetch_meta["is_degraded_fetch"] = is_degraded_fetch
             fetch_meta["fetch_health"] = health_info
@@ -296,10 +313,13 @@ class ContentCrawler(ABC):
                 "fetch_meta": fetch_meta,
                 "status": status_label,
                 "summary": summary,
+                "db_sync_skipped": skip_database_sync,
             }
 
             # 8) DB sync (commit is enforced here, not in crawler implementations)
-            added = self.synchronize_database(conn, all_content_today, ongoing_today, hiatus_today, finished_today)
+            added = 0
+            if not skip_database_sync:
+                added = self.synchronize_database(conn, all_content_today, ongoing_today, hiatus_today, finished_today)
 
             # 8.5) Seed default publication dates for webtoons (best effort).
             default_publication_seeded_count = 0
@@ -325,6 +345,7 @@ class ContentCrawler(ABC):
             raise
 
         finally:
+            self._prefetch_context = {}
             if read_cursor:
                 try:
                     read_cursor.close()

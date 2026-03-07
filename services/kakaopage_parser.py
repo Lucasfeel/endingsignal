@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 STATUS_COMPLETED = "\uc644\uacb0"
 STATUS_ONGOING = "\uc5f0\uc7ac\uc911"
 KAKAOPAGE_BASE_URL = "https://bff-page.kakao.com"
+KAKAOPAGE_PUBLIC_BASE_URL = "https://page.kakao.com"
 KAKAOPAGE_GENRE_ROOT_PATH = "/landing/genre/11"
 KAKAOPAGE_TITLE_SUFFIX_RE = re.compile(
     r"\s*-\s*\uc6f9\uc18c\uc124\s*\|\s*\uce74\uce74\uc624\ud398\uc774\uc9c0\s*$"
@@ -148,6 +149,222 @@ def extract_tab_links(html: str, *, base_url: str = KAKAOPAGE_BASE_URL) -> List[
         )
 
     return discovered
+
+
+def _parse_data_attribute_json(raw_value: object) -> Any:
+    if not isinstance(raw_value, str):
+        return None
+    text = raw_value.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _extract_listing_title_from_aria(raw_value: str) -> str:
+    parts = [_clean_text(part) for part in str(raw_value or "").split(",")]
+    parts = [part for part in parts if part]
+    if len(parts) >= 2 and parts[0] in {"작품", "웹소설"}:
+        return parts[1]
+    if parts:
+        return parts[0]
+    return ""
+
+
+def _extract_listing_status_from_text(raw_value: object, *, seed_completed: bool) -> str:
+    text = _clean_text(raw_value)
+    if "\uc644\uacb0" in text:
+        return STATUS_COMPLETED
+    if seed_completed:
+        return STATUS_COMPLETED
+    return STATUS_ONGOING
+
+
+def _merge_listing_item(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(existing or {})
+    for key in ("content_id", "content_url"):
+        value = _clean_text(incoming.get(key))
+        if value:
+            merged[key] = value
+
+    title = _clean_text(incoming.get("title"))
+    if title:
+        merged["title"] = title
+
+    authors = _filter_plausible_authors([*(merged.get("authors") or []), *(incoming.get("authors") or [])])
+    merged["authors"] = authors
+
+    genres = _dedupe_strings([*(merged.get("genres") or []), *(incoming.get("genres") or [])])
+    merged["genres"] = genres
+
+    incoming_status = _clean_text(incoming.get("status"))
+    current_status = _clean_text(merged.get("status"))
+    if incoming_status == STATUS_COMPLETED or current_status == STATUS_COMPLETED:
+        merged["status"] = STATUS_COMPLETED
+    elif incoming_status:
+        merged["status"] = incoming_status
+    else:
+        merged["status"] = current_status or STATUS_ONGOING
+
+    return merged
+
+
+def _extract_listing_items_from_next_data(
+    html: str,
+    *,
+    default_genres: Optional[List[str]] = None,
+    seed_completed: bool = False,
+) -> List[Dict[str, Any]]:
+    soup = BeautifulSoup(html or "", "lxml")
+    node = soup.select_one('script[id="__NEXT_DATA__"][type="application/json"]')
+    if node is None:
+        return []
+
+    script_text = node.string or node.get_text(strip=True) or ""
+    if not script_text or len(script_text) > 8_000_000:
+        return []
+
+    try:
+        parsed = json.loads(script_text)
+    except Exception:
+        return []
+
+    defaults = _dedupe_strings(default_genres or [])
+    items_by_id: Dict[str, Dict[str, Any]] = {}
+    stack: List[Any] = [parsed]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            raw_content_id = current.get("seriesId")
+            if raw_content_id in (None, ""):
+                raw_content_id = current.get("series_id")
+            if raw_content_id in (None, ""):
+                raw_content_id = current.get("contentId")
+            content_id = _clean_text(raw_content_id)
+            title = _clean_text(current.get("title") or current.get("name"))
+            if content_id.isdigit() and title:
+                status_source = current.get("statusBadge")
+                if isinstance(status_source, dict):
+                    status_source = status_source.get("label") or status_source.get("text") or ""
+                genres = defaults[:]
+                for key in ("subcategory", "subCategory", "genre"):
+                    value = _clean_text(current.get(key))
+                    if value:
+                        genres.append(value)
+                raw_genres = current.get("genres")
+                if isinstance(raw_genres, list):
+                    genres.extend(str(item) for item in raw_genres)
+
+                content_url = _clean_text(current.get("contentHomeUri"))
+                if not content_url:
+                    content_url = f"{KAKAOPAGE_PUBLIC_BASE_URL}/content/{content_id}"
+                elif content_url.startswith("/"):
+                    content_url = urljoin(KAKAOPAGE_PUBLIC_BASE_URL, content_url)
+
+                authors: List[str] = []
+                for key in ("author", "authors", "writer", "writers", "creator", "creators"):
+                    authors.extend(_extract_author_names_from_json_obj(current.get(key)))
+
+                items_by_id[content_id] = _merge_listing_item(
+                    items_by_id.get(content_id, {}),
+                    {
+                        "content_id": content_id,
+                        "content_url": content_url,
+                        "title": title,
+                        "authors": authors,
+                        "status": _extract_listing_status_from_text(
+                            status_source or current.get("status") or current.get("badge"),
+                            seed_completed=seed_completed or bool(current.get("isComplete")),
+                        ),
+                        "genres": genres,
+                    },
+                )
+
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+
+    return list(items_by_id.values())
+
+
+def parse_kakaopage_listing_items(
+    html: str,
+    *,
+    default_genres: Optional[List[str]] = None,
+    seed_completed: bool = False,
+) -> List[Dict[str, Any]]:
+    defaults = _dedupe_strings(default_genres or [])
+    items_by_id: Dict[str, Dict[str, Any]] = {}
+
+    for item in _extract_listing_items_from_next_data(
+        html,
+        default_genres=defaults,
+        seed_completed=seed_completed,
+    ):
+        content_id = _clean_text(item.get("content_id"))
+        if content_id:
+            items_by_id[content_id] = _merge_listing_item(items_by_id.get(content_id, {}), item)
+
+    soup = BeautifulSoup(html or "", "lxml")
+    for anchor in soup.select("a[href*='/content/']"):
+        href = anchor.get("href") or ""
+        content_id = parse_content_id_from_href(href)
+        if not content_id:
+            continue
+
+        container = anchor.find_parent(["li", "div", "article"]) or anchor
+        data_obj = _parse_data_attribute_json(anchor.get("data-t-obj")) or {}
+        if not isinstance(data_obj, dict):
+            data_obj = {}
+        aria_label = _clean_text(anchor.get("aria-label") or "")
+        title = _clean_text(
+            data_obj.get("name")
+            or _extract_listing_title_from_aria(aria_label)
+            or (anchor.get("title") or "")
+        )
+        if not title:
+            title = _clean_text(anchor.get_text(" ", strip=True))
+        if not title:
+            image = container.select_one("img[alt]")
+            if image:
+                title = _clean_text(image.get("alt") or "")
+
+        authors: List[str] = []
+        for key in ("author", "authors", "writer", "writers", "creator", "creators"):
+            authors.extend(_extract_author_names_from_json_obj(data_obj.get(key)))
+
+        genres = defaults[:]
+        subcategory = _clean_text(data_obj.get("subcategory"))
+        if subcategory:
+            genres.append(subcategory)
+
+        status = _extract_listing_status_from_text(
+            " ".join(
+                part
+                for part in [
+                    container.get_text(" ", strip=True),
+                    aria_label,
+                    _clean_text(data_obj.get("statusBadge")),
+                ]
+                if part
+            ),
+            seed_completed=seed_completed,
+        )
+        items_by_id[content_id] = _merge_listing_item(
+            items_by_id.get(content_id, {}),
+            {
+                "content_id": content_id,
+                "content_url": urljoin(KAKAOPAGE_PUBLIC_BASE_URL, href),
+                "title": title,
+                "authors": authors,
+                "status": status,
+                "genres": genres,
+            },
+        )
+
+    return list(items_by_id.values())
 
 
 def _strip_kakaopage_title_suffix(title: str) -> str:
@@ -447,4 +664,3 @@ def parse_kakaopage_detail(
         "genres": genres,
         "_author_source": author_source,
     }
-

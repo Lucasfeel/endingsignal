@@ -102,6 +102,28 @@ class BestEffortProfileLookupCrawler(DummyCrawler):
         return {}, {}, {"1": item}, {"1": item}, fetch_meta
 
 
+class PrefetchContextCrawler(DummyCrawler):
+    def build_prefetch_context(self, conn, cursor, db_status_map, override_map, db_state_before_sync):
+        conn.events.append("build_prefetch_context")
+        assert cursor is conn.snapshot_cursor
+        assert db_status_map == {}
+        assert override_map == {}
+        assert db_state_before_sync == {}
+        return {"snapshot_loaded": True}
+
+    async def fetch_all_data(self):
+        assert self.get_prefetch_context() == {"snapshot_loaded": True}
+        return await super().fetch_all_data()
+
+
+class SkipDatabaseSyncCrawler(DummyCrawler):
+    async def fetch_all_data(self):
+        return {}, {}, {}, {}, {"force_no_ratio": True, "skip_database_sync": True}
+
+    def synchronize_database(self, conn, all_content_today, ongoing_today, hiatus_today, finished_today):
+        raise AssertionError("synchronize_database should be skipped")
+
+
 def test_run_daily_check_ends_snapshot_transaction_before_fetch():
     conn = FakeConnection()
     crawler = DummyCrawler(conn)
@@ -184,3 +206,23 @@ def test_run_daily_check_does_not_skip_cdc_for_best_effort_profile_lookup_failur
     assert recorded_events[0]["content_id"] == "1"
     assert cdc_info["fetch_meta"]["profile_lookup_errors"] == ["profile:1:http_404"]
     assert conn.commit_calls == 1
+
+
+def test_run_daily_check_exposes_prefetch_context_during_fetch_only():
+    conn = FakeConnection()
+    crawler = PrefetchContextCrawler(conn)
+
+    asyncio.run(crawler.run_daily_check(conn))
+
+    assert crawler.get_prefetch_context() == {}
+    assert "build_prefetch_context" in conn.events
+
+
+def test_run_daily_check_can_skip_database_sync_via_fetch_meta():
+    conn = FakeConnection()
+    crawler = SkipDatabaseSyncCrawler(conn)
+
+    added, _, cdc_info = asyncio.run(crawler.run_daily_check(conn))
+
+    assert added == 0
+    assert cdc_info["db_sync_skipped"] is True

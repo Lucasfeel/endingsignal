@@ -25,6 +25,13 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import config
 from database import create_standalone_connection
+from services.kakaopage_novel_common import (
+    KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS as SHARED_KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS,
+    fetch_kakao_detail_and_build_record as shared_fetch_kakao_detail_and_build_record,
+    is_kakao_suspicious_author_list as shared_is_kakao_suspicious_author_list,
+    is_probable_kakao_block_page as shared_is_probable_kakao_block_page,
+    resolve_kakaopage_status as shared_resolve_kakaopage_status,
+)
 from services.kakaopage_parser import (
     KAKAOPAGE_BASE_URL,
     KAKAOPAGE_GENRE_ROOT_PATH,
@@ -38,6 +45,33 @@ from services.naver_series_parser import (
     NAVER_SERIES_DETAIL_URL,
     STATUS_ONGOING,
     parse_naver_series_list,
+)
+from services.novel_seed_catalog import (
+    GENRE_BL as SHARED_GENRE_BL,
+    GENRE_FANTASY as SHARED_GENRE_FANTASY,
+    GENRE_HYEONPAN as SHARED_GENRE_HYEONPAN,
+    GENRE_LIGHT_NOVEL as SHARED_GENRE_LIGHT_NOVEL,
+    GENRE_MYSTERY as SHARED_GENRE_MYSTERY,
+    GENRE_ROMANCE as SHARED_GENRE_ROMANCE,
+    GENRE_ROMANCE_FANTASY as SHARED_GENRE_ROMANCE_FANTASY,
+    GENRE_WUXIA as SHARED_GENRE_WUXIA,
+    KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE as SHARED_KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE,
+    KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE as SHARED_KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE,
+    KAKAOPAGE_LIST_URL as SHARED_KAKAOPAGE_LIST_URL,
+    KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER as SHARED_KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER,
+    KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES as SHARED_KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES,
+    KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS as SHARED_KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS,
+    KAKAOPAGE_WEBNOVELDB_EXPECTED_TOTAL as SHARED_KAKAOPAGE_WEBNOVELDB_EXPECTED_TOTAL,
+    KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID as SHARED_KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID,
+    KAKAOPAGE_WEBNOVELDB_SEED_INPUTS as SHARED_KAKAOPAGE_WEBNOVELDB_SEED_INPUTS,
+    NAVER_SERIES_GENRE_SEED_DEFINITIONS as SHARED_NAVER_SERIES_GENRE_SEED_DEFINITIONS,
+    NAVER_SERIES_SEEDS as SHARED_NAVER_SERIES_SEEDS,
+    build_kakao_tab_url as shared_build_kakao_tab_url,
+    build_kakaopage_content_urls as shared_build_kakaopage_content_urls,
+    build_naver_series_genre_url as shared_build_naver_series_genre_url,
+    build_naver_series_seeds as shared_build_naver_series_seeds,
+    build_webnoveldb_kakao_seeds as shared_build_webnoveldb_kakao_seeds,
+    normalize_kakao_seed_url_to_crawler_host as shared_normalize_kakao_seed_url_to_crawler_host,
 )
 from utils.backfill import (
     STATUS_COMPLETED as BACKFILL_STATUS_COMPLETED,
@@ -214,6 +248,28 @@ def _build_naver_series_seeds() -> Tuple[Dict[str, Any], ...]:
 
 
 NAVER_SERIES_SEEDS = _build_naver_series_seeds()
+
+# Keep backfill module exports aligned with the shared seed catalog.
+KAKAOPAGE_LIST_URL = SHARED_KAKAOPAGE_LIST_URL
+KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE = SHARED_KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE
+KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE = SHARED_KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE
+GENRE_FANTASY = SHARED_GENRE_FANTASY
+GENRE_HYEONPAN = SHARED_GENRE_HYEONPAN
+GENRE_ROMANCE = SHARED_GENRE_ROMANCE
+GENRE_ROMANCE_FANTASY = SHARED_GENRE_ROMANCE_FANTASY
+GENRE_MYSTERY = SHARED_GENRE_MYSTERY
+GENRE_LIGHT_NOVEL = SHARED_GENRE_LIGHT_NOVEL
+GENRE_WUXIA = SHARED_GENRE_WUXIA
+GENRE_BL = SHARED_GENRE_BL
+NAVER_SERIES_GENRE_SEED_DEFINITIONS = SHARED_NAVER_SERIES_GENRE_SEED_DEFINITIONS
+NAVER_SERIES_SEEDS = SHARED_NAVER_SERIES_SEEDS
+KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER = SHARED_KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRE_ORDER
+KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES = SHARED_KAKAOPAGE_WEBNOVELDB_CANONICAL_GENRES
+KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID = SHARED_KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID
+KAKAOPAGE_WEBNOVELDB_SEED_INPUTS = SHARED_KAKAOPAGE_WEBNOVELDB_SEED_INPUTS
+KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS = SHARED_KAKAOPAGE_WEBNOVELDB_EXPECTED_COUNTS
+KAKAOPAGE_WEBNOVELDB_EXPECTED_TOTAL = SHARED_KAKAOPAGE_WEBNOVELDB_EXPECTED_TOTAL
+KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS = SHARED_KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS
 
 
 @dataclass
@@ -528,52 +584,19 @@ def _raise_kakao_playwright_launch_error(exc: Exception) -> None:
 
 
 def _build_kakao_tab_url(url: str) -> str:
-    parsed = urlparse(url)
-    merged = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    merged.pop("is_complete", None)
-    return urlunparse(parsed._replace(query=urlencode(merged)))
+    return shared_build_kakao_tab_url(url)
 
 
 def _normalize_kakao_seed_url_to_crawler_host(seed_url: str) -> str:
-    parsed_seed = urlparse(seed_url)
-    parsed_crawler = urlparse(KAKAOPAGE_BASE_URL)
-    return urlunparse(
-        parsed_seed._replace(
-            scheme=parsed_crawler.scheme,
-            netloc=parsed_crawler.netloc,
-        )
-    )
+    return shared_normalize_kakao_seed_url_to_crawler_host(seed_url)
 
 
 def _build_kakaopage_content_urls(content_id: str) -> Dict[str, str]:
-    normalized_content_id = str(content_id or "").strip()
-    return {
-        "fetch_url": KAKAOPAGE_FETCH_CONTENT_URL_TEMPLATE.format(content_id=normalized_content_id),
-        "canonical_url": KAKAOPAGE_CANONICAL_CONTENT_URL_TEMPLATE.format(content_id=normalized_content_id),
-    }
+    return shared_build_kakaopage_content_urls(content_id)
 
 
 def _build_webnoveldb_kakao_seeds() -> List[Dict[str, Any]]:
-    seeds: List[Dict[str, Any]] = []
-    for item in KAKAOPAGE_WEBNOVELDB_SEED_INPUTS:
-        genre_id = str(item.get("genre_id") or "").strip()
-        canonical_genre = KAKAOPAGE_WEBNOVELDB_GENRE_BY_ID.get(genre_id)
-        if not canonical_genre:
-            continue
-        input_url = str(item.get("url") or "").strip()
-        if not input_url:
-            continue
-        crawl_url = _normalize_kakao_seed_url_to_crawler_host(input_url)
-        seeds.append(
-            {
-                "url": crawl_url,
-                "name": canonical_genre,
-                "genres": [canonical_genre],
-                "seed_completed": bool(item.get("completed")),
-                "seed_stat_key": canonical_genre,
-            }
-        )
-    return seeds
+    return shared_build_webnoveldb_kakao_seeds()
 
 
 def _normalize_seed_stat_key(raw_value: Any) -> str:
@@ -635,16 +658,11 @@ def _resolve_kakaopage_status(
     seed_completed: bool,
     content_id: str,
 ) -> str:
-    status = coerce_status(str(parsed_status or STATUS_ONGOING))
-    if seed_completed and status != BACKFILL_STATUS_COMPLETED:
-        LOGGER.warning(
-            "Kakao status override via seed_completed content_id=%s parsed_status=%s final_status=%s",
-            content_id,
-            status,
-            BACKFILL_STATUS_COMPLETED,
-        )
-        return BACKFILL_STATUS_COMPLETED
-    return status
+    return shared_resolve_kakaopage_status(
+        parsed_status=parsed_status,
+        seed_completed=seed_completed,
+        content_id=content_id,
+    )
 
 
 def _cookie_names_from_header(cookie_header: Optional[str]) -> List[str]:
@@ -1068,15 +1086,11 @@ def _is_probable_kakao_block_page(
     authors: List[str],
     diagnostics: Dict[str, str],
 ) -> bool:
-    if title and authors:
-        return False
-    diagnostic_text = " ".join(
-        [
-            str(diagnostics.get("title") or ""),
-            str(diagnostics.get("text_snippet") or ""),
-        ]
-    ).lower()
-    return any(keyword.lower() in diagnostic_text for keyword in KAKAOPAGE_BLOCK_DIAGNOSTIC_KEYWORDS)
+    return shared_is_probable_kakao_block_page(
+        title=title,
+        authors=authors,
+        diagnostics=diagnostics,
+    )
 
 
 def _trip_kakao_circuit_if_needed(
@@ -1674,12 +1688,7 @@ async def _discover_kakaopage_ids(
 
 
 def _is_kakao_suspicious_author_list(authors: Any) -> bool:
-    if not isinstance(authors, list):
-        return True
-    tokens = [str(item).strip() for item in authors if str(item).strip()]
-    if not tokens:
-        return True
-    return any(is_noise_author_token(token) for token in tokens)
+    return shared_is_kakao_suspicious_author_list(authors)
 
 
 async def _fetch_kakao_detail_and_build_record(
@@ -1693,122 +1702,18 @@ async def _fetch_kakao_detail_and_build_record(
     retry_max_delay_seconds: float,
     canonical_fallback_enabled: bool = True,
 ) -> Optional[Dict[str, Any]]:
-    content_urls = _build_kakaopage_content_urls(content_id)
-    fetch_url = content_urls["fetch_url"]
-    canonical_content_url = content_urls["canonical_url"]
-
-    async def _fetch_and_parse(url: str) -> Tuple[Dict[str, Any], Dict[str, str]]:
-        html = await fetch_text_polite(
-            session,
-            url,
-            headers=headers,
-            retries=retries,
-            retry_base_delay_seconds=retry_base_delay_seconds,
-            retry_max_delay_seconds=retry_max_delay_seconds,
-        )
-        diagnostics = _extract_html_diagnostics(html)
-        parsed = parse_kakaopage_detail(
-            html,
-            fallback_genres=discovered_entry.get("genres", []),
-        )
-        author_source = str(parsed.get("_author_source") or "").strip()
-        if author_source:
-            diagnostics["author_source"] = author_source
-        return parsed, diagnostics
-
-    parsed, diagnostics = await _fetch_and_parse(fetch_url)
-    parsed_authors = parsed.get("authors", []) or []
-    parsed_suspicious = _is_kakao_suspicious_author_list(parsed_authors)
-
-    canonical_attempted = False
-    fallback_diagnostics: Optional[Dict[str, str]] = None
-
-    if canonical_fallback_enabled and (not parsed_authors or parsed_suspicious):
-        canonical_attempted = True
-        LOGGER.warning(
-            "Kakao suspicious/missing authors; attempting canonical fallback content_id=%s fetch_url=%s canonical_url=%s "
-            "title=%r authors=%s author_source=%s",
-            content_id,
-            fetch_url,
-            canonical_content_url,
-            parsed.get("title"),
-            parsed_authors,
-            diagnostics.get("author_source"),
-        )
-        fallback_parsed, fallback_diagnostics = await _fetch_and_parse(canonical_content_url)
-        fallback_authors = fallback_parsed.get("authors", []) or []
-        fallback_suspicious = _is_kakao_suspicious_author_list(fallback_authors)
-        fallback_author_source = str(fallback_parsed.get("_author_source") or "").strip()
-
-        if fallback_authors and not fallback_suspicious:
-            diagnostics = fallback_diagnostics
-            diagnostics["author_source"] = "canonical_fallback"
-            diagnostics["canonical_author_source"] = fallback_author_source
-            parsed = dict(fallback_parsed)
-            parsed["_author_source"] = "canonical_fallback"
-        else:
-            if not parsed.get("title") and fallback_parsed.get("title"):
-                parsed["title"] = fallback_parsed.get("title")
-            if not parsed.get("status") and fallback_parsed.get("status"):
-                parsed["status"] = fallback_parsed.get("status")
-            if not parsed.get("genres") and fallback_parsed.get("genres"):
-                parsed["genres"] = fallback_parsed.get("genres")
-            parsed["authors"] = []
-            diagnostics["author_source"] = str(parsed.get("_author_source") or "")
-            diagnostics["canonical_fallback_attempted"] = "1"
-            diagnostics["canonical_author_source"] = fallback_author_source
-            LOGGER.warning(
-                "Kakao canonical fallback did not yield valid authors content_id=%s fetch_url=%s canonical_url=%s "
-                "title=%r authors=%s canonical_title=%r canonical_authors=%s canonical_author_source=%s",
-                content_id,
-                fetch_url,
-                canonical_content_url,
-                parsed.get("title"),
-                parsed_authors,
-                fallback_parsed.get("title"),
-                fallback_authors,
-                fallback_author_source,
-            )
-
-    blocked = _is_probable_kakao_block_page(
-        title=str(parsed.get("title") or ""),
-        authors=parsed.get("authors", []) or [],
-        diagnostics=diagnostics,
-    )
-    if (
-        not blocked
-        and fallback_diagnostics is not None
-        and _is_probable_kakao_block_page(
-            title=str(parsed.get("title") or ""),
-            authors=parsed.get("authors", []) or [],
-            diagnostics=fallback_diagnostics,
-        )
-    ):
-        blocked = True
-    if blocked:
-        raise BlockedError(
-            status=200,
-            url=canonical_content_url if canonical_attempted else fetch_url,
-            diagnostics=fallback_diagnostics or diagnostics,
-        )
-
-    status = _resolve_kakaopage_status(
-        parsed_status=parsed.get("status"),
-        seed_completed=bool(discovered_entry.get("seed_completed")),
+    return await shared_fetch_kakao_detail_and_build_record(
+        session=session,
         content_id=content_id,
+        discovered_entry=discovered_entry,
+        headers=headers,
+        retries=retries,
+        retry_base_delay_seconds=retry_base_delay_seconds,
+        retry_max_delay_seconds=retry_max_delay_seconds,
+        canonical_fallback_enabled=canonical_fallback_enabled,
+        fetch_text_func=fetch_text_polite,
+        parse_detail_func=parse_kakaopage_detail,
     )
-    genres = merge_genres(parsed.get("genres"), discovered_entry.get("genres"))
-
-    return {
-        "content_id": content_id,
-        "source": SOURCE_KAKAOPAGE,
-        "title": parsed.get("title"),
-        "authors": parsed.get("authors", []),
-        "status": status,
-        "content_url": canonical_content_url,
-        "genres": genres,
-        "_diagnostics": diagnostics,
-    }
 
 
 async def run_kakaopage_backfill(
