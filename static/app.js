@@ -378,7 +378,7 @@ const SOURCE_LOGO_ASSETS = {
   ridi: '/static/source_logos/ridi.jpeg',
   netflix: '/static/source_logos/netflix.jpeg',
   tving: '/static/source_logos/tving.png',
-  wavve: '/static/source_logos/wavve.svg',
+  wavve: '/static/source_logos/wavve.png',
   coupangplay: '/static/source_logos/coupangplay.png',
   disney_plus: '/static/source_logos/disney_plus.jpeg',
   laftel: '/static/source_logos/laftel.png',
@@ -4976,9 +4976,9 @@ function renderL1Filters(tabId) {
     if (hasCustomNavBg && brandMeta.bg) el.style.background = brandMeta.bg;
     else el.style.removeProperty('background');
     if (isWideLogo) {
-      const wideLogoWidth = sourceId === 'tving' ? '38px' : '40px';
+      const wideLogoWidth = sourceId === 'tving' ? '36px' : '38px';
       el.style.setProperty('--logo-width', wideLogoWidth);
-      el.style.setProperty('--logo-height', '18px');
+      el.style.setProperty('--logo-height', '17px');
     } else {
       el.style.removeProperty('--logo-width');
       el.style.removeProperty('--logo-height');
