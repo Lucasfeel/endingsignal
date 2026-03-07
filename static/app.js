@@ -340,11 +340,12 @@ const SOURCE_BRAND_META = {
     border: '#E5E8EB',
   },
   tving: {
-    bg: '#F6F6F6',
-    border: '#E5E8EB',
+    bg: '#FF143C',
+    border: 'rgba(255,255,255,0.24)',
+    logoColor: '#FFFFFF',
   },
   wavve: {
-    bg: '#1312C1',
+    bg: '#1550F5',
     border: 'rgba(255,255,255,0.25)',
     logoColor: '#FFFFFF',
   },
@@ -358,9 +359,9 @@ const SOURCE_BRAND_META = {
     logoColor: '#FFFFFF',
   },
   laftel: {
-    bg: '#AFA3ED',
+    bg: '#826CFF',
     border: 'rgba(255,255,255,0.20)',
-    logoColor: '#111111',
+    logoColor: '#FFFFFF',
   },
   watcha: {
     bg: '#FF0558',
@@ -402,11 +403,11 @@ const SOURCE_ICON_SVGS = {
   disney:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#113b7a"/><path d="M8.2 14.5c1.9-3.4 8.4-3.3 10.5.2m-9.8 2.8h6.2c1.9 0 3-.9 3-2.5s-1.1-2.5-3-2.5h-1.3" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
   tving:
-    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#e11d48"/><path d="M8.4 10h11.2v2.2h-4.4V20h-2.4v-7.8H8.4V10z" fill="#fff"/></svg>',
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#FF143C"/><path d="M8.4 10h11.2v2.2h-4.4V20h-2.4v-7.8H8.4V10z" fill="#fff"/></svg>',
   watcha:
     '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#fb7185"/><path d="M8.3 8h2.6l2.5 8.1L15.9 8h2.5l2.4 12h-2.3l-1.2-7.3-2.2 7.3h-1.7l-2.2-7.3L10 20H7.7L8.3 8z" fill="#fff"/></svg>',
   wavve:
-    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#0f172a"/><path d="M7.8 9h2.4l1.5 6 1.7-6h2.1l1.7 6 1.5-6h2.4l-3 11h-1.9l-1.8-6-1.8 6h-1.9L7.8 9z" fill="#93c5fd"/></svg>',
+    '<svg viewBox="0 0 28 28" fill="none"><rect x="2.5" y="2.5" width="23" height="23" rx="7" fill="#1550F5"/><path d="M8.2 7.7h4.2c-.4 2.1-.4 4.7 0 7.4.5 2.7 1.5 5.6 3.1 8.4h-4.1c-2.9-3.6-4.5-8.3-4.5-12.8 0-1.2.2-2.2.6-3z" fill="#fff"/><path d="M14.8 10.8h3.8c-.5 2.1-.5 4.5.2 7.4l.7 3.2h-1.8c-.6-1.6-1.1-3.1-1.5-4.6-.9 2-1.3 4.3-1.1 6.8H13c-.4-4.7.1-9 .9-12.8z" fill="#fff"/><path d="M20.6 13.4H25c-2 2.7-3 6.1-2.8 10.2h-2.9c-.2-4.2.2-7.6 1.3-10.2z" fill="#fff"/></svg>',
 };
 
 function getSourceTextFallbackMarkup(sourceId, fallbackLabel) {
@@ -4957,8 +4958,8 @@ function renderL1Filters(tabId) {
 
   items.forEach((item) => {
     const sourceId = normalizeSourceId(item.id);
-    const isWideLogo = sourceId === 'wavve';
-    const keepCurrentLogoFit = sourceId === 'tving' || sourceId === 'laftel' || isWideLogo;
+    const isWideLogo = sourceId === 'tving' || sourceId === 'laftel';
+    const keepCurrentLogoFit = isWideLogo;
     const el = document.createElement('div');
     const isActive = selectedSet.has(sourceId);
     const hasSelection = selectedSet.size > 0;
@@ -4971,12 +4972,13 @@ function renderL1Filters(tabId) {
     const brandMeta = SOURCE_BRAND_META[sourceId] || {};
     if (brandMeta.logoColor) el.style.setProperty('--chip-fg', brandMeta.logoColor);
     else el.style.removeProperty('--chip-fg');
-    const hasCustomNavBg = sourceId === 'wavve' || sourceId === 'laftel';
+    const hasCustomNavBg = sourceId === 'tving' || sourceId === 'laftel';
     if (hasCustomNavBg && brandMeta.bg) el.style.background = brandMeta.bg;
     else el.style.removeProperty('background');
     if (isWideLogo) {
-      el.style.setProperty('--logo-width', '40px');
-      el.style.setProperty('--logo-height', '16px');
+      const wideLogoWidth = sourceId === 'tving' ? '38px' : '40px';
+      el.style.setProperty('--logo-width', wideLogoWidth);
+      el.style.setProperty('--logo-height', '18px');
     } else {
       el.style.removeProperty('--logo-width');
       el.style.removeProperty('--logo-height');
