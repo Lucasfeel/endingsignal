@@ -714,11 +714,17 @@ body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer > * 
 }
 
 #mainHeader {
-  position: -webkit-sticky;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 520px);
   background: var(--es-surface);
   border-bottom: 1px solid var(--es-divider);
+}
+
+body:not(.is-ait) #app-root > main {
+  padding-top: 56px;
 }
 
 #homeButton {
