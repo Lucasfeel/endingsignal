@@ -204,6 +204,10 @@ const UI_STATE_KEYS = {
     mysub: 'endingsignal.scroll.mysub',
     search: 'endingsignal.scroll.search',
   },
+  navigation: {
+    activeTab: 'endingsignal.nav.activeTab',
+    lastBrowseTab: 'endingsignal.nav.lastBrowseTab',
+  },
 };
 
 const UI_STATE_DEFAULTS = {
@@ -213,6 +217,9 @@ const UI_STATE_DEFAULTS = {
     day: 'all', // Day defaults to ALL on a fresh visit per product decision
   },
 };
+
+const NAV_TAB_IDS = ['home', 'webtoon', 'novel', 'ott', 'my'];
+const BROWSE_TAB_IDS = ['webtoon', 'novel', 'ott'];
 
 const WEBTOON_DAY_FILTER_OPTIONS = [
   { id: 'all', label: '\uC804\uCCB4' },
@@ -570,6 +577,12 @@ const sanitizeFilterValue = (value, allowed, fallback) => {
   return allowed.includes(safeVal) ? safeVal : fallback;
 };
 
+const sanitizeTabId = (value, fallback = 'home') =>
+  sanitizeFilterValue(value, NAV_TAB_IDS, fallback);
+
+const sanitizeBrowseTabId = (value, fallback = 'webtoon') =>
+  sanitizeFilterValue(value, BROWSE_TAB_IDS, fallback);
+
 const sortWebtoonDays = (days) => {
   const order = new Map(WEBTOON_DAY_FILTER_IDS.map((dayId, idx) => [dayId, idx]));
   return [...days].sort(
@@ -841,6 +854,33 @@ const getScrollViewKeyForTab = (tabId) => {
 const getCurrentScrollViewKey = () => {
   if (STATE.search.pageOpen) return 'search';
   return getScrollViewKeyForTab(STATE.activeTab);
+};
+
+const NavigationState = {
+  load() {
+    const savedActiveTab = safeLoadStorage(sessionStorage, UI_STATE_KEYS.navigation.activeTab);
+    const savedLastBrowseTab = safeLoadStorage(sessionStorage, UI_STATE_KEYS.navigation.lastBrowseTab);
+    const lastBrowseTab = sanitizeBrowseTabId(savedLastBrowseTab, STATE.lastBrowseTab || 'webtoon');
+    const activeTab = sanitizeTabId(savedActiveTab, STATE.activeTab || 'home');
+
+    return {
+      activeTab,
+      lastBrowseTab: BROWSE_TAB_IDS.includes(activeTab) ? activeTab : lastBrowseTab,
+    };
+  },
+
+  save() {
+    safeSaveStorage(
+      sessionStorage,
+      UI_STATE_KEYS.navigation.activeTab,
+      sanitizeTabId(STATE.activeTab, 'home'),
+    );
+    safeSaveStorage(
+      sessionStorage,
+      UI_STATE_KEYS.navigation.lastBrowseTab,
+      sanitizeBrowseTabId(STATE.lastBrowseTab, 'webtoon'),
+    );
+  },
 };
 
 const UIState = {
@@ -3187,11 +3227,15 @@ async function initApp() {
     console.warn('Failed to preload subscriptions', e);
   }
 
+  const initialNavigationState = NavigationState.load();
+  STATE.activeTab = initialNavigationState.activeTab;
+  STATE.lastBrowseTab = initialNavigationState.lastBrowseTab;
+
   const initialUIState = UIState.load();
   UIState.apply(initialUIState, { rerender: false, fetch: false });
 
   renderBottomNav();
-  updateTab('home');
+  updateTab(initialNavigationState.activeTab, { preserveScroll: false });
   setupScrollEffect();
   runDevSelfCheck();
 }
@@ -4891,9 +4935,10 @@ function renderBottomNav() {
 }
 
 async function updateTab(tabId, { preserveScroll = true } = {}) {
+  const normalizedTabId = sanitizeTabId(tabId, 'home');
   const prevTab = STATE.activeTab || 'home';
   const prevViewKey = getScrollViewKeyForTab(prevTab);
-  const nextViewKey = getScrollViewKeyForTab(tabId);
+  const nextViewKey = getScrollViewKeyForTab(normalizedTabId);
 
   STATE.renderToken = (STATE.renderToken || 0) + 1;
   const renderToken = STATE.renderToken;
@@ -4902,16 +4947,17 @@ async function updateTab(tabId, { preserveScroll = true } = {}) {
   UIState.save();
 
   if (STATE.search.pageOpen) closeSearchPage({ fromPopstate: true });
-  STATE.activeTab = tabId;
-  if (['webtoon', 'novel', 'ott'].includes(tabId)) STATE.lastBrowseTab = tabId;
-  STATE.isMySubOpen = tabId === 'my';
+  STATE.activeTab = normalizedTabId;
+  if (BROWSE_TAB_IDS.includes(normalizedTabId)) STATE.lastBrowseTab = normalizedTabId;
+  STATE.isMySubOpen = normalizedTabId === 'my';
+  NavigationState.save();
 
   renderBottomNav();
-  updateFilterVisibility(tabId);
-  renderL1Filters(tabId);
-  renderL2Filters(tabId);
+  updateFilterVisibility(normalizedTabId);
+  renderL1Filters(normalizedTabId);
+  renderL2Filters(normalizedTabId);
 
-  const renderResult = await fetchAndRenderContent(tabId, { renderToken });
+  const renderResult = await fetchAndRenderContent(normalizedTabId, { renderToken });
 
   const shouldRestore = preserveScroll && STATE.hasBootstrapped && renderToken === STATE.renderToken;
   if (shouldRestore) {
@@ -4923,7 +4969,7 @@ async function updateTab(tabId, { preserveScroll = true } = {}) {
   }
 
   STATE.hasBootstrapped = true;
-  scheduleLikelyPrefetch(tabId);
+  scheduleLikelyPrefetch(normalizedTabId);
 }
 
 function updateFilterVisibility(tabId) {
@@ -4959,6 +5005,7 @@ function renderL1Filters(tabId) {
   items.forEach((item) => {
     const sourceId = normalizeSourceId(item.id);
     const isWideLogo = sourceId === 'tving' || sourceId === 'laftel';
+    const isWavveLogo = sourceId === 'wavve';
     const keepCurrentLogoFit = isWideLogo;
     const el = document.createElement('div');
     const isActive = selectedSet.has(sourceId);
@@ -4975,15 +5022,25 @@ function renderL1Filters(tabId) {
     const hasCustomNavBg = sourceId === 'tving' || sourceId === 'laftel';
     if (hasCustomNavBg && brandMeta.bg) el.style.background = brandMeta.bg;
     else el.style.removeProperty('background');
+    if (isWavveLogo) el.style.overflow = 'hidden';
+    else el.style.removeProperty('overflow');
     if (isWideLogo) {
-      const wideLogoWidth = sourceId === 'tving' ? '36px' : '38px';
+      el.style.setProperty('--logo-icon-radius', '0px');
+      el.style.setProperty('--logo-icon-overflow', 'visible');
+    } else {
+      el.style.removeProperty('--logo-icon-radius');
+      el.style.removeProperty('--logo-icon-overflow');
+    }
+    if (isWideLogo) {
+      const wideLogoWidth = sourceId === 'tving' ? '33px' : '33px';
       el.style.setProperty('--logo-width', wideLogoWidth);
-      el.style.setProperty('--logo-height', '17px');
+      el.style.setProperty('--logo-height', '15px');
     } else {
       el.style.removeProperty('--logo-width');
       el.style.removeProperty('--logo-height');
     }
-    el.style.setProperty('--logo-size', keepCurrentLogoFit ? '30px' : '40px');
+    const logoSize = keepCurrentLogoFit ? '30px' : isWavveLogo ? '44px' : '40px';
+    el.style.setProperty('--logo-size', logoSize);
     el.style.setProperty('--logo-fit', keepCurrentLogoFit ? 'contain' : 'cover');
 
     el.setAttribute('role', 'button');
@@ -5129,6 +5186,11 @@ const setContentGridLayout = (mode = 'grid') => {
     return;
   }
   UI.contentGrid.classList.add(...GRID_LAYOUT_CLASS_TOKENS);
+};
+
+const getContentGridLayoutMode = () => {
+  if (!UI.contentGrid) return 'grid';
+  return UI.contentGrid.classList.contains('flex') ? 'home' : 'grid';
 };
 
 const resolveCardTabId = (content, fallback = 'webtoon') => {
@@ -5787,11 +5849,19 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   const navPerfStartMark = `es-tab:${tabId}:${requestSeq}:start`;
   markPerf(navPerfStartMark);
   const hadVisibleCards = UI.contentGrid.childElementCount > 0;
+  const nextLayoutMode = tabId === 'home' ? 'home' : 'grid';
+  const currentLayoutMode = getContentGridLayoutMode();
   const retainExistingView =
-    hadVisibleCards && VIEW_CACHEABLE_TABS.has(tabId) && !['my', 'search'].includes(tabId);
+    hadVisibleCards &&
+    VIEW_CACHEABLE_TABS.has(tabId) &&
+    !['my', 'search'].includes(tabId) &&
+    currentLayoutMode === nextLayoutMode;
 
   STATE.isLoading = true;
-  setContentGridLayout(tabId === 'home' ? 'home' : 'grid');
+  if (hadVisibleCards && currentLayoutMode !== nextLayoutMode) {
+    UI.contentGrid.innerHTML = '';
+  }
+  setContentGridLayout(nextLayoutMode);
 
   let aspectClass = 'aspect-[3/4]';
   if (tabId === 'novel') aspectClass = 'aspect-[1/1.4]';

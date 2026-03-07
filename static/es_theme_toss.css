@@ -762,8 +762,8 @@ body[data-route-loading='1'][data-route-retained='1'] #contentGridContainer > * 
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  overflow: hidden;
+  border-radius: var(--logo-icon-radius, 999px);
+  overflow: var(--logo-icon-overflow, hidden);
 }
 
 .l1-logo.active {
