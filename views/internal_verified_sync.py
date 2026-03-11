@@ -6,6 +6,7 @@ import os
 from flask import Blueprint, jsonify, request, current_app
 
 from database import DatabaseUnavailableError, get_db
+from services.internal_content_sync_service import summarize_contents, upsert_contents_batch
 from services.verified_sync_registry import resolve_crawler_class
 from services.verified_sync_remote_service import (
     apply_remote_report,
@@ -32,6 +33,45 @@ def _require_internal_token():
     if not provided or not hmac.compare_digest(provided, configured):
         return _error_response(403, "INVALID_TOKEN", "invalid internal token")
     return None
+
+
+@internal_verified_sync_bp.route("/api/internal/content-sync/summary", methods=["GET"])
+def get_internal_content_sync_summary():
+    auth_error = _require_internal_token()
+    if auth_error:
+        return auth_error
+
+    try:
+        summary = summarize_contents(get_db())
+        return jsonify({"success": True, "summary": summary}), 200
+    except DatabaseUnavailableError:
+        return _error_response(503, "DATABASE_UNAVAILABLE", "database not configured")
+    except Exception:
+        current_app.logger.exception("internal content sync summary failed")
+        return _error_response(500, "INTERNAL_ERROR", "internal server error")
+
+
+@internal_verified_sync_bp.route("/api/internal/content-sync/upsert-batch", methods=["POST"])
+def post_internal_content_sync_upsert_batch():
+    auth_error = _require_internal_token()
+    if auth_error:
+        return auth_error
+
+    payload = request.get_json() or {}
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        return _error_response(400, "INVALID_REQUEST", "rows must be an array")
+
+    try:
+        result = upsert_contents_batch(get_db(), rows)
+        return jsonify({"success": True, "result": result}), 200
+    except ValueError as exc:
+        return _error_response(400, "INVALID_REQUEST", str(exc))
+    except DatabaseUnavailableError:
+        return _error_response(503, "DATABASE_UNAVAILABLE", "database not configured")
+    except Exception:
+        current_app.logger.exception("internal content sync batch upsert failed")
+        return _error_response(500, "INTERNAL_ERROR", "internal server error")
 
 
 @internal_verified_sync_bp.route("/api/internal/verified-sync/source-snapshot", methods=["GET"])
