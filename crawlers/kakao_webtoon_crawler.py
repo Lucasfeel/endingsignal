@@ -12,6 +12,7 @@ from database import create_standalone_connection, get_cursor
 from utils.time import now_kst_naive, parse_iso_naive_kst
 from utils.text import normalize_search_text
 from .base_crawler import ContentCrawler
+from .sync_utils import build_sync_row, load_existing_content_snapshot, sync_prepared_content_rows
 
 
 HEADERS = {
@@ -45,6 +46,29 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
     def __init__(self):
         super().__init__("kakaowebtoon")
+
+    @staticmethod
+    def _http_session_kwargs(
+        *,
+        timeout: aiohttp.ClientTimeout,
+        connector,
+    ) -> Dict[str, object]:
+        return {
+            "timeout": timeout,
+            "connector": connector,
+            # Codex cloud routes outbound traffic through an HTTP/HTTPS proxy.
+            "trust_env": config.CRAWLER_HTTP_TRUST_ENV,
+        }
+
+    def _create_http_session(
+        self,
+        *,
+        timeout: aiohttp.ClientTimeout,
+        connector,
+    ) -> aiohttp.ClientSession:
+        return aiohttp.ClientSession(
+            **self._http_session_kwargs(timeout=timeout, connector=connector)
+        )
 
     def _build_headers(self) -> Dict[str, str]:
         headers = dict(HEADERS)
@@ -566,7 +590,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
         ]
         placements.append(("finished", config.KAKAOWEBTOON_PLACEMENT_COMPLETED))
 
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        async with self._create_http_session(timeout=timeout, connector=connector) as session:
             tasks = [
                 self._fetch_placement_entries(session, placement, headers) for _, placement in placements
             ]
@@ -696,7 +720,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
                     limit=config.KAKAOWEBTOON_PROFILE_CONCURRENCY, ttl_dns_cache=300
                 )
                 checked_at_iso = now_kst.isoformat()
-                async with aiohttp.ClientSession(
+                async with self._create_http_session(
                     timeout=profile_timeout, connector=profile_connector
                 ) as profile_session:
                     results = await self._fetch_profile_statuses(
@@ -780,14 +804,19 @@ class KakaoWebtoonCrawler(ContentCrawler):
         finished_today,
     ):
         print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...")
-        cursor = get_cursor(conn)
-        cursor.execute(
-            "SELECT content_id, status FROM contents WHERE source = %s",
-            (self.source_name,),
-        )
-        db_status_by_id = {row["content_id"]: row.get("status") for row in cursor.fetchall()}
-        db_existing_ids = set(db_status_by_id.keys())
-        updates, inserts = [], []
+        existing_snapshot = (self.get_prefetch_context() or {}).get("sync_snapshot")
+        if existing_snapshot is None:
+            existing_snapshot = load_existing_content_snapshot(
+                conn,
+                self.source_name,
+                cursor_getter=get_cursor,
+            )
+        db_status_by_id = {
+            str(content_id): row.get("status")
+            for content_id, row in existing_snapshot.items()
+        }
+        prepared_rows = []
+        write_skipped_count = 0
         completed_placement_processed = 0
         promoted_to_completed = 0
 
@@ -808,6 +837,7 @@ class KakaoWebtoonCrawler(ContentCrawler):
 
             title = webtoon_data.get("title")
             if not title:
+                write_skipped_count += 1
                 continue
 
             existing_status = db_status_by_id.get(content_id)
@@ -847,46 +877,31 @@ class KakaoWebtoonCrawler(ContentCrawler):
             kakao_assets = webtoon_data.get("kakao_assets")
             if kakao_assets:
                 meta_data["common"]["kakao_assets"] = kakao_assets
-
-            if content_id in db_existing_ids:
-                record = (
-                    "webtoon",
-                    title,
-                    normalized_title,
-                    normalized_authors,
-                    status,
-                    json.dumps(meta_data),
-                    content_id,
-                    self.source_name,
+            prepared_rows.append(
+                build_sync_row(
+                    content_id=str(content_id),
+                    source=self.source_name,
+                    content_type="webtoon",
+                    title=title,
+                    normalized_title=normalized_title,
+                    normalized_authors=normalized_authors,
+                    status=status,
+                    meta=meta_data,
                 )
-                updates.append(record)
-            else:
-                record = (
-                    content_id,
-                    self.source_name,
-                    "webtoon",
-                    title,
-                    normalized_title,
-                    normalized_authors,
-                    status,
-                    json.dumps(meta_data),
-                )
-                inserts.append(record)
-
-        if updates:
-            cursor.executemany(
-                "UPDATE contents SET content_type=%s, title=%s, normalized_title=%s, normalized_authors=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
-                updates,
             )
-            print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
 
-        if inserts:
-            cursor.executemany(
-                "INSERT INTO contents (content_id, source, content_type, title, normalized_title, normalized_authors, status, meta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (content_id, source) DO NOTHING",
-                inserts,
-            )
-            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
+        sync_stats = sync_prepared_content_rows(
+            conn,
+            source_name=self.source_name,
+            prepared_rows=prepared_rows,
+            existing_snapshot=existing_snapshot,
+            write_skipped_count=write_skipped_count,
+            cursor_getter=get_cursor,
+        )
+        if sync_stats["updated_count"]:
+            print(f"{sync_stats['updated_count']}개 웹툰 정보 업데이트 완료.")
+        if sync_stats["inserted_count"]:
+            print(f"{sync_stats['inserted_count']}개 신규 웹툰 DB 추가 완료.")
 
         print(
             "INFO: [KakaoWebtoon] "
@@ -894,8 +909,11 @@ class KakaoWebtoonCrawler(ContentCrawler):
             f"promoted_to_completed={promoted_to_completed}"
         )
 
-        cursor.close()
         print("DB 동기화 완료.")
-        return len(inserts)
+        return {
+            **sync_stats,
+            "completed_placement_processed": completed_placement_processed,
+            "promoted_to_completed": promoted_to_completed,
+        }
 
 

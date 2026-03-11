@@ -29,17 +29,53 @@ DEFAULT_DB_INIT_DDL_RETRY_BASE_DELAY_SECONDS = 1.0
 DEFAULT_DB_INIT_STALE_DDL_MAX_AGE_SECONDS = 300
 DEFAULT_DB_INIT_STALE_DDL_CLEANUP_ACTION = "cancel"
 DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE = 20000
+DEFAULT_DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE = 1000
 DEFAULT_DB_INIT_BACKFILL_MAX_BATCHES = 0
 DEFAULT_DB_INIT_BACKFILL_MAX_SECONDS = 0.0
 DEFAULT_DB_INIT_BACKFILL_PROGRESS_EVERY = 25
 DEFAULT_DB_INIT_STRICT_MAINTENANCE = False
 PG_TIMEOUT_LITERAL_PATTERN = re.compile(r"^\d+(?:ms|s|min|h|d)?$", re.IGNORECASE)
-DEFAULT_DB_POOL_ENABLED = False
+DEFAULT_DB_POOL_ENABLED = True
 DEFAULT_DB_POOL_MINCONN = 1
 DEFAULT_DB_POOL_MAXCONN = 4
 _DB_POOL = None
 _DB_POOL_CONFIG = None
 _DB_POOL_LOCK = Lock()
+
+NORMALIZED_TITLE_SQL = "regexp_replace(lower(COALESCE(title, '')), '\\s+', '', 'g')"
+NORMALIZED_AUTHORS_SQL = (
+    "regexp_replace(lower(COALESCE(meta->'common'->>'authors', '')), '\\s+', '', 'g')"
+)
+TITLE_ALIAS_TEXT_SQL = """
+CASE
+    WHEN jsonb_typeof(meta->'common'->'title_alias') = 'array' THEN COALESCE(
+        (
+            SELECT string_agg(alias_value, ' ')
+            FROM jsonb_array_elements_text(meta->'common'->'title_alias') AS alias_row(alias_value)
+        ),
+        ''
+    )
+    ELSE COALESCE(meta->'common'->>'title_alias', '')
+END
+""".strip()
+NORMALIZED_TITLE_ALIAS_SQL = f"regexp_replace(lower(({TITLE_ALIAS_TEXT_SQL})), '\\s+', '', 'g')"
+NORMALIZED_ALT_TITLE_SQL = (
+    "regexp_replace(lower(COALESCE(meta->'common'->>'alt_title', '')), '\\s+', '', 'g')"
+)
+SEARCH_DOCUMENT_SQL = f"""
+trim(
+    concat_ws(
+        ' ',
+        COALESCE(title, ''),
+        COALESCE(normalized_title, {NORMALIZED_TITLE_SQL}),
+        COALESCE(normalized_authors, {NORMALIZED_AUTHORS_SQL}),
+        COALESCE(meta->'common'->>'alt_title', ''),
+        COALESCE({TITLE_ALIAS_TEXT_SQL}, ''),
+        {NORMALIZED_ALT_TITLE_SQL},
+        {NORMALIZED_TITLE_ALIAS_SQL}
+    )
+)
+""".strip()
 
 
 class DatabaseUnavailableError(ValueError):
@@ -380,6 +416,11 @@ def _read_db_init_settings():
         "backfill_batch_size": _read_int_env(
             "DB_INIT_BACKFILL_BATCH_SIZE",
             DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE,
+            minimum=1,
+        ),
+        "search_document_backfill_batch_size": _read_int_env(
+            "DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE",
+            DEFAULT_DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE,
             minimum=1,
         ),
         "backfill_max_batches": _read_int_env(
@@ -807,14 +848,14 @@ def find_stale_ddl_waiters(conn, max_age_seconds):
               AND wait_event_type = 'Lock'
               AND query_start IS NOT NULL
               AND query_start < now() - (%s * interval '1 second')
-              -- Keep wildcard patterns parameterized. Raw '%' in query text can
-              -- interfere with psycopg2 placeholder parsing.
+              -- Keep wildcard patterns parameterized to avoid placeholder
+              -- parsing issues inside psycopg2.
               AND query ILIKE ANY (%s::text[])
             ORDER BY query_start ASC
             """,
             (max_age_seconds, ddl_patterns),
         )
-        rows = cursor.fetchall() or []
+        rows = [dict(row) for row in (cursor.fetchall() or [])]
 
     try:
         conn.rollback()
@@ -1265,6 +1306,10 @@ def ensure_updated_at_trigger_with_retry(
 
 def run_contents_backfill_in_batches(conn, cursor, *, settings):
     batch_size = int(settings.get("backfill_batch_size") or DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE)
+    search_document_batch_size = int(
+        settings.get("search_document_backfill_batch_size")
+        or DEFAULT_DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE
+    )
     strict_maintenance = bool(
         settings.get("strict_maintenance", DEFAULT_DB_INIT_STRICT_MAINTENANCE)
     )
@@ -1284,6 +1329,7 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                 LIMIT %s
             )
             """,
+            batch_size,
         ),
         (
             "backfill contents.created_at",
@@ -1297,6 +1343,7 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                 LIMIT %s
             )
             """,
+            batch_size,
         ),
         (
             "backfill contents.updated_at",
@@ -1310,6 +1357,7 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                 LIMIT %s
             )
             """,
+            batch_size,
         ),
         (
             "backfill contents.normalized_title",
@@ -1324,6 +1372,7 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                 LIMIT %s
             )
             """,
+            batch_size,
         ),
         (
             "backfill contents.normalized_authors",
@@ -1338,10 +1387,26 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                 LIMIT %s
             )
             """,
+            batch_size,
+        ),
+        (
+            "backfill contents.search_document",
+            f"""
+            UPDATE contents
+            SET search_document = {SEARCH_DOCUMENT_SQL}
+            WHERE ctid IN (
+                SELECT ctid
+                FROM contents
+                WHERE (search_document IS NULL OR search_document = '')
+                   OR search_document IS DISTINCT FROM {SEARCH_DOCUMENT_SQL}
+                LIMIT %s
+            )
+            """,
+            search_document_batch_size,
         ),
     ]
 
-    for label, batch_sql in updates:
+    for label, batch_sql, current_batch_size in updates:
         total_updated = 0
         batches = 0
         start_time = time.monotonic()
@@ -1381,7 +1446,7 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                 break
 
             try:
-                cursor.execute(batch_sql, (batch_size,))
+                cursor.execute(batch_sql, (current_batch_size,))
                 updated = cursor.rowcount or 0
                 conn.commit()
                 batches += 1
@@ -1508,6 +1573,7 @@ def setup_database_standalone():
                         title TEXT NOT NULL,
                         normalized_title TEXT,
                         normalized_authors TEXT,
+                        search_document TEXT,
                         status TEXT NOT NULL,
                         meta JSONB,
                         PRIMARY KEY (content_id, source)
@@ -1538,6 +1604,15 @@ def setup_database_standalone():
             cursor,
             "contents",
             "normalized_authors",
+            "TEXT",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "search_document",
             "TEXT",
             settings=settings,
             relation="contents",
@@ -1693,6 +1768,24 @@ def setup_database_standalone():
             WHERE updated_at IS NULL;
             """
         )
+        current_step = "ensure users apps in toss columns"
+        print("LOG: [DB Setup] Ensuring users Apps-in-Toss columns exist...")
+        ensure_column_exists(cursor, "users", "user_key", "TEXT")
+        ensure_column_exists(cursor, "users", "auth_provider", "TEXT")
+        ensure_column_exists(cursor, "users", "display_name", "TEXT")
+        ensure_column_exists(cursor, "users", "profile_json", "JSONB")
+        ensure_column_default(cursor, "users", "auth_provider", "'legacy'::text")
+        cursor.execute(
+            """
+            UPDATE users
+            SET auth_provider = 'legacy'
+            WHERE auth_provider IS NULL OR auth_provider = '';
+            """
+        )
+        ensure_column_not_null(cursor, "users", "auth_provider")
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_key_unique ON users (user_key)"
+        )
         ensure_updated_at_trigger(cursor, "users", "trg_users_updated_at")
 
         current_step = "create subscriptions table"
@@ -1723,6 +1816,31 @@ def setup_database_standalone():
             "subscriptions",
             "wants_publication",
             "BOOLEAN NOT NULL DEFAULT FALSE",
+        )
+        ensure_column_exists(
+            cursor,
+            "subscriptions",
+            "user_key",
+            "TEXT",
+        )
+        cursor.execute(
+            """
+            UPDATE subscriptions s
+            SET user_key = u.user_key
+            FROM users u
+            WHERE s.user_id = u.id
+              AND s.user_key IS NULL
+              AND u.user_key IS NOT NULL;
+            """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_user_key ON subscriptions (user_key)"
+        )
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_user_key_content_source_unique
+            ON subscriptions (user_key, content_id, source)
+            """
         )
         cursor.execute(
             """
@@ -1910,7 +2028,35 @@ def setup_database_standalone():
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_cdc_events_created_at ON cdc_events (created_at DESC)"
         )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cdc_events_event_type_created_at
+            ON cdc_events (event_type, created_at DESC)
+            """
+        )
         print("LOG: [DB Setup] 'cdc_events' table created or already exists.")
+
+        current_step = "create cdc_event_tombstones table"
+        print("LOG: [DB Setup] Creating 'cdc_event_tombstones' table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cdc_event_tombstones (
+                id SERIAL PRIMARY KEY,
+                content_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                tombstoned_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                UNIQUE(content_id, source, event_type)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cdc_event_tombstones_tombstoned_at
+            ON cdc_event_tombstones (tombstoned_at DESC)
+            """
+        )
+        print("LOG: [DB Setup] 'cdc_event_tombstones' table created or already exists.")
 
         current_step = "create cdc_event_consumptions table"
         print("LOG: [DB Setup] Creating 'cdc_event_consumptions' table...")
@@ -2045,7 +2191,100 @@ def setup_database_standalone():
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_cdc_event_consumptions_event_id ON cdc_event_consumptions (event_id)"
         )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cdc_event_consumptions_created_at
+            ON cdc_event_consumptions (created_at DESC)
+            """
+        )
         print("LOG: [DB Setup] 'cdc_event_consumptions' table created or already exists.")
+
+        current_step = "create notification_log table"
+        print("LOG: [DB Setup] Creating 'notification_log' table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_log (
+                id SERIAL PRIMARY KEY,
+                event_id INTEGER NULL REFERENCES cdc_events(id),
+                user_key TEXT NOT NULL,
+                content_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                template_code TEXT NOT NULL,
+                sent_at TIMESTAMP NULL,
+                result TEXT NOT NULL DEFAULT 'pending',
+                fail_reason TEXT NULL,
+                idempotency_key TEXT NOT NULL,
+                response_payload JSONB NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                UNIQUE(idempotency_key)
+            )
+            """
+        )
+        ensure_column_exists(cursor, "notification_log", "event_id", "INTEGER")
+        ensure_column_exists(cursor, "notification_log", "user_key", "TEXT")
+        ensure_column_exists(cursor, "notification_log", "content_id", "TEXT")
+        ensure_column_exists(cursor, "notification_log", "source", "TEXT")
+        ensure_column_exists(cursor, "notification_log", "template_code", "TEXT")
+        ensure_column_exists(cursor, "notification_log", "sent_at", "TIMESTAMP")
+        ensure_column_exists(
+            cursor,
+            "notification_log",
+            "result",
+            "TEXT NOT NULL DEFAULT 'pending'",
+        )
+        ensure_column_exists(cursor, "notification_log", "fail_reason", "TEXT")
+        ensure_column_exists(cursor, "notification_log", "idempotency_key", "TEXT")
+        ensure_column_exists(cursor, "notification_log", "response_payload", "JSONB")
+        ensure_column_exists(
+            cursor,
+            "notification_log",
+            "created_at",
+            "TIMESTAMP NOT NULL DEFAULT NOW()",
+        )
+        ensure_column_exists(
+            cursor,
+            "notification_log",
+            "updated_at",
+            "TIMESTAMP NOT NULL DEFAULT NOW()",
+        )
+        ensure_column_default(cursor, "notification_log", "result", "'pending'::text")
+        ensure_column_default(cursor, "notification_log", "created_at", "NOW()")
+        ensure_column_default(cursor, "notification_log", "updated_at", "NOW()")
+        ensure_column_not_null(cursor, "notification_log", "user_key")
+        ensure_column_not_null(cursor, "notification_log", "content_id")
+        ensure_column_not_null(cursor, "notification_log", "source")
+        ensure_column_not_null(cursor, "notification_log", "template_code")
+        ensure_column_not_null(cursor, "notification_log", "result")
+        ensure_column_not_null(cursor, "notification_log", "idempotency_key")
+        ensure_column_not_null(cursor, "notification_log", "created_at")
+        ensure_column_not_null(cursor, "notification_log", "updated_at")
+        ensure_updated_at_trigger(cursor, "notification_log", "trg_notification_log_updated_at")
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_log_idempotency_key
+            ON notification_log (idempotency_key)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_log_user_key_sent_at
+            ON notification_log (user_key, sent_at DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_log_event_id
+            ON notification_log (event_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_log_result_updated_at
+            ON notification_log (result, updated_at DESC)
+            """
+        )
+        print("LOG: [DB Setup] 'notification_log' table created or already exists.")
         # === Table for crawler daily summary/report snapshots ===
         print("LOG: [DB Setup] Creating 'daily_crawler_reports' table...")
         cursor.execute("""
@@ -2175,6 +2414,50 @@ def setup_database_standalone():
                 """
                 CREATE INDEX idx_contents_active_type_title_source_id
                 ON contents (content_type, title, source, content_id)
+                WHERE COALESCE(is_deleted, FALSE) = FALSE;
+                """,
+            )
+
+            current_step = "create idx_contents_search_document_trgm"
+            print("LOG: [DB Setup] Creating GIN index on contents.search_document...")
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_search_document_trgm",
+                """
+                CREATE INDEX idx_contents_search_document_trgm
+                ON contents
+                USING gin (search_document gin_trgm_ops);
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_active_normalized_title",
+                """
+                CREATE INDEX idx_contents_active_normalized_title
+                ON contents (normalized_title)
+                WHERE COALESCE(is_deleted, FALSE) = FALSE;
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_active_normalized_authors",
+                """
+                CREATE INDEX idx_contents_active_normalized_authors
+                ON contents (normalized_authors)
+                WHERE COALESCE(is_deleted, FALSE) = FALSE;
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_active_search_document_trgm",
+                """
+                CREATE INDEX idx_contents_active_search_document_trgm
+                ON contents
+                USING gin (search_document gin_trgm_ops)
                 WHERE COALESCE(is_deleted, FALSE) = FALSE;
                 """,
             )

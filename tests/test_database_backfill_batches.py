@@ -32,6 +32,7 @@ class FakeConn:
 def _settings(**overrides):
     base = {
         "backfill_batch_size": 100,
+        "search_document_backfill_batch_size": 25,
         "backfill_max_batches": 0,
         "backfill_max_seconds": 0.0,
         "backfill_progress_every": 0,
@@ -43,11 +44,11 @@ def _settings(**overrides):
 
 def test_backfill_normalized_sql_is_convergent():
     conn = FakeConn()
-    cursor = FakeCursor([0, 0, 0, 0, 0])
+    cursor = FakeCursor([0, 0, 0, 0, 0, 0])
 
     database.run_contents_backfill_in_batches(conn, cursor, settings=_settings())
 
-    assert len(cursor.executed) == 5
+    assert len(cursor.executed) == 6
 
     normalized_title_sql = str(cursor.executed[3][0])
     assert "normalized_title IS DISTINCT FROM" in normalized_title_sql
@@ -56,6 +57,26 @@ def test_backfill_normalized_sql_is_convergent():
     normalized_authors_sql = str(cursor.executed[4][0])
     assert "normalized_authors IS DISTINCT FROM" in normalized_authors_sql
     assert "normalized_authors IS NULL OR normalized_authors = ''" in normalized_authors_sql
+
+    search_document_sql = str(cursor.executed[5][0])
+    assert "search_document IS DISTINCT FROM" in search_document_sql
+    assert "search_document IS NULL OR search_document = ''" in search_document_sql
+    assert cursor.executed[5][1] == (25,)
+
+
+def test_backfill_uses_general_batch_size_for_non_search_updates():
+    conn = FakeConn()
+    cursor = FakeCursor([0, 0, 0, 0, 0, 0])
+
+    database.run_contents_backfill_in_batches(conn, cursor, settings=_settings())
+
+    assert [params for _query, params in cursor.executed[:5]] == [
+        (100,),
+        (100,),
+        (100,),
+        (100,),
+        (100,),
+    ]
 
 
 def test_backfill_max_batches_breaks_infinite_progress_non_strict():
@@ -69,8 +90,8 @@ def test_backfill_max_batches_breaks_infinite_progress_non_strict():
 
     database.run_contents_backfill_in_batches(conn, cursor, settings=settings)
 
-    assert len(cursor.executed) == 7
-    assert conn.commit_calls == 7
+    assert len(cursor.executed) == 8
+    assert conn.commit_calls == 8
 
 
 def test_backfill_max_batches_raises_when_strict():

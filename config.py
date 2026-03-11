@@ -16,6 +16,11 @@ def _parse_cors_allow_origins(raw_value):
         return [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
     return [item.strip() for item in stripped.split(",") if item.strip()]
 
+
+def _env_flag(name, default="0"):
+    value = os.getenv(name, default)
+    return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+
 # --- Crawler ---
 CRAWLER_HEADERS = {
     "User-Agent": (
@@ -36,6 +41,7 @@ CRAWLER_HTTP_SOCK_READ_TIMEOUT_SECONDS = int(os.getenv("CRAWLER_HTTP_SOCK_READ_T
 CRAWLER_HTTP_CONCURRENCY_LIMIT = int(os.getenv("CRAWLER_HTTP_CONCURRENCY_LIMIT", 50))
 CRAWLER_FETCH_HEALTH_MIN_RATIO = float(os.getenv("CRAWLER_FETCH_HEALTH_MIN_RATIO", 0.70))
 CRAWLER_RUN_WALL_TIMEOUT_SECONDS = int(os.getenv("CRAWLER_RUN_WALL_TIMEOUT_SECONDS", 1800))
+CRAWLER_HTTP_TRUST_ENV = _env_flag("CRAWLER_HTTP_TRUST_ENV", "1")
 
 # --- KakaoPage Crawler Controls ---
 KAKAOPAGE_GRAPHQL_URL = os.getenv("KAKAOPAGE_GRAPHQL_URL", "https://bff-page.kakao.com/graphql")

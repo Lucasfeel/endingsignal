@@ -33,7 +33,7 @@ def _stub_db(monkeypatch, rows):
     return fake_cursor
 
 
-def test_search_defaults_to_all_types_and_uses_normalized_columns_directly(monkeypatch, client):
+def test_search_uses_candidate_rollup_and_search_document(monkeypatch, client):
     fake_cursor = _stub_db(
         monkeypatch,
         [
@@ -41,7 +41,7 @@ def test_search_defaults_to_all_types_and_uses_normalized_columns_directly(monke
                 "content_id": "cid-1",
                 "title": "테스트 제목",
                 "status": contents_view.STATUS_ONGOING,
-                "meta": {"common": {"authors": "작가A"}},
+                "meta": {"common": {"authors": ["작가A"]}},
                 "source": "ridi",
                 "content_type": "novel",
             }
@@ -52,50 +52,52 @@ def test_search_defaults_to_all_types_and_uses_normalized_columns_directly(monke
     payload = response.get_json()
 
     assert response.status_code == 200
-    query, params = fake_cursor.executed[0]
+    query, params = fake_cursor.executed[-1]
+    assert "WITH candidate_hits AS" in query
+    assert "candidate_rollup" in query
+    assert "search_document %% %s" in query
     assert "content_type = %s" not in query
     assert "source = %s" not in query
-    assert "normalized_title" in query
-    assert "normalized_authors" in query
-    assert "NULLIF(normalized_" not in query
-    assert "regexp_replace(" not in query
+    assert "rollup.title_exact DESC" in query
+    assert "rollup.author_exact DESC" in query
     assert payload[0]["content_type"] == "novel"
     assert fake_cursor.closed is True
     assert "webtoon" not in tuple(str(value) for value in (params or ()))
 
 
-def test_search_applies_type_and_source_filters_when_requested(monkeypatch, client):
+def test_search_applies_type_and_source_filters_in_candidate_stage(monkeypatch, client):
     fake_cursor = _stub_db(monkeypatch, [])
 
     response = client.get("/api/contents/search?q=abcd&type=novel&source=ridi")
 
     assert response.status_code == 200
-    query, params = fake_cursor.executed[0]
+    query, params = fake_cursor.executed[-1]
     assert "content_type = %s" in query
     assert "source = %s" in query
-    assert params[0] == "novel"
-    assert params[1] == "ridi"
+    assert params.count("novel") >= 1
+    assert params.count("ridi") >= 1
 
 
-def test_search_uses_or_similarity_clause_for_long_queries(monkeypatch, client):
+def test_search_ranks_title_matches_before_author_matches(monkeypatch, client):
     fake_cursor = _stub_db(monkeypatch, [])
 
     response = client.get("/api/contents/search?q=abcd")
 
     assert response.status_code == 200
-    query, _ = fake_cursor.executed[0]
-    assert "OR (similarity(" in query
-    assert "AND (similarity(" not in query
+    query, _ = fake_cursor.executed[-1]
+    title_order_index = query.index("rollup.title_exact DESC")
+    author_order_index = query.index("rollup.author_exact DESC")
+    assert title_order_index < author_order_index
+    assert "similarity(COALESCE(c.search_document, ''), %s)" in query
 
 
-def test_search_short_query_returns_empty_without_db_call(monkeypatch, client):
-    def _fail_get_db():
-        raise AssertionError("DB should not be called for 1-char query")
+def test_search_single_character_query_skips_search_document_candidate_branch(monkeypatch, client):
+    fake_cursor = _stub_db(monkeypatch, [])
 
-    monkeypatch.setattr(contents_view, "get_db", _fail_get_db)
-
-    response = client.get("/api/contents/search?q=a")
-    payload = response.get_json()
+    response = client.get("/api/contents/search?q=비")
 
     assert response.status_code == 200
-    assert payload == []
+    query, params = fake_cursor.executed[-1]
+    assert "search_document LIKE %s" not in query
+    assert "similarity(COALESCE(c.search_document, ''), %s)" in query
+    assert "%비%" in tuple(str(value) for value in (params or ()))

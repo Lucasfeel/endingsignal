@@ -6,11 +6,15 @@ comparisons must use naive datetimes that represent Asia/Seoul local time to
 avoid host timezone drift.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
-_KST = ZoneInfo("Asia/Seoul")
+try:
+    _KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    # Windows test environments may not ship the IANA timezone database.
+    _KST = timezone(timedelta(hours=9), name="Asia/Seoul")
 
 
 def now_kst_naive() -> datetime:

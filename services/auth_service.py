@@ -35,9 +35,12 @@ def create_access_token(user: dict):
     expires_at = now + datetime.timedelta(minutes=ACCESS_TOKEN_EXP_MINUTES)
     payload = {
         'sub': f"user:{user['id']}",
-        'uid': user['id'],
-        'email': user['email'],
-        'role': user['role'],
+        'uid': user.get('id'),
+        'email': user.get('email'),
+        'role': user.get('role', 'user'),
+        'user_key': None if user.get('user_key') in (None, '') else str(user.get('user_key')),
+        'auth_provider': user.get('auth_provider') or 'legacy',
+        'display_name': user.get('display_name'),
         'iat': now,
         'exp': expires_at,
         'iss': JWT_ISSUER,

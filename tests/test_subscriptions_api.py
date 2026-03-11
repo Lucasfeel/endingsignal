@@ -72,8 +72,7 @@ def test_subscribe_accepts_canonical_content_id(monkeypatch, client, auth_header
     assert data['success'] is True
     assert fake_conn.committed is True
     assert fake_cursor.executed[-1][1][2] == 'abc-123'
-    assert fake_cursor.executed[-1][1][4] is True
-    assert fake_cursor.executed[-1][1][5] is False
+    assert fake_cursor.executed[-1][1][3] == 'rss'
 
 
 def test_subscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers):
@@ -93,8 +92,7 @@ def test_subscribe_accepts_legacy_contentId(monkeypatch, client, auth_headers):
     assert data['success'] is True
     assert fake_conn.committed is True
     assert fake_cursor.executed[-1][1][2] == 'legacy-42'
-    assert fake_cursor.executed[-1][1][4] is True
-    assert fake_cursor.executed[-1][1][5] is False
+    assert fake_cursor.executed[-1][1][3] == 'email'
 
 
 @pytest.mark.parametrize('alert_type', ['publication', 'publish'])

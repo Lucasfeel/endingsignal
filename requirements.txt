@@ -3,6 +3,7 @@ aiohttp
 tenacity
 beautifulsoup4
 lxml
+playwright
 flask
 flask-compress
 flask-cors
@@ -11,3 +12,4 @@ python-dotenv
 psycopg2-binary
 bcrypt
 PyJWT
+tzdata

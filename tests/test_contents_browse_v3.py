@@ -87,7 +87,8 @@ def test_browse_v3_webtoon_applies_compact_filters(monkeypatch, client):
     assert response.status_code == 200
     query, params = fake_cursor.executed[0]
     assert "source IN (%s, %s)" in query
-    assert "(title, source, content_id) > (%s, %s, %s)" in query
+    assert 'title COLLATE "ko-KR-x-icu"' in query
+    assert "char_length(title)" in query
     assert "(meta->'attributes'->'weekdays') ? %s" in query
     assert params[-1] == 5
     assert payload["filters"]["type"] == "webtoon"

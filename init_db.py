@@ -80,6 +80,10 @@ def main():
         backfill_batch_size = (
             os.environ.get("DB_INIT_BACKFILL_BATCH_SIZE", "20000").strip() or "20000"
         )
+        search_document_backfill_batch_size = (
+            os.environ.get("DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE", "1000").strip()
+            or "1000"
+        )
         strict_maintenance = (
             os.environ.get("DB_INIT_STRICT_MAINTENANCE", "false").strip() or "false"
         )
@@ -93,6 +97,7 @@ def main():
             f"DB_INIT_STALE_DDL_MAX_AGE_SECONDS={stale_ddl_max_age_seconds}, "
             f"DB_INIT_STALE_DDL_CLEANUP_ACTION={stale_ddl_cleanup_action}, "
             f"DB_INIT_BACKFILL_BATCH_SIZE={backfill_batch_size}, "
+            f"DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE={search_document_backfill_batch_size}, "
             f"DB_INIT_STRICT_MAINTENANCE={strict_maintenance}"
         )
 

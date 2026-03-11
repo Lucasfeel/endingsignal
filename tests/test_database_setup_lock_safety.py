@@ -25,6 +25,20 @@ class FakeCursor:
         self.closed = True
 
 
+class FragileRow:
+    def __init__(self, data):
+        self._data = dict(data)
+        self.valid = True
+
+    def __iter__(self):
+        return iter(self._data.items())
+
+    def __getitem__(self, key):
+        if not self.valid:
+            raise IndexError("tuple index out of range")
+        return self._data[key]
+
+
 class FakeConn:
     def __init__(self, cursors=None):
         self.cursors = list(cursors or [])
@@ -47,6 +61,28 @@ class DummyPsycopgError(Exception):
     def __init__(self, message, pgcode=None):
         super().__init__(message)
         self.pgcode = pgcode
+
+
+class ClosingCursor(FakeCursor):
+    def close(self):
+        for row in self.fetchall_values:
+            if isinstance(row, list):
+                for item in row:
+                    if hasattr(item, "valid"):
+                        item.valid = False
+        super().close()
+
+
+class PercentParsingCursor(FakeCursor):
+    def execute(self, query, params=None):
+        text = str(query)
+        for idx, char in enumerate(text):
+            if char != "%":
+                continue
+            next_char = text[idx + 1] if idx + 1 < len(text) else ""
+            if next_char not in {"s", "%"}:
+                raise IndexError("tuple index out of range")
+        super().execute(query, params)
 
 
 def test_column_exists_true():
@@ -147,6 +183,38 @@ def test_find_stale_ddl_waiters_returns_rows():
         "DROP TABLE %",
         "CREATE EXTENSION %",
     ]
+
+
+def test_find_stale_ddl_waiters_materializes_rows_before_cursor_close():
+    fragile_row = FragileRow(
+        {
+            "pid": 123,
+            "application_name": "endingsignal_init_db",
+            "query_text": "CREATE INDEX idx_x ON contents(title)",
+        }
+    )
+    cursor = ClosingCursor(fetchall_values=[[fragile_row]])
+    conn = FakeConn(cursors=[cursor])
+
+    result = database.find_stale_ddl_waiters(conn, max_age_seconds=300)
+
+    assert result == [
+        {
+            "pid": 123,
+            "application_name": "endingsignal_init_db",
+            "query_text": "CREATE INDEX idx_x ON contents(title)",
+        }
+    ]
+    assert cursor.closed is True
+
+
+def test_find_stale_ddl_waiters_query_avoids_raw_percent_tokens():
+    cursor = PercentParsingCursor(fetchall_values=[[]])
+    conn = FakeConn(cursors=[cursor])
+
+    result = database.find_stale_ddl_waiters(conn, max_age_seconds=300)
+
+    assert result == []
 
 
 def test_cleanup_stale_ddl_waiters_cancel(monkeypatch):

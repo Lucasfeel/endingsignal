@@ -125,14 +125,15 @@ def test_synchronize_database_persists_display_genres_as_authors(monkeypatch):
 
     insert_rows = []
     for query, rows in fake_cursor.executemany_calls:
-        if query.startswith("INSERT INTO contents"):
+        if "INSERT INTO contents" in query:
             insert_rows = rows
             break
 
     assert len(insert_rows) == 1
     inserted = insert_rows[0]
     assert inserted[5] == "fantasythriller"
-    meta = json.loads(inserted[7])
+    meta_payload = inserted[7]
+    meta = meta_payload.adapted if hasattr(meta_payload, "adapted") else json.loads(meta_payload)
     assert meta["common"]["authors"] == ["Fantasy", "Thriller"]
     assert meta["attributes"]["genres"] == ["anime", "Fantasy", "Thriller"]
 

@@ -27,6 +27,12 @@ class FakePool:
         self.putconn_calls.append(conn)
 
 
+def test_db_pool_enabled_defaults_to_true(monkeypatch):
+    monkeypatch.delenv("DB_POOL_ENABLED", raising=False)
+
+    assert database._db_pool_enabled() is True
+
+
 def test_close_db_returns_connection_to_pool_when_enabled(monkeypatch):
     app = Flask(__name__)
     fake_conn = FakeConnection()

@@ -1,0 +1,39 @@
+name: DB Maintenance
+
+on:
+  schedule:
+    - cron: '15 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  db-maintenance:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      DB_POOL_ENABLED: '0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run DB maintenance
+        env:
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_MAINTENANCE_BATCH_SIZE: 1000
+          DB_RETENTION_REPORT_DAYS: 90
+          DB_RETENTION_NOTIFICATION_DAYS: 365
+          DB_RETENTION_CDC_DAYS: 365
+        run: python run_db_maintenance.py

@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 import psycopg2.extras
 
 from database import get_cursor
+from utils.content_indexing import build_search_document
 from utils.text import normalize_search_text
 
 EXECUTE_VALUES_PAGE_SIZE = 1000
@@ -132,16 +133,25 @@ def _build_meta(record: BackfillRecord) -> Dict[str, Any]:
 def _build_upsert_rows(records: Sequence[BackfillRecord]) -> List[tuple]:
     rows = []
     for record in records:
+        normalized_title = normalize_search_text(record.title)
+        normalized_authors = normalize_search_text(" ".join(record.authors))
+        meta = _build_meta(record)
         rows.append(
             (
                 record.content_id,
                 record.source,
                 "novel",
                 record.title,
-                normalize_search_text(record.title),
-                normalize_search_text(" ".join(record.authors)),
+                normalized_title,
+                normalized_authors,
                 record.status,
-                psycopg2.extras.Json(_build_meta(record)),
+                psycopg2.extras.Json(meta),
+                build_search_document(
+                    title=record.title,
+                    normalized_title=normalized_title,
+                    normalized_authors=normalized_authors,
+                    meta=meta,
+                ),
             )
         )
     return rows
@@ -175,7 +185,8 @@ INSERT INTO contents (
     normalized_title,
     normalized_authors,
     status,
-    meta
+    meta,
+    search_document
 )
 VALUES %s
 ON CONFLICT (content_id, source)
@@ -186,6 +197,7 @@ DO UPDATE SET
     normalized_authors = EXCLUDED.normalized_authors,
     status = EXCLUDED.status,
     meta = EXCLUDED.meta,
+    search_document = EXCLUDED.search_document,
     updated_at = NOW()
 RETURNING (xmax = 0) AS inserted
 """

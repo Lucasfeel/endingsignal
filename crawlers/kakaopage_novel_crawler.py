@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin
 
@@ -62,6 +63,19 @@ class KakaoPageNovelCrawler(ContentCrawler):
             existing_by_id[str(row["content_id"])] = self._extract_existing_entry(row)
         return {"existing_by_id": existing_by_id}
 
+    def build_prefetch_context_from_snapshot(self, snapshot):
+        context = super().build_prefetch_context_from_snapshot(snapshot)
+        existing_by_id = {}
+        for row in (snapshot or {}).get("existing_rows") or []:
+            if not isinstance(row, dict):
+                continue
+            content_id = str(row.get("content_id") or "").strip()
+            if not content_id:
+                continue
+            existing_by_id[content_id] = self._extract_existing_entry(row)
+        context["existing_by_id"] = existing_by_id
+        return context
+
     @staticmethod
     def _load_playwright_async_api():
         from playwright.async_api import async_playwright
@@ -89,6 +103,16 @@ class KakaoPageNovelCrawler(ContentCrawler):
             "Referer": referer,
             "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.6,en;q=0.5",
         }
+
+    @staticmethod
+    def _new_detail_fetch_limit() -> Optional[int]:
+        raw_value = str(os.getenv("KAKAOPAGE_INCREMENTAL_MAX_NEW_DETAILS", "")).strip()
+        if not raw_value:
+            return None
+        try:
+            return max(0, int(raw_value))
+        except ValueError:
+            return None
 
     @staticmethod
     def _merge_discovered_entry(
@@ -331,9 +355,26 @@ class KakaoPageNovelCrawler(ContentCrawler):
                 continue
             new_ids.append(content_id)
 
+        detail_fetch_limit = self._new_detail_fetch_limit()
+        new_ids_to_fetch = new_ids
+        skipped_new_detail_count = 0
+        if detail_fetch_limit is not None:
+            new_ids_to_fetch = new_ids[:detail_fetch_limit]
+            skipped_new_detail_count = max(0, len(new_ids) - len(new_ids_to_fetch))
+            fetch_meta["new_detail_limit"] = detail_fetch_limit
+        fetch_meta["new_detail_candidate_count"] = len(new_ids)
+        fetch_meta["new_detail_fetch_count"] = len(new_ids_to_fetch)
+
         detail_notes: List[str] = []
+        if skipped_new_detail_count > 0:
+            detail_notes.append(
+                "DETAIL_FETCH_LIMIT_APPLIED:"
+                f"kept={len(new_ids_to_fetch)}:"
+                f"skipped={skipped_new_detail_count}:"
+                f"limit={detail_fetch_limit}"
+            )
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            for content_id in new_ids:
+            for content_id in new_ids_to_fetch:
                 discovered_entry = discovered_by_id[content_id]
                 try:
                     record = await fetch_kakao_detail_and_build_record(
@@ -394,6 +435,13 @@ class KakaoPageNovelCrawler(ContentCrawler):
                 "reason": "partial_seed_failures",
                 "message": "kakaopage incremental crawl completed with seed failures",
             }
+        elif skipped_new_detail_count > 0:
+            fetch_meta["status"] = "warn"
+            fetch_meta["summary"] = {
+                "crawler": self.source_name,
+                "reason": "detail_fetch_limited",
+                "message": "kakaopage incremental crawl skipped some new detail fetches due to configured limit",
+            }
         else:
             fetch_meta["status"] = "ok"
             fetch_meta["summary"] = {
@@ -411,4 +459,5 @@ class KakaoPageNovelCrawler(ContentCrawler):
             all_content_today=all_content_today,
             ongoing_today=ongoing_today,
             finished_today=finished_today,
+            existing_snapshot=(self.get_prefetch_context() or {}).get("sync_snapshot"),
         )

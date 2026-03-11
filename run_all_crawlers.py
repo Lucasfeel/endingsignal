@@ -1,18 +1,22 @@
-# run_all_crawlers.py
 import asyncio
 import json
 import os
 import sys
 import time
 import traceback
-from typing import Dict, List, Optional
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Awaitable, Callable, Dict, List, Optional, Sequence, TextIO
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+from crawlers.kakaopage_novel_crawler import KakaoPageNovelCrawler
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
 from crawlers.laftel_ott_crawler import LaftelOttCrawler
+from crawlers.naver_series_novel_crawler import NaverSeriesNovelCrawler
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
 from crawlers.ridi_novel_crawler import RidiNovelCrawler
 from database import create_standalone_connection, get_cursor
@@ -20,48 +24,134 @@ from services.cdc_event_service import (
     record_due_scheduled_completions,
     record_due_scheduled_publications,
 )
+from services.notification_dispatch_service import dispatch_pending_completion_events
+from services.verified_sync_service import enrich_report_data, normalize_verification_gate
 from utils.time import now_kst_naive
+
+OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
 ALL_CRAWLERS = [
     NaverWebtoonCrawler,
     KakaoWebtoonCrawler,
+    NaverSeriesNovelCrawler,
+    KakaoPageNovelCrawler,
     RidiNovelCrawler,
     LaftelOttCrawler,
 ]
 
-ERROR_STATUS_ALIASES = {"error", "fail", "fatal", "실패"}
-WARN_STATUS_ALIASES = {"warn", "warning", "경고"}
-OK_STATUS_ALIASES = {"ok", "success", "성공"}
-SKIP_STATUS_ALIASES = {"skip", "스킵"}
+ERROR_STATUS_ALIASES = {"error", "fail", "failure", "fatal", "\uc2e4\ud328"}
+WARN_STATUS_ALIASES = {"warn", "warning", "\uacbd\uace0"}
+OK_STATUS_ALIASES = {"ok", "success", "\uc131\uacf5"}
+SKIP_STATUS_ALIASES = {"skip", "skipped", "\uc2a4\ud0b5"}
 
 FATAL_KAKAO_ERROR_SIGNATURES = (
     "SECTION_PARSE_ERROR",
     "SUSPICIOUS_EMPTY_RESULT",
     "suspicious empty result",
 )
-FINAL_COLLECTION_ORDER = ("kakaowebtoon", "naver_webtoon", "ridi")
+
+FINAL_COLLECTION_ORDER = (
+    "naver_webtoon",
+    "kakaowebtoon",
+    "naver_series",
+    "kakao_page",
+    "ridi",
+    "laftel",
+)
+
 FINAL_COLLECTION_LABELS = {
-    "kakaowebtoon": "카카오웹툰",
-    "naver_webtoon": "네이버웹툰",
-    "ridi": "리디",
+    "naver_webtoon": "\ub124\uc774\ubc84 \uc6f9\ud230",
+    "kakaowebtoon": "\uce74\uce74\uc624\uc6f9\ud230",
+    "naver_series": "\ub124\uc774\ubc84 \uc2dc\ub9ac\uc988",
+    "kakao_page": "\uce74\uce74\uc624\ud398\uc774\uc9c0",
+    "ridi": "\ub9ac\ub514",
+    "laftel": "\ub77c\ud504\ud154",
 }
+
 SOURCE_NAME_ALIASES = {
     "kakaowebtoon": "kakaowebtoon",
     "kakao_webtoon": "kakaowebtoon",
-    "naver_webtoon": "naver_webtoon",
-    "ridi": "ridi",
+    "kakao_webtoon_crawler": "kakaowebtoon",
+    "kakao_webtoon_crawler.py": "kakaowebtoon",
+    "kakao_webtoon_crawler_class": "kakaowebtoon",
+    "kakao_webtoon_display": "kakaowebtoon",
+    "kakao_webtoon_name": "kakaowebtoon",
+    "kakao_webtoon_title": "kakaowebtoon",
+    "kakao_webtoon_label": "kakaowebtoon",
+    "kakaopage_novel": "kakao_page",
+    "kakaopage_novel_crawler": "kakao_page",
+    "kakao_page": "kakao_page",
     "laftel": "laftel",
+    "laftel_ott": "laftel",
+    "naver_series": "naver_series",
+    "naver_series_novel": "naver_series",
+    "naver_series_novel_crawler": "naver_series",
+    "naver_webtoon": "naver_webtoon",
+    "naver_webtoon_crawler": "naver_webtoon",
+    "ridi": "ridi",
+    "ridi_novel": "ridi",
+    "ridi_novel_crawler": "ridi",
 }
 
 
-def _ensure_unique_sources(crawler_classes):
-    source_map = {}
+class TeeStream:
+    def __init__(self, *streams: TextIO):
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        written = len(data)
+        for stream in self._streams:
+            self._write_to_stream(stream, data)
+        return written
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            try:
+                stream.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        for stream in self._streams:
+            try:
+                if stream.isatty():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    @property
+    def encoding(self) -> str:
+        for stream in self._streams:
+            encoding = getattr(stream, "encoding", None)
+            if encoding:
+                return encoding
+        return "utf-8"
+
+    def writable(self) -> bool:
+        return True
+
+    @staticmethod
+    def _write_to_stream(stream: TextIO, data: str) -> None:
+        try:
+            stream.write(data)
+        except UnicodeEncodeError:
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            safe_text = data.encode(encoding, errors="backslashreplace").decode(
+                encoding,
+                errors="ignore",
+            )
+            stream.write(safe_text)
+
+
+def _ensure_unique_sources(crawler_classes: Sequence[type]) -> None:
+    source_map: Dict[str, List[str]] = {}
     for crawler_class in crawler_classes:
         instance = crawler_class()
         source_name = getattr(instance, "source_name", None)
-        source_map.setdefault(source_name, []).append(crawler_class.__name__)
+        source_map.setdefault(str(source_name), []).append(crawler_class.__name__)
 
-    duplicates = {k: v for k, v in source_map.items() if k and len(v) > 1}
+    duplicates = {key: value for key, value in source_map.items() if key and len(value) > 1}
     if duplicates:
         raise ValueError(
             f"Duplicate crawler registrations detected for sources: {duplicates}."
@@ -71,9 +161,40 @@ def _ensure_unique_sources(crawler_classes):
 _ensure_unique_sources(ALL_CRAWLERS)
 
 
-def normalize_runtime_status(status):
+def _normalize_source_token(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _normalize_source_name(value: Optional[str]) -> Optional[str]:
+    token = _normalize_source_token(value)
+    if not token:
+        return None
+    return SOURCE_NAME_ALIASES.get(token, token)
+
+
+def _default_display_name(source_name: Optional[str], fallback: str) -> str:
+    if source_name:
+        normalized = _normalize_source_name(source_name)
+        if normalized and normalized in FINAL_COLLECTION_LABELS:
+            return FINAL_COLLECTION_LABELS[normalized]
+        return str(source_name).replace("_", " ").title()
+    return fallback
+
+
+def _safe_non_negative_int(value) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
+def normalize_runtime_status(status) -> str:
     if status is None:
         return "ok"
+
     raw = str(status).strip().lower()
     if not raw:
         return "ok"
@@ -88,7 +209,18 @@ def normalize_runtime_status(status):
     return raw
 
 
-def severity_prefix(status):
+def normalize_status_for_storage(status, *, success_value: str = "ok") -> str:
+    normalized = normalize_runtime_status(status)
+    if normalized == "error":
+        return "fail"
+    if normalized == "warn":
+        return "warn"
+    if normalized == "skip":
+        return "skip"
+    return success_value
+
+
+def severity_prefix(status) -> str:
     normalized = normalize_runtime_status(status)
     if normalized == "error":
         return "ERROR"
@@ -120,7 +252,7 @@ def get_rollup_target_total_unique():
     return parsed, None
 
 
-def _contains_fatal_kakao_errors(kakao_fetch_meta):
+def _contains_fatal_kakao_errors(kakao_fetch_meta) -> bool:
     if not isinstance(kakao_fetch_meta, dict):
         return False
 
@@ -133,18 +265,14 @@ def _contains_fatal_kakao_errors(kakao_fetch_meta):
         for signature in FATAL_KAKAO_ERROR_SIGNATURES:
             if signature.lower() in lowered:
                 return True
-
     return False
 
 
-def is_kakao_fetch_failed(kakao_status, kakao_unique, kakao_fetch_meta):
+def is_kakao_fetch_failed(kakao_status, kakao_unique, kakao_fetch_meta) -> bool:
     if normalize_runtime_status(kakao_status) == "error":
         return True
 
-    try:
-        unique_count = int(kakao_unique or 0)
-    except (TypeError, ValueError):
-        unique_count = 0
+    unique_count = _safe_non_negative_int(kakao_unique)
     if unique_count <= 0:
         return True
 
@@ -152,7 +280,6 @@ def is_kakao_fetch_failed(kakao_status, kakao_unique, kakao_fetch_meta):
         health_warnings = kakao_fetch_meta.get("health_warnings")
         if isinstance(health_warnings, list) and health_warnings:
             return True
-
         if _contains_fatal_kakao_errors(kakao_fetch_meta):
             return True
 
@@ -171,36 +298,25 @@ def build_rollup_warning_reasons(actual_total_unique, target_total_unique, kakao
     return warning_reasons
 
 
-def _safe_non_negative_int(value) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, parsed)
-
-
 def _infer_source_name(result: Dict) -> Optional[str]:
-    source_name = result.get("source_name")
-    if isinstance(source_name, str) and source_name.strip():
-        normalized = source_name.strip().lower()
-        return SOURCE_NAME_ALIASES.get(normalized, normalized)
+    source_name = _normalize_source_name(result.get("source_name"))
+    if source_name:
+        return source_name
 
     summary = result.get("summary")
     if isinstance(summary, dict):
-        summary_source = summary.get("crawler")
-        if isinstance(summary_source, str) and summary_source.strip():
-            normalized = summary_source.strip().lower()
-            return SOURCE_NAME_ALIASES.get(normalized, normalized)
+        summary_source = _normalize_source_name(summary.get("crawler"))
+        if summary_source:
+            return summary_source
 
-    crawler_name = result.get("crawler_name")
-    if isinstance(crawler_name, str) and crawler_name.strip():
-        normalized = crawler_name.strip().lower().replace(" ", "_")
-        return SOURCE_NAME_ALIASES.get(normalized, normalized)
+    crawler_name = _normalize_source_name(result.get("crawler_name"))
+    if crawler_name:
+        return crawler_name
 
     return None
 
 
-def format_final_collection_summary(results: List[dict]) -> str:
+def _build_counts_by_source(results: Sequence[dict]) -> Dict[str, int]:
     counts_by_source: Dict[str, int] = {}
 
     for result in results:
@@ -212,324 +328,78 @@ def format_final_collection_summary(results: List[dict]) -> str:
         fetched_count = _safe_non_negative_int(result.get("fetched_count"))
         counts_by_source[source_name] = counts_by_source.get(source_name, 0) + fetched_count
 
+    return counts_by_source
+
+
+def format_final_collection_summary(results: List[dict]) -> str:
+    counts_by_source = _build_counts_by_source(results)
     ordered_sources: List[str] = []
+
     for source_name in FINAL_COLLECTION_ORDER:
         if source_name in counts_by_source:
             ordered_sources.append(source_name)
-    for source_name in sorted(counts_by_source.keys()):
+
+    for source_name in sorted(counts_by_source):
         if source_name not in FINAL_COLLECTION_ORDER:
             ordered_sources.append(source_name)
 
     total = sum(counts_by_source.values())
     if not ordered_sources:
-        return f"총 {total}개 수집"
+        return f"\ucd1d {total}\uac1c \uc218\uc9d1"
 
     segments = [
-        f"{FINAL_COLLECTION_LABELS.get(source_name, source_name)} {counts_by_source[source_name]}개 수집"
+        f"{FINAL_COLLECTION_LABELS.get(source_name, source_name)} {counts_by_source[source_name]}\uac1c \uc218\uc9d1"
         for source_name in ordered_sources
     ]
-    segments.append(f"총 {total}개 수집")
+    segments.append(f"\ucd1d {total}\uac1c \uc218\uc9d1")
     return ", ".join(segments)
 
 
-async def run_one_crawler(crawler_class):
-    report = {"status": "ok", "fetched_count": 0}
-    crawler_start_time = time.time()
-    report_status = "ok"
+def build_rollup_payload(
+    results: Sequence[dict],
+    *,
+    include_target_total_check: bool,
+    include_kakao_fetch_check: bool,
+):
+    counts_by_source = _build_counts_by_source(results)
+    actual_total_unique = sum(counts_by_source.values())
+    target_total_unique, target_warning = (
+        get_rollup_target_total_unique() if include_target_total_check else (None, None)
+    )
 
-    db_conn = None
-    crawler_display_name = getattr(crawler_class, "DISPLAY_NAME", crawler_class.__name__)
-    required_env_vars = getattr(crawler_class, "REQUIRED_ENV_VARS", [])
-    missing_env_vars = [key for key in required_env_vars if not os.getenv(key)]
-
-    try:
-        if missing_env_vars:
-            crawler_display_name = crawler_display_name.replace("_", " ").title()
-            print(
-                f"WARNING: [{crawler_display_name}] skipped (missing env vars): {missing_env_vars}",
-                flush=True,
-            )
-            report.update(
-                {
-                    "status": "스킵",
-                    "skip_reason": "missing_required_env_vars",
-                    "missing_env_vars": missing_env_vars,
-                    "note": "Set KAKAOWEBTOON_WEBID / KAKAOWEBTOON_T_ANO in Render env to enable this crawler.",
-                    "summary": {
-                        "crawler": crawler_display_name,
-                        "reason": "missing_env",
-                        "message": "crawler skipped due to missing required env vars",
-                    },
-                }
-            )
-            report_status = "skip"
-        else:
-            try:
-                crawler_instance = crawler_class()
-                crawler_display_name = getattr(crawler_instance, "source_name", crawler_class.__name__)
-                crawler_display_name = crawler_display_name.replace("_", " ").title()
-
-                print(f"\n--- [{crawler_display_name}] 크롤러 작업 시작 ---", flush=True)
-
-                db_conn = create_standalone_connection()
-                new_contents, newly_completed_items, cdc_info = await crawler_instance.run_daily_check(db_conn)
-                if not isinstance(cdc_info, dict):
-                    cdc_info = {}
-
-                report.update(
-                    {
-                        "new_contents": new_contents,
-                        "newly_completed_items": newly_completed_items,
-                        "cdc_info": cdc_info,
-                        "fetched_count": cdc_info.get("health", {}).get("fetched_count", 0),
-                        "summary": cdc_info.get("summary"),
-                    }
-                )
-                report_status = cdc_info.get("status", "ok")
-
-            except Exception as exc:
-                crawler_display_name = crawler_display_name.replace("_", " ").title()
-                print(
-                    f"FATAL: [{crawler_display_name}] 크롤러 실행 중 치명적 오류 발생: {exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                report["status"] = "fail"
-                report_status = "fail"
-                report["error_message"] = traceback.format_exc()
-                report["summary"] = {
-                    "crawler": crawler_display_name,
-                    "reason": "exception",
-                    "message": str(exc),
-                }
-
-    finally:
-        report["duration"] = time.time() - crawler_start_time
-        report["status"] = report_status
-        report["crawler_name"] = crawler_display_name
-        if db_conn:
-            db_conn.close()
-
-        report_conn = None
-        try:
-            report_conn = create_standalone_connection()
-            report_cursor = get_cursor(report_conn)
-            report_cursor.execute(
-                """
-                INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
-                VALUES (%s, %s, %s)
-                """,
-                (crawler_display_name, report_status, json.dumps(report)),
-            )
-            report_conn.commit()
-            report_cursor.close()
-            print(f"LOG: [{crawler_display_name}]의 실행 결과를 DB에 성공적으로 저장했습니다.", flush=True)
-        except Exception as report_exc:
-            print(
-                f"FATAL: [{crawler_display_name}]의 보고서를 DB에 저장하는 데 실패했습니다: {report_exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-        finally:
-            if report_conn:
-                report_conn.close()
-
-        normalized_status = normalize_runtime_status(report_status)
-        if normalized_status in ("error", "warn"):
-            summary = report.get("summary") or {}
-            reason = summary.get("reason") if isinstance(summary, dict) else None
-            message = summary.get("message") if isinstance(summary, dict) else None
-            prefix = severity_prefix(normalized_status)
-            print(
-                f"{prefix}: [{crawler_display_name}] run status={normalized_status} reason={reason} message={message}",
-                file=sys.stderr,
-                flush=True,
-            )
-
-        return report
-
-
-def run_scheduled_completion_cdc():
-    report = {"status": "성공"}
-    start_time = time.time()
-    conn = None
-    cursor = None
-    try:
-        conn = create_standalone_connection()
-        cursor = get_cursor(conn)
-        result = record_due_scheduled_completions(conn, cursor, now_kst_naive())
-        conn.commit()
-        report.update(result)
-    except Exception as exc:
-        print(f"FATAL: [scheduled completion cdc] 실행 실패: {exc}", file=sys.stderr, flush=True)
-        report["status"] = "실패"
-        report["error_message"] = traceback.format_exc()
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-    finally:
-        if cursor:
-            try:
-                cursor.close()
-            except Exception:
-                pass
-        if conn:
-            conn.close()
-
-    report["duration"] = time.time() - start_time
-    report_conn = None
-    try:
-        report_conn = create_standalone_connection()
-        report_cursor = get_cursor(report_conn)
-        report_cursor.execute(
-            """
-            INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
-            VALUES (%s, %s, %s)
-            """,
-            ("scheduled completion cdc", report["status"], json.dumps(report)),
-        )
-        report_conn.commit()
-        report_cursor.close()
-        print("LOG: [scheduled completion cdc] 실행 결과를 DB에 성공적으로 저장했습니다.", flush=True)
-    except Exception as report_exc:
-        print(f"FATAL: [scheduled completion cdc] 보고서 저장 실패: {report_exc}", file=sys.stderr, flush=True)
-    finally:
-        if report_conn:
-            report_conn.close()
-
-    return report
-
-
-def run_scheduled_publication_cdc():
-    report = {"status": "성공"}
-    start_time = time.time()
-    conn = None
-    cursor = None
-    try:
-        conn = create_standalone_connection()
-        cursor = get_cursor(conn)
-        result = record_due_scheduled_publications(conn, cursor, now_kst_naive())
-        conn.commit()
-        report.update(result)
-    except Exception as exc:
-        print(f"FATAL: [scheduled publication cdc] 실행 실패: {exc}", file=sys.stderr, flush=True)
-        report["status"] = "실패"
-        report["error_message"] = traceback.format_exc()
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-    finally:
-        if cursor:
-            try:
-                cursor.close()
-            except Exception:
-                pass
-        if conn:
-            conn.close()
-
-    report["duration"] = time.time() - start_time
-    report_conn = None
-    try:
-        report_conn = create_standalone_connection()
-        report_cursor = get_cursor(report_conn)
-        report_cursor.execute(
-            """
-            INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
-            VALUES (%s, %s, %s)
-            """,
-            ("scheduled publication cdc", report["status"], json.dumps(report)),
-        )
-        report_conn.commit()
-        report_cursor.close()
-        print("LOG: [scheduled publication cdc] 실행 결과를 DB에 성공적으로 저장했습니다.", flush=True)
-    except Exception as report_exc:
-        print(f"FATAL: [scheduled publication cdc] 보고서 저장 실패: {report_exc}", file=sys.stderr, flush=True)
-    finally:
-        if report_conn:
-            report_conn.close()
-
-    return report
-
-
-async def main():
-    start_time = time.time()
-    print("==========================================", flush=True)
-    print("   통합 크롤러 실행 스크립트 시작", flush=True)
-    print("==========================================", flush=True)
-
-    tasks = [run_one_crawler(crawler_class) for crawler_class in ALL_CRAWLERS]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    has_error = False
-    has_warn = False
-
-    for result in results:
-        if isinstance(result, Exception):
-            has_error = True
-            print(
-                f"ERROR: 크롤러 작업 중 gather 레벨 예외가 발생했습니다: {result}",
-                file=sys.stderr,
-                flush=True,
-            )
-
-    naver_unique = 0
-    kakao_unique = 0
+    kakao_unique = counts_by_source.get("kakaowebtoon", 0)
+    naver_unique = counts_by_source.get("naver_webtoon", 0)
+    kakao_present = "kakaowebtoon" in counts_by_source
     kakao_status = None
     kakao_summary = None
     kakao_fetch_meta = None
 
     for result in results:
-        if not isinstance(result, dict):
+        if _infer_source_name(result) != "kakaowebtoon":
             continue
+        kakao_status = result.get("status")
+        kakao_summary = result.get("summary")
+        cdc_info = result.get("cdc_info")
+        if isinstance(cdc_info, dict):
+            kakao_fetch_meta = cdc_info.get("fetch_meta")
+        break
 
-        status_label = normalize_runtime_status(result.get("status"))
-        if status_label == "error":
-            has_error = True
-        elif status_label == "warn":
-            has_warn = True
+    kakao_fetch_failed = False
+    if include_kakao_fetch_check and kakao_present:
+        kakao_fetch_failed = is_kakao_fetch_failed(
+            kakao_status=kakao_status,
+            kakao_unique=kakao_unique,
+            kakao_fetch_meta=kakao_fetch_meta,
+        )
 
-        name_lower = str(result.get("crawler_name", "")).lower()
-        fetched = result.get("fetched_count") or 0
-        if "naver" in name_lower:
-            naver_unique = fetched
-        elif "kakao" in name_lower:
-            kakao_unique = fetched
-            kakao_status = status_label
-            kakao_summary = result.get("summary")
-            cdc_info = result.get("cdc_info")
-            if isinstance(cdc_info, dict):
-                kakao_fetch_meta = cdc_info.get("fetch_meta")
-
-    actual_total_unique = naver_unique + kakao_unique
-
-    target_total_unique, target_warning = get_rollup_target_total_unique()
-    if target_warning:
-        has_warn = True
-        print(f"WARNING: {target_warning}", file=sys.stderr, flush=True)
-
-    kakao_fetch_failed = is_kakao_fetch_failed(kakao_status, kakao_unique, kakao_fetch_meta)
     warning_reasons = build_rollup_warning_reasons(
         actual_total_unique=actual_total_unique,
         target_total_unique=target_total_unique,
         kakao_fetch_failed=kakao_fetch_failed,
     )
-    if warning_reasons:
-        has_warn = True
-
     warning = ",".join(warning_reasons) if warning_reasons else None
 
-    rollup = {
-        "naver_unique": naver_unique,
-        "kakao_unique": kakao_unique,
-        "actual_total_unique": actual_total_unique,
-        "target_total_unique": target_total_unique,
-        "warning": warning,
-    }
-
+    kakao_rollup_log = None
     if kakao_fetch_failed:
         summary_reason = None
         summary_message = None
@@ -539,52 +409,562 @@ async def main():
 
         kakao_rollup_status = normalize_runtime_status(kakao_status)
         kakao_rollup_status = "error" if kakao_rollup_status == "error" else "warn"
+        kakao_rollup_log = {
+            "status": kakao_rollup_status,
+            "reason": summary_reason,
+            "message": summary_message,
+        }
+
+    rollup = {
+        "counts_by_source": counts_by_source,
+        "naver_unique": naver_unique,
+        "kakao_unique": kakao_unique,
+        "actual_total_unique": actual_total_unique,
+        "target_total_unique": target_total_unique,
+        "warning": warning,
+    }
+    return rollup, target_warning, warning_reasons, kakao_rollup_log
+
+
+def format_rollup_uniques(rollup: Dict[str, object]) -> str:
+    counts_by_source = rollup.get("counts_by_source") or {}
+    segments = []
+
+    for source_name in FINAL_COLLECTION_ORDER:
+        if source_name in counts_by_source:
+            label = FINAL_COLLECTION_LABELS.get(source_name, source_name)
+            segments.append(f"{label}: {counts_by_source[source_name]}")
+
+    for source_name in sorted(counts_by_source):
+        if source_name in FINAL_COLLECTION_ORDER:
+            continue
+        label = FINAL_COLLECTION_LABELS.get(source_name, source_name)
+        segments.append(f"{label}: {counts_by_source[source_name]}")
+
+    target_total_unique = rollup.get("target_total_unique")
+    target_label = target_total_unique if target_total_unique is not None else "disabled"
+    total_label = f"Total: {rollup.get('actual_total_unique', 0)} / {target_label}"
+
+    if segments:
+        return f"Rollup uniques -> {', '.join(segments)}, {total_label}"
+    return f"Rollup uniques -> {total_label}"
+
+
+def _configure_stream_encoding(stream: TextIO) -> None:
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except Exception:
+            pass
+
+
+@contextmanager
+def capture_runner_output(log_prefix: str):
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    log_path = OUTPUT_DIR / f"{log_prefix}-run-{timestamp}.log"
+
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    _configure_stream_encoding(original_stdout)
+    _configure_stream_encoding(original_stderr)
+
+    with log_path.open("w", encoding="utf-8-sig", newline="") as log_file:
+        sys.stdout = TeeStream(log_file, original_stdout)
+        sys.stderr = TeeStream(log_file, original_stderr)
+        try:
+            print(f"LOG_PATH: {log_path.resolve()}", flush=True)
+            yield log_path
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+
+
+def _serialize_report(report: Dict) -> str:
+    return json.dumps(report, ensure_ascii=False)
+
+
+def _write_daily_report(crawler_name: str, status: str, report: Dict) -> None:
+    report_conn = None
+    try:
+        report_conn = create_standalone_connection()
+        report_cursor = get_cursor(report_conn)
+        report_cursor.execute(
+            """
+            INSERT INTO daily_crawler_reports (crawler_name, status, report_data)
+            VALUES (%s, %s, %s)
+            """,
+            (crawler_name, status, _serialize_report(report)),
+        )
+        report_conn.commit()
+        report_cursor.close()
+        print(f"LOG: [{crawler_name}] report written to daily_crawler_reports", flush=True)
+    except Exception as report_exc:
+        print(
+            f"FATAL: [{crawler_name}] report write failed: {report_exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+    finally:
+        if report_conn:
+            report_conn.close()
+
+
+def _extract_report_verification_gate(report: Dict) -> Optional[Dict]:
+    cdc_info = report.get("cdc_info")
+    if isinstance(cdc_info, dict):
+        verification = cdc_info.get("verification")
+        if isinstance(verification, dict):
+            return verification
+
+    verification = report.get("verification_gate")
+    if isinstance(verification, dict):
+        return verification
+    return None
+
+
+def _resolve_apply_result(report: Dict, *, write_enabled: bool) -> str:
+    status = normalize_runtime_status(report.get("status"))
+    if status == "skip":
+        return "skipped"
+
+    cdc_info = report.get("cdc_info")
+    if isinstance(cdc_info, dict):
+        apply_result = cdc_info.get("apply_result")
+        if apply_result:
+            return str(apply_result)
+        if cdc_info.get("db_sync_skipped"):
+            return "skipped"
+
+    if not write_enabled:
+        return "dry_run"
+    return "applied"
+
+
+async def run_one_crawler(
+    crawler_class,
+    *,
+    report_context: Optional[Dict] = None,
+    verification_gate=None,
+    write_enabled: bool = True,
+):
+    report = {"status": "ok", "fetched_count": 0}
+    crawler_start_time = time.time()
+    report_status = "ok"
+
+    db_conn = None
+    crawler_display_name = getattr(crawler_class, "DISPLAY_NAME", crawler_class.__name__)
+    source_name = None
+    required_env_vars = getattr(crawler_class, "REQUIRED_ENV_VARS", [])
+    missing_env_vars = [key for key in required_env_vars if not os.getenv(key)]
+
+    try:
+        if missing_env_vars:
+            report_status = normalize_status_for_storage("skip")
+            report.update(
+                {
+                    "status": report_status,
+                    "skip_reason": "missing_required_env_vars",
+                    "missing_env_vars": missing_env_vars,
+                    "summary": {
+                        "crawler": crawler_display_name,
+                        "reason": "missing_env",
+                        "message": "crawler skipped due to missing required env vars",
+                    },
+                }
+            )
+            print(
+                f"WARNING: [{crawler_display_name}] skipped (missing env vars): {missing_env_vars}",
+                flush=True,
+            )
+        else:
+            crawler_instance = crawler_class()
+            source_name = getattr(crawler_instance, "source_name", None)
+            crawler_display_name = getattr(
+                crawler_class,
+                "DISPLAY_NAME",
+                _default_display_name(source_name, crawler_class.__name__),
+            )
+
+            print(f"--- [{crawler_display_name}] crawler run start ---", flush=True)
+
+            db_conn = create_standalone_connection()
+            new_contents, newly_completed_items, cdc_info = await crawler_instance.run_daily_check(
+                db_conn,
+                verification_gate=verification_gate,
+                write_enabled=write_enabled,
+            )
+            if not isinstance(cdc_info, dict):
+                cdc_info = {}
+
+            report_status = normalize_status_for_storage(cdc_info.get("status", "ok"))
+            report.update(
+                {
+                    "status": report_status,
+                    "new_contents": new_contents,
+                    "newly_completed_items": newly_completed_items,
+                    "cdc_info": cdc_info,
+                    "inserted_count": _safe_non_negative_int(cdc_info.get("inserted_count")),
+                    "updated_count": _safe_non_negative_int(cdc_info.get("updated_count")),
+                    "unchanged_count": _safe_non_negative_int(cdc_info.get("unchanged_count")),
+                    "write_skipped_count": _safe_non_negative_int(cdc_info.get("write_skipped_count")),
+                    "fetched_count": _safe_non_negative_int(
+                        (cdc_info.get("health") or {}).get("fetched_count")
+                    ),
+                    "summary": cdc_info.get("summary"),
+                }
+            )
+
+    except Exception as exc:
+        report_status = normalize_status_for_storage("fail")
+        print(
+            f"FATAL: [{crawler_display_name}] crawler execution failed: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        report.update(
+            {
+                "status": report_status,
+                "error_message": traceback.format_exc(),
+                "summary": {
+                    "crawler": crawler_display_name,
+                    "reason": "exception",
+                    "message": str(exc),
+                },
+            }
+        )
+    finally:
+        report["duration"] = time.time() - crawler_start_time
+        report["status"] = report_status
+        report["crawler_name"] = crawler_display_name
+        report.setdefault("inserted_count", 0)
+        report.setdefault("updated_count", 0)
+        report.setdefault("unchanged_count", 0)
+        report.setdefault("write_skipped_count", 0)
+        if source_name:
+            report["source_name"] = source_name
+        verification_gate_summary = _extract_report_verification_gate(report)
+        apply_result = _resolve_apply_result(report, write_enabled=write_enabled)
+        if verification_gate_summary is not None:
+            report["verification_gate"] = normalize_verification_gate(verification_gate_summary)
+        report["apply_result"] = apply_result
+        report = enrich_report_data(
+            report,
+            run_context=report_context,
+            verification_gate=verification_gate_summary,
+            apply_result=apply_result,
+        )
+        if db_conn:
+            db_conn.close()
+
+        _write_daily_report(crawler_display_name, report_status, report)
+
+        normalized_status = normalize_runtime_status(report_status)
+        if normalized_status in ("error", "warn"):
+            summary = report.get("summary") or {}
+            reason = summary.get("reason") if isinstance(summary, dict) else None
+            message = summary.get("message") if isinstance(summary, dict) else None
+            prefix = severity_prefix(normalized_status)
+            print(
+                f"{prefix}: [{crawler_display_name}] run status={normalized_status} "
+                f"reason={reason} message={message}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        return report
+
+
+def build_crawler_runner(
+    *,
+    report_context: Optional[Dict] = None,
+    verification_gate_factory=None,
+    write_enabled: bool = True,
+):
+    async def runner(crawler_class):
+        verification_gate = (
+            verification_gate_factory(crawler_class)
+            if callable(verification_gate_factory)
+            else verification_gate_factory
+        )
+        return await run_one_crawler(
+            crawler_class,
+            report_context=report_context,
+            verification_gate=verification_gate,
+            write_enabled=write_enabled,
+        )
+
+    return runner
+
+
+def _run_reporting_job(
+    crawler_name: str,
+    callback: Callable[..., Dict],
+    *,
+    callback_args: Sequence = (),
+    success_value: str = "success",
+    report_context: Optional[Dict] = None,
+    verification_gate: Optional[Dict] = None,
+    apply_result: Optional[str] = None,
+):
+    report = {"status": success_value}
+    start_time = time.time()
+    conn = None
+    cursor = None
+
+    try:
+        conn = create_standalone_connection()
+        cursor = get_cursor(conn)
+        result = callback(conn, cursor, *callback_args)
+        conn.commit()
+        report.update(result)
+        report["status"] = normalize_status_for_storage(
+            report.get("status"),
+            success_value=success_value,
+        )
+    except Exception as exc:
+        print(f"FATAL: [{crawler_name}] execution failed: {exc}", file=sys.stderr, flush=True)
+        report["status"] = normalize_status_for_storage("fail", success_value=success_value)
+        report["error_message"] = traceback.format_exc()
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            conn.close()
+
+    report["duration"] = time.time() - start_time
+    resolved_apply_result = apply_result or (
+        "applied" if normalize_runtime_status(report.get("status")) not in {"error", "skip"} else "skipped"
+    )
+    report = enrich_report_data(
+        report,
+        run_context=report_context,
+        verification_gate=verification_gate,
+        apply_result=resolved_apply_result,
+    )
+    _write_daily_report(crawler_name, report["status"], report)
+    return report
+
+
+def run_scheduled_completion_cdc(report_context: Optional[Dict] = None):
+    return _run_reporting_job(
+        "scheduled completion cdc",
+        record_due_scheduled_completions,
+        callback_args=(now_kst_naive(),),
+        report_context=report_context,
+        verification_gate={"status": "not_applicable", "mode": "dispatch_only", "reason": "dispatch_job"},
+    )
+
+
+def run_scheduled_publication_cdc(report_context: Optional[Dict] = None):
+    return _run_reporting_job(
+        "scheduled publication cdc",
+        record_due_scheduled_publications,
+        callback_args=(now_kst_naive(),),
+        report_context=report_context,
+        verification_gate={"status": "not_applicable", "mode": "dispatch_only", "reason": "dispatch_job"},
+    )
+
+
+def run_completion_notification_dispatch(report_context: Optional[Dict] = None):
+    report = {"status": "success"}
+    start_time = time.time()
+    conn = None
+    template_code = (os.getenv("AIT_COMPLETION_TEMPLATE_CODE") or "").strip()
+
+    try:
+        conn = create_standalone_connection()
+        result = dispatch_pending_completion_events(
+            conn,
+            template_code=template_code,
+            limit=int(os.getenv("AIT_NOTIFICATION_DISPATCH_LIMIT", "100")),
+        )
+        report.update(result)
+        report["status"] = normalize_status_for_storage(
+            report.get("status"),
+            success_value="success",
+        )
+    except Exception as exc:
+        print(
+            f"FATAL: [completion notification dispatch] execution failed: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        report["status"] = normalize_status_for_storage("fail", success_value="success")
+        report["error_message"] = traceback.format_exc()
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if conn:
+            conn.close()
+
+    report["duration"] = time.time() - start_time
+    resolved_apply_result = (
+        "applied" if normalize_runtime_status(report.get("status")) not in {"error", "skip"} else "skipped"
+    )
+    report = enrich_report_data(
+        report,
+        run_context=report_context,
+        verification_gate={"status": "not_applicable", "mode": "dispatch_only", "reason": "dispatch_job"},
+        apply_result=resolved_apply_result,
+    )
+    _write_daily_report("completion notification dispatch", report["status"], report)
+    return report
+
+
+async def run_crawler_suite(
+    crawler_classes: Sequence[type],
+    *,
+    suite_display_name: str,
+    runner: Optional[Callable[[type], Awaitable[dict]]] = None,
+    post_run_actions: Sequence[Callable[[], Dict]] = (),
+    include_target_total_check: bool = False,
+    include_kakao_fetch_check: bool = False,
+    emit_json_payload: bool = False,
+    result_handler: Optional[Callable[[Dict], None]] = None,
+) -> int:
+    start_time = time.time()
+    runner = runner or run_one_crawler
+    print("==========================================", flush=True)
+    print(f"   {suite_display_name}", flush=True)
+    print("==========================================", flush=True)
+
+    results = await asyncio.gather(
+        *(runner(crawler_class) for crawler_class in crawler_classes),
+        return_exceptions=True,
+    )
+
+    has_error = False
+    has_warn = False
+    summarized_results = []
+
+    for result in results:
+        if isinstance(result, Exception):
+            has_error = True
+            print(
+                f"ERROR: crawler gather failure: {result}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+
+        summarized_results.append(result)
+        status_label = normalize_runtime_status(result.get("status"))
+        if status_label == "error":
+            has_error = True
+        elif status_label == "warn":
+            has_warn = True
+
+    rollup, target_warning, warning_reasons, kakao_rollup_log = build_rollup_payload(
+        summarized_results,
+        include_target_total_check=include_target_total_check,
+        include_kakao_fetch_check=include_kakao_fetch_check,
+    )
+
+    if target_warning:
+        has_warn = True
+        print(f"WARNING: {target_warning}", file=sys.stderr, flush=True)
+
+    if warning_reasons:
+        has_warn = True
+
+    if kakao_rollup_log:
+        kakao_rollup_status = kakao_rollup_log["status"]
         kakao_prefix = severity_prefix(kakao_rollup_status)
         log_file = sys.stderr if kakao_rollup_status == "error" else sys.stdout
         print(
             f"{kakao_prefix}: [Kakaowebtoon] rollup status={kakao_rollup_status} "
-            f"reason={summary_reason} message={summary_message}",
+            f"reason={kakao_rollup_log.get('reason')} message={kakao_rollup_log.get('message')}",
             file=log_file,
             flush=True,
         )
 
     rollup_status = "error" if has_error else "warn" if has_warn else "ok"
-    target_total_label = target_total_unique if target_total_unique is not None else "disabled"
-    print(
-        f"Rollup uniques -> Naver: {naver_unique}, Kakao: {kakao_unique}, "
-        f"Total: {actual_total_unique} / {target_total_label}",
-        flush=True,
-    )
-    if warning:
-        print(f"{severity_prefix(rollup_status)}: {warning}", flush=True)
+    print(format_rollup_uniques(rollup), flush=True)
+    if rollup.get("warning"):
+        print(f"{severity_prefix(rollup_status)}: {rollup['warning']}", flush=True)
     print(f"Final rollup payload: {json.dumps(rollup, ensure_ascii=False)}", flush=True)
-    print(format_final_collection_summary([result for result in results if isinstance(result, dict)]), flush=True)
+    print(format_final_collection_summary(summarized_results), flush=True)
 
-    completion_report = run_scheduled_completion_cdc()
-    publication_report = run_scheduled_publication_cdc()
+    if emit_json_payload:
+        payload = {
+            "results": summarized_results,
+            "duration_seconds": round(time.time() - start_time, 3),
+            "rollup": rollup,
+        }
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
 
-    completion_status = normalize_runtime_status((completion_report or {}).get("status"))
-    publication_status = normalize_runtime_status((publication_report or {}).get("status"))
-    if completion_status == "error" or publication_status == "error":
-        has_error = True
-    elif completion_status == "warn" or publication_status == "warn":
-        has_warn = True
+    action_reports = []
+    for action in post_run_actions:
+        action_report = action()
+        action_reports.append(action_report)
+        action_status = normalize_runtime_status((action_report or {}).get("status"))
+        if action_status == "error":
+            has_error = True
+        elif action_status == "warn":
+            has_warn = True
 
     total_duration = time.time() - start_time
     final_status = "error" if has_error else "warn" if has_warn else "ok"
-    print("\n==========================================", flush=True)
-    print(f"  통합 크롤러 실행 완료 (총 소요 시간: {total_duration:.2f}초)", flush=True)
     print("==========================================", flush=True)
+    print(
+        f"   {suite_display_name} complete (total duration: {total_duration:.2f}s)",
+        flush=True,
+    )
+    print("==========================================", flush=True)
+
+    payload = {
+        "results": summarized_results,
+        "action_reports": action_reports,
+        "duration_seconds": round(total_duration, 3),
+        "rollup": rollup,
+        "final_status": final_status,
+    }
+    if callable(result_handler):
+        result_handler(payload)
 
     return 1 if final_status == "error" else 0
 
 
-if __name__ == "__main__":
+async def main():
+    return await run_crawler_suite(
+        ALL_CRAWLERS,
+        suite_display_name="integrated crawler run start",
+        post_run_actions=(
+            run_scheduled_completion_cdc,
+            run_scheduled_publication_cdc,
+            run_completion_notification_dispatch,
+        ),
+        include_target_total_check=True,
+        include_kakao_fetch_check=True,
+    )
+
+
+def run_cli(main_coro: Callable[[], Awaitable[int]], log_prefix: str) -> int:
     exit_code = 1
-    try:
-        exit_code = asyncio.run(main())
-    except Exception:
-        print("ERROR: integrated crawler execution crashed.", file=sys.stderr, flush=True)
-        traceback.print_exc()
-        exit_code = 1
-    sys.exit(exit_code)
+    with capture_runner_output(log_prefix):
+        try:
+            exit_code = asyncio.run(main_coro())
+        except Exception:
+            print("ERROR: integrated crawler execution crashed.", file=sys.stderr, flush=True)
+            traceback.print_exc()
+            exit_code = 1
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(run_cli(main, "crawler"))

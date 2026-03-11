@@ -11,6 +11,7 @@ from utils.perf import init_request_perf, log_request_perf
 from views.admin import admin_bp
 from views.auth import auth_bp
 from views.contents import contents_bp
+from views.internal_verified_sync import internal_verified_sync_bp
 from views.status import status_bp
 from views.subscriptions import subscriptions_bp
 
@@ -30,6 +31,7 @@ app.register_blueprint(subscriptions_bp)
 app.register_blueprint(status_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(internal_verified_sync_bp)
 
 
 @app.before_request

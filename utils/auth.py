@@ -5,7 +5,7 @@ import jwt
 from flask import jsonify, request, g
 from jwt import ExpiredSignatureError, InvalidIssuerError, InvalidTokenError
 
-JWT_ISSUER = 'ending-signal'
+JWT_ISSUER = 'endingsignal-toss'
 
 
 class AuthConfigError(Exception):
@@ -87,6 +87,9 @@ def login_required(func):
             'id': payload.get('uid'),
             'email': payload.get('email'),
             'role': payload.get('role'),
+            'user_key': None if payload.get('user_key') in (None, '') else str(payload.get('user_key')),
+            'auth_provider': payload.get('auth_provider') or 'legacy',
+            'display_name': payload.get('display_name'),
         }
         return func(*args, **kwargs)
 

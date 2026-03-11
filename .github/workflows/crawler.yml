@@ -1,12 +1,12 @@
-name: Run All Crawlers Daily
+name: Cloud Dispatch
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 자정(UTC)에 실행
-  workflow_dispatch: # 수동 실행 기능
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 jobs:
-  run-all-crawlers:
+  cloud-dispatch:
     runs-on: ubuntu-latest
     env:
       TZ: Asia/Seoul
@@ -23,23 +23,34 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
 
-      - name: Run all crawlers
+      - name: Materialize mTLS certificates
+        shell: bash
         env:
-          # 모든 크롤러 및 DB 스크립트에 필요한 환경 변수
+          AIT_MTLS_CERT_PEM: ${{ secrets.AIT_MTLS_CERT_PEM }}
+          AIT_MTLS_KEY_PEM: ${{ secrets.AIT_MTLS_KEY_PEM }}
+          AIT_CA_BUNDLE_PEM: ${{ secrets.AIT_CA_BUNDLE_PEM }}
+        run: |
+          if [ -n "$AIT_MTLS_CERT_PEM" ]; then
+            printf '%s' "$AIT_MTLS_CERT_PEM" > "$RUNNER_TEMP/ait-client-cert.pem"
+            echo "AIT_MTLS_CERT_PATH=$RUNNER_TEMP/ait-client-cert.pem" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$AIT_MTLS_KEY_PEM" ]; then
+            printf '%s' "$AIT_MTLS_KEY_PEM" > "$RUNNER_TEMP/ait-client-key.pem"
+            echo "AIT_MTLS_KEY_PATH=$RUNNER_TEMP/ait-client-key.pem" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$AIT_CA_BUNDLE_PEM" ]; then
+            printf '%s' "$AIT_CA_BUNDLE_PEM" > "$RUNNER_TEMP/ait-ca-bundle.pem"
+            echo "AIT_CA_BUNDLE_PATH=$RUNNER_TEMP/ait-ca-bundle.pem" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run cloud dispatch
+        env:
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_PORT: ${{ secrets.DB_PORT }}
-        run: python run_all_crawlers.py
-
-      - name: Cleanup old daily crawler reports
-        env:
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          KEEP_DAYS: 14
-        run: python scripts/cleanup_daily_crawler_reports.py
+          AIT_COMPLETION_TEMPLATE_CODE: ${{ secrets.AIT_COMPLETION_TEMPLATE_CODE }}
+        run: python run_cloud_dispatch.py

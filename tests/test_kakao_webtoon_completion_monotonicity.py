@@ -17,7 +17,7 @@ class FakeCursor:
         self._last_query = query
 
     def fetchall(self):
-        if "SELECT content_id, status FROM contents" in self._last_query:
+        if "FROM contents" in self._last_query:
             return self._existing_rows
         return []
 
@@ -40,7 +40,7 @@ def _make_webtoon_data(content_id, *, completed_candidate=False):
 
 def _updated_statuses(fake_cursor):
     for query, rows in fake_cursor.executemany_calls:
-        if query.startswith("UPDATE contents SET"):
+        if "UPDATE contents" in query:
             return [row[4] for row in rows]
     return []
 

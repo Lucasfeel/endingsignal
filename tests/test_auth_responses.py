@@ -21,7 +21,7 @@ def test_login_invalid_credentials_returns_standard_error(monkeypatch):
     assert response.status_code == 401
     assert data['success'] is False
     assert data['error']['code'] == 'INVALID_CREDENTIALS'
-    assert '이메일 또는 비밀번호' in data['error']['message']
+    assert data['error']['message'] == 'invalid credentials'
 
 
 def test_me_requires_authentication_standard_error():

@@ -60,6 +60,19 @@ class NaverSeriesNovelCrawler(ContentCrawler):
             existing_by_id[str(row["content_id"])] = self._extract_existing_entry(row)
         return {"existing_by_id": existing_by_id}
 
+    def build_prefetch_context_from_snapshot(self, snapshot):
+        context = super().build_prefetch_context_from_snapshot(snapshot)
+        existing_by_id = {}
+        for row in (snapshot or {}).get("existing_rows") or []:
+            if not isinstance(row, dict):
+                continue
+            content_id = str(row.get("content_id") or "").strip()
+            if not content_id:
+                continue
+            existing_by_id[content_id] = self._extract_existing_entry(row)
+        context["existing_by_id"] = existing_by_id
+        return context
+
     def _headers_for(self, *, referer: str) -> Dict[str, str]:
         return {
             **config.CRAWLER_HEADERS,
@@ -215,4 +228,5 @@ class NaverSeriesNovelCrawler(ContentCrawler):
             all_content_today=all_content_today,
             ongoing_today=ongoing_today,
             finished_today=finished_today,
+            existing_snapshot=(self.get_prefetch_context() or {}).get("sync_snapshot"),
         )

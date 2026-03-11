@@ -167,3 +167,76 @@ def test_kakaopage_incremental_marks_zero_discovery_as_suspicious_empty(monkeypa
     assert all_content == {}
     assert fetch_meta["skip_database_sync"] is True
     assert fetch_meta["status"] == "error"
+
+
+def test_kakaopage_incremental_can_limit_new_detail_fetch(monkeypatch):
+    async def fake_discover(self, *, existing_by_id):
+        assert "1" in existing_by_id
+        return (
+            {
+                "1": {
+                    "content_id": "1",
+                    "title": "기존 작품",
+                    "authors": [],
+                    "status": "연재중",
+                    "content_url": "https://page.kakao.com/content/1",
+                    "genres": ["판타지"],
+                    "crawl_roots": ["판타지"],
+                    "seed_completed": False,
+                },
+                "2": {
+                    "content_id": "2",
+                    "title": "신규 작품 1",
+                    "authors": [],
+                    "status": "연재중",
+                    "content_url": "https://page.kakao.com/content/2",
+                    "genres": ["판타지"],
+                    "crawl_roots": ["판타지"],
+                    "seed_completed": False,
+                },
+                "3": {
+                    "content_id": "3",
+                    "title": "신규 작품 2",
+                    "authors": [],
+                    "status": "연재중",
+                    "content_url": "https://page.kakao.com/content/3",
+                    "genres": ["판타지"],
+                    "crawl_roots": ["판타지"],
+                    "seed_completed": False,
+                },
+            },
+            {"seeds": {}, "health_notes": [], "failed_seed_count": 0},
+        )
+
+    async def fake_fetch_detail(**kwargs):
+        raise AssertionError("detail fetch should be skipped when limit is 0")
+
+    monkeypatch.setattr(KakaoPageNovelCrawler, "discover_listing_entries", fake_discover)
+    monkeypatch.setattr(kakao_module, "fetch_kakao_detail_and_build_record", fake_fetch_detail)
+    monkeypatch.setenv("KAKAOPAGE_INCREMENTAL_MAX_NEW_DETAILS", "0")
+
+    crawler = KakaoPageNovelCrawler()
+    crawler._prefetch_context = {
+        "existing_by_id": {
+            "1": {
+                "title": "기존 작품",
+                "authors": ["기존 작가"],
+                "content_url": "https://page.kakao.com/content/1",
+                "genres": ["판타지"],
+                "crawl_roots": ["판타지"],
+                "status": "연재중",
+            }
+        }
+    }
+
+    ongoing, hiatus, finished, all_content, fetch_meta = asyncio.run(crawler.fetch_all_data())
+
+    assert hiatus == {}
+    assert finished == {}
+    assert set(ongoing.keys()) == {"1"}
+    assert set(all_content.keys()) == {"1"}
+    assert fetch_meta["status"] == "warn"
+    assert fetch_meta["new_detail_limit"] == 0
+    assert fetch_meta["new_detail_candidate_count"] == 2
+    assert fetch_meta["new_detail_fetch_count"] == 0
+    assert any(note.startswith("DETAIL_FETCH_LIMIT_APPLIED:kept=0:skipped=2:limit=0") for note in fetch_meta["health_notes"])

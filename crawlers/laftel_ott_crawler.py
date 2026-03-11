@@ -12,6 +12,7 @@ import config
 from database import get_cursor
 from utils.text import normalize_search_text
 from .base_crawler import ContentCrawler
+from .sync_utils import build_sync_row, sync_prepared_content_rows
 
 
 STATUS_FINISHED = "\uc644\uacb0"
@@ -522,16 +523,14 @@ class LaftelOttCrawler(ContentCrawler):
         hiatus_today,
         finished_today,
     ):
-        cursor = get_cursor(conn)
-        cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
-        db_existing_ids = {str(row["content_id"]) for row in cursor.fetchall()}
-
-        updates = []
-        inserts = []
+        existing_snapshot = (self.get_prefetch_context() or {}).get("sync_snapshot")
+        prepared_rows = []
+        write_skipped_count = 0
 
         for raw_content_id, entry in all_content_today.items():
             content_id = self._sanitize_text(raw_content_id)
             if not content_id:
+                write_skipped_count += 1
                 continue
 
             if content_id in finished_today:
@@ -543,6 +542,7 @@ class LaftelOttCrawler(ContentCrawler):
 
             title = self._sanitize_text(entry.get("title"))
             if not title:
+                write_skipped_count += 1
                 continue
 
             authors = self._dedupe_strings(
@@ -581,46 +581,24 @@ class LaftelOttCrawler(ContentCrawler):
                 "common": common,
                 "attributes": attributes,
             }
-
-            if content_id in db_existing_ids:
-                updates.append(
-                    (
-                        self.CONTENT_TYPE,
-                        title,
-                        normalized_title,
-                        normalized_authors,
-                        status,
-                        json.dumps(meta_data),
-                        content_id,
-                        self.source_name,
-                    )
+            prepared_rows.append(
+                build_sync_row(
+                    content_id=content_id,
+                    source=self.source_name,
+                    content_type=self.CONTENT_TYPE,
+                    title=title,
+                    normalized_title=normalized_title,
+                    normalized_authors=normalized_authors,
+                    status=status,
+                    meta=meta_data,
                 )
-            else:
-                inserts.append(
-                    (
-                        content_id,
-                        self.source_name,
-                        self.CONTENT_TYPE,
-                        title,
-                        normalized_title,
-                        normalized_authors,
-                        status,
-                        json.dumps(meta_data),
-                    )
-                )
-
-        if updates:
-            cursor.executemany(
-                "UPDATE contents SET content_type=%s, title=%s, normalized_title=%s, normalized_authors=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
-                updates,
             )
 
-        if inserts:
-            cursor.executemany(
-                "INSERT INTO contents (content_id, source, content_type, title, normalized_title, normalized_authors, status, meta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (content_id, source) DO NOTHING",
-                inserts,
-            )
-
-        cursor.close()
-        return len(inserts)
+        return sync_prepared_content_rows(
+            conn,
+            source_name=self.source_name,
+            prepared_rows=prepared_rows,
+            existing_snapshot=existing_snapshot,
+            write_skipped_count=write_skipped_count,
+            cursor_getter=get_cursor,
+        )

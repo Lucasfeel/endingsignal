@@ -2,7 +2,6 @@ import time
 import traceback
 import asyncio
 import aiohttp
-import json
 import sys
 
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -10,7 +9,8 @@ from dotenv import load_dotenv
 
 import config
 from .base_crawler import ContentCrawler
-from database import get_cursor, create_standalone_connection
+from .sync_utils import build_sync_row, sync_prepared_content_rows
+from database import create_standalone_connection, get_cursor
 from utils.text import normalize_search_text
 
 load_dotenv()
@@ -220,10 +220,9 @@ class NaverWebtoonCrawler(ContentCrawler):
         naver_finished_today,
     ):
         print("\nDB를 오늘의 최신 상태로 전체 동기화를 시작합니다...")
-        cursor = get_cursor(conn)
-        cursor.execute("SELECT content_id FROM contents WHERE source = %s", (self.source_name,))
-        db_existing_ids = {row["content_id"] for row in cursor.fetchall()}
-        updates, inserts = [], []
+        existing_snapshot = (self.get_prefetch_context() or {}).get("sync_snapshot")
+        prepared_rows = []
+        write_skipped_count = 0
 
         for content_id, webtoon_data in all_naver_webtoons_today.items():
             status = ""
@@ -238,6 +237,7 @@ class NaverWebtoonCrawler(ContentCrawler):
 
             title = webtoon_data.get("title") or webtoon_data.get("titleName")
             if not title:
+                write_skipped_count += 1
                 continue
 
             author = webtoon_data.get("author")
@@ -253,50 +253,33 @@ class NaverWebtoonCrawler(ContentCrawler):
                     "weekdays": webtoon_data.get("normalized_weekdays", []),
                 },
             }
-
-            if content_id in db_existing_ids:
-                record = (
-                    "webtoon",
-                    title,
-                    normalized_title,
-                    normalized_authors,
-                    status,
-                    json.dumps(meta_data),
-                    content_id,
-                    self.source_name,
+            prepared_rows.append(
+                build_sync_row(
+                    content_id=str(content_id),
+                    source=self.source_name,
+                    content_type="webtoon",
+                    title=title,
+                    normalized_title=normalized_title,
+                    normalized_authors=normalized_authors,
+                    status=status,
+                    meta=meta_data,
                 )
-                updates.append(record)
-            else:
-                record = (
-                    content_id,
-                    self.source_name,
-                    "webtoon",
-                    title,
-                    normalized_title,
-                    normalized_authors,
-                    status,
-                    json.dumps(meta_data),
-                )
-                inserts.append(record)
-
-        if updates:
-            cursor.executemany(
-                "UPDATE contents SET content_type=%s, title=%s, normalized_title=%s, normalized_authors=%s, status=%s, meta=%s WHERE content_id=%s AND source=%s",
-                updates,
             )
-            print(f"{len(updates)}개 웹툰 정보 업데이트 완료.")
 
-        if inserts:
-            cursor.executemany(
-                "INSERT INTO contents (content_id, source, content_type, title, normalized_title, normalized_authors, status, meta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (content_id, source) DO NOTHING",
-                inserts,
-            )
-            print(f"{len(inserts)}개 신규 웹툰 DB 추가 완료.")
-
-        cursor.close()
+        sync_stats = sync_prepared_content_rows(
+            conn,
+            source_name=self.source_name,
+            prepared_rows=prepared_rows,
+            existing_snapshot=existing_snapshot,
+            write_skipped_count=write_skipped_count,
+            cursor_getter=get_cursor,
+        )
+        if sync_stats["updated_count"]:
+            print(f"{sync_stats['updated_count']}개 웹툰 정보 업데이트 완료.")
+        if sync_stats["inserted_count"]:
+            print(f"{sync_stats['inserted_count']}개 신규 웹툰 DB 추가 완료.")
         print("DB 동기화 완료.")
-        return len(inserts)
+        return sync_stats
 
 
 if __name__ == "__main__":

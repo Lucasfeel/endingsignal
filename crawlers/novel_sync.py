@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
-from database import get_cursor
+from .sync_utils import build_sync_row, sync_prepared_content_rows
 from utils.backfill import STATUS_COMPLETED, STATUS_ONGOING, dedupe_strings
 from utils.text import normalize_search_text
 
@@ -31,16 +30,14 @@ def synchronize_novel_contents(
     all_content_today: Dict[str, Dict[str, Any]],
     ongoing_today: Dict[str, Dict[str, Any]],
     finished_today: Dict[str, Dict[str, Any]],
-) -> int:
-    cursor = get_cursor(conn)
-    cursor.execute("SELECT content_id FROM contents WHERE source = %s", (source_name,))
-    db_existing_ids = {str(row["content_id"]) for row in cursor.fetchall()}
-
-    updates = []
-    inserts = []
+    existing_snapshot: Dict[str, Dict[str, Any]] | None = None,
+) -> Dict[str, int]:
+    prepared_rows = []
+    write_skipped_count = 0
     for content_id, entry in all_content_today.items():
         cid = _clean_text(content_id)
         if not cid:
+            write_skipped_count += 1
             continue
 
         if cid in finished_today:
@@ -54,6 +51,7 @@ def synchronize_novel_contents(
         authors = _merge_unique_strings(entry.get("authors"))
         content_url = _clean_text(entry.get("content_url"))
         if not title or not authors or not content_url:
+            write_skipped_count += 1
             continue
 
         normalized_title = normalize_search_text(title)
@@ -86,49 +84,23 @@ def synchronize_novel_contents(
         if thumbnail_url:
             meta["common"]["thumbnail_url"] = thumbnail_url
 
-        row = (
-            "novel",
-            title,
-            normalized_title,
-            normalized_authors,
-            status,
-            json.dumps(meta, ensure_ascii=False),
-            cid,
-            source_name,
-        )
-        if cid in db_existing_ids:
-            updates.append(row)
-        else:
-            inserts.append((cid, source_name, *row[:-2]))
-
-    if updates:
-        cursor.executemany(
-            """
-            UPDATE contents
-            SET content_type=%s, title=%s, normalized_title=%s, normalized_authors=%s, status=%s, meta=%s
-            WHERE content_id=%s AND source=%s
-            """,
-            updates,
-        )
-
-    if inserts:
-        cursor.executemany(
-            """
-            INSERT INTO contents (
-                content_id,
-                source,
-                content_type,
-                title,
-                normalized_title,
-                normalized_authors,
-                status,
-                meta
+        prepared_rows.append(
+            build_sync_row(
+                content_id=cid,
+                source=source_name,
+                content_type="novel",
+                title=title,
+                normalized_title=normalized_title,
+                normalized_authors=normalized_authors,
+                status=status,
+                meta=meta,
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (content_id, source) DO NOTHING
-            """,
-            inserts,
         )
 
-    cursor.close()
-    return len(inserts)
+    return sync_prepared_content_rows(
+        conn,
+        source_name=source_name,
+        prepared_rows=prepared_rows,
+        existing_snapshot=existing_snapshot,
+        write_skipped_count=write_skipped_count,
+    )

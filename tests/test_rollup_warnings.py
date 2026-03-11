@@ -108,6 +108,18 @@ def test_kakao_fetch_failed_true_for_health_warning():
     assert failed is True
 
 
+def test_rollup_skips_kakao_warning_when_kakao_source_absent():
+    rollup, _target_warning, warning_reasons, kakao_rollup_log = run_all_crawlers.build_rollup_payload(
+        [{"source_name": "naver_webtoon", "fetched_count": 10}],
+        include_target_total_check=False,
+        include_kakao_fetch_check=True,
+    )
+
+    assert rollup["warning"] is None
+    assert warning_reasons == []
+    assert kakao_rollup_log is None
+
+
 def test_main_warn_uses_warning_prefix_and_exit_zero(monkeypatch, capsys):
     class FakeNaver:
         pass
@@ -140,6 +152,11 @@ def test_main_warn_uses_warning_prefix_and_exit_zero(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         run_all_crawlers, "run_scheduled_publication_cdc", lambda: {"status": "success"}
+    )
+    monkeypatch.setattr(
+        run_all_crawlers,
+        "run_completion_notification_dispatch",
+        lambda: {"status": "success"},
     )
     monkeypatch.setenv("ROLLUP_TARGET_TOTAL_UNIQUE", "200")
 
@@ -178,6 +195,11 @@ def test_main_error_uses_error_prefix_and_exit_one(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         run_all_crawlers, "run_scheduled_publication_cdc", lambda: {"status": "success"}
+    )
+    monkeypatch.setattr(
+        run_all_crawlers,
+        "run_completion_notification_dispatch",
+        lambda: {"status": "success"},
     )
     monkeypatch.delenv("ROLLUP_TARGET_TOTAL_UNIQUE", raising=False)
 

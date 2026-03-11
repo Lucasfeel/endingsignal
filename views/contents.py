@@ -97,6 +97,13 @@ def _meta_select_expr():
     return "meta"
 
 
+def _meta_select_expr_for(alias):
+    expr = _meta_select_expr()
+    if not alias:
+        return expr
+    return re.sub(r"(?<![\w.])meta(?![\w])", f"{alias}.meta", expr)
+
+
 def _is_api_cache_enabled():
     return _read_bool_env("ES_API_CACHE_ENABLED", default=False)
 
@@ -633,6 +640,47 @@ def _append_cursor_filter(where_parts, params, cursor_title, cursor_source, curs
     return True
 
 
+def _append_browse_cursor_filter(where_parts, params, cursor_title, cursor_source, cursor_content_id):
+    if cursor_title is None or cursor_content_id is None:
+        return False
+    title_group_expr = _browse_title_group_expr("title")
+    cursor_title_group_expr = _browse_title_group_expr("%s")
+    if cursor_source is not None:
+        where_parts.append(
+            f'({title_group_expr}, char_length(title), title COLLATE "ko-KR-x-icu", source COLLATE "ko-KR-x-icu", content_id) '
+            f'> ({cursor_title_group_expr}, char_length(%s), %s COLLATE "ko-KR-x-icu", %s COLLATE "ko-KR-x-icu", %s)'
+        )
+        params.extend([cursor_title, cursor_title, cursor_title, cursor_source, cursor_content_id])
+    else:
+        where_parts.append(
+            f'({title_group_expr}, char_length(title), title COLLATE "ko-KR-x-icu", content_id) '
+            f'> ({cursor_title_group_expr}, char_length(%s), %s COLLATE "ko-KR-x-icu", %s)'
+        )
+        params.extend([cursor_title, cursor_title, cursor_title, cursor_content_id])
+    return True
+
+
+def _browse_title_group_expr(value_expr):
+    return (
+        f"CASE "
+        f"WHEN left({value_expr}, 1) >= U&'\\AC00' AND left({value_expr}, 1) <= U&'\\D7A3' THEN 0 "
+        f"WHEN left({value_expr}, 1) >= 'A' AND left({value_expr}, 1) <= 'Z' THEN 1 "
+        f"WHEN left({value_expr}, 1) >= 'a' AND left({value_expr}, 1) <= 'z' THEN 1 "
+        f"WHEN left({value_expr}, 1) >= '0' AND left({value_expr}, 1) <= '9' THEN 2 "
+        f"ELSE 3 END"
+    )
+
+
+def _browse_order_by_clause():
+    return (
+        f"{_browse_title_group_expr('title')} ASC, "
+        'char_length(title) ASC, '
+        'title COLLATE "ko-KR-x-icu" ASC, '
+        'source COLLATE "ko-KR-x-icu" ASC, '
+        'content_id ASC'
+    )
+
+
 def _parse_status_filter(raw_value, *, default="ongoing"):
     normalized = str(raw_value or default).strip().lower()
     if normalized in {"completed", "hiatus"}:
@@ -775,6 +823,127 @@ def _apply_threshold_overrides(defaults, _q_len):
     return title_threshold, author_threshold
 
 
+def _build_search_query(*, normalized_query, content_type, source, search_limit):
+    base_filters = ["COALESCE(is_deleted, FALSE) = FALSE"]
+    base_params = []
+
+    if content_type:
+        base_filters.append("content_type = %s")
+        base_params.append(content_type)
+
+    if source != "all":
+        base_filters.append("source = %s")
+        base_params.append(source)
+
+    filter_sql = " AND ".join(base_filters)
+    substring_param = f"%{normalized_query}%"
+    candidate_limit = max(50, search_limit * 4)
+
+    def _candidate_branch(
+        predicate_sql,
+        predicate_params,
+        *,
+        title_exact=0,
+        title_prefix=0,
+        title_substring=0,
+        author_exact=0,
+        author_prefix=0,
+        author_substring=0,
+    ):
+        branch_sql = f"""
+            (
+                SELECT
+                    content_id,
+                    source,
+                    {title_exact} AS title_exact,
+                    {title_prefix} AS title_prefix,
+                    {title_substring} AS title_substring,
+                    {author_exact} AS author_exact,
+                    {author_prefix} AS author_prefix,
+                    {author_substring} AS author_substring
+                FROM contents
+                WHERE {filter_sql}
+                  AND {predicate_sql}
+                LIMIT {candidate_limit}
+            )
+        """
+        branch_params = list(base_params)
+        branch_params.extend(predicate_params)
+        return branch_sql, branch_params
+
+    candidate_branches = [
+        _candidate_branch("normalized_title = %s", [normalized_query], title_exact=1),
+        _candidate_branch(
+            "normalized_title >= %s AND normalized_title < (%s || U&'\\FFFF')",
+            [normalized_query, normalized_query],
+            title_prefix=1,
+        ),
+        _candidate_branch("normalized_authors = %s", [normalized_query], author_exact=1),
+        _candidate_branch(
+            "normalized_authors >= %s AND normalized_authors < (%s || U&'\\FFFF')",
+            [normalized_query, normalized_query],
+            author_prefix=1,
+        ),
+    ]
+
+    if len(normalized_query) >= 2:
+        candidate_branches.append(_candidate_branch("search_document %% %s", [normalized_query]))
+
+    candidate_sql = "\nUNION ALL\n".join(branch_sql for branch_sql, _ in candidate_branches)
+    params = []
+    for _, branch_params in candidate_branches:
+        params.extend(branch_params)
+
+    meta_expr = _meta_select_expr_for("c")
+    query = f"""
+        WITH candidate_hits AS (
+            {candidate_sql}
+        ),
+        candidate_rollup AS (
+            SELECT
+                content_id,
+                source,
+                MAX(title_exact) AS title_exact,
+                MAX(title_prefix) AS title_prefix,
+                MAX(author_exact) AS author_exact,
+                MAX(author_prefix) AS author_prefix,
+                MAX(author_substring) AS author_substring
+            FROM candidate_hits
+            GROUP BY content_id, source
+        )
+        SELECT
+            c.content_id,
+            c.title,
+            c.status,
+            {meta_expr} AS meta,
+            c.source,
+            c.content_type
+        FROM candidate_rollup rollup
+        JOIN contents c
+          ON c.content_id = rollup.content_id
+         AND c.source = rollup.source
+        ORDER BY
+            rollup.title_exact DESC,
+            rollup.title_prefix DESC,
+            CASE WHEN c.normalized_title LIKE %s THEN 1 ELSE 0 END DESC,
+            rollup.author_exact DESC,
+            rollup.author_prefix DESC,
+            CASE WHEN c.normalized_authors LIKE %s THEN 1 ELSE 0 END DESC,
+            GREATEST(
+                similarity(COALESCE(c.normalized_title, ''), %s),
+                similarity(COALESCE(c.normalized_authors, ''), %s),
+                similarity(COALESCE(c.search_document, ''), %s)
+            ) DESC,
+            char_length(c.title) ASC,
+            c.title COLLATE "ko-KR-x-icu" ASC,
+            c.source COLLATE "ko-KR-x-icu" ASC,
+            c.content_id ASC
+        LIMIT {search_limit}
+    """
+    params.extend([substring_param, substring_param, normalized_query, normalized_query, normalized_query])
+    return query, tuple(params)
+
+
 @contents_bp.route('/api/contents/search', methods=['GET'])
 def search_contents():
     """전체 DB에서 콘텐츠 제목을 검색하여 결과를 반환합니다."""
@@ -795,82 +964,18 @@ def search_contents():
         if not normalized_query:
             return _json_response([])
 
-        q_len = len(normalized_query)
-        # 너무 짧은 검색어(1자 이하)는 노이즈가 많으므로 즉시 반환
-        if q_len <= 1:
-            return _json_response([])
-
         conn = get_db()
         cursor = get_cursor(conn)
-
-        title_expr = "normalized_title"
-        author_expr = "normalized_authors"
-        like_param = f"%{normalized_query}%"
-
-        def compute_thresholds(length):
-            if length <= 2:
-                return None
-            if length == 3:
-                return (0.2, 0.25)
-            if length == 4:
-                return (0.15, 0.2)
-            return (0.12, 0.18)
-
-        thresholds = _apply_threshold_overrides(compute_thresholds(q_len), q_len)
-
-        where_clauses = [
-            "COALESCE(is_deleted, FALSE) = FALSE",
-        ]
-        params = []
-
-        if content_type:
-            where_clauses.insert(0, "content_type = %s")
-            params.insert(0, content_type)
-
-        if source != 'all':
-            where_clauses.append("source = %s")
-            params.append(source)
-
-        if thresholds:
-            title_threshold, author_threshold = thresholds
-            where_clauses.append(
-                f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s) OR "
-                f"(similarity({title_expr}, %s) >= %s OR similarity({author_expr}, %s) >= %s))"
-            )
-            params.extend(
-                [
-                    like_param,
-                    like_param,
-                    normalized_query,
-                    title_threshold,
-                    normalized_query,
-                    author_threshold,
-                ]
-            )
-        else:
-            where_clauses.append(f"(({title_expr} ILIKE %s) OR ({author_expr} ILIKE %s))")
-            params.extend([like_param, like_param])
-
         search_limit = _get_search_limit()
-        meta_expr = _meta_select_expr()
-        search_query = f"""
-            SELECT content_id, title, status, {meta_expr} AS meta, source, content_type
-            FROM contents
-            WHERE {' AND '.join(where_clauses)}
-            ORDER BY
-              CASE
-                WHEN {title_expr} ILIKE %s THEN 0
-                WHEN {author_expr} ILIKE %s THEN 1
-                ELSE 2
-              END,
-              GREATEST(similarity({title_expr}, %s), similarity({author_expr}, %s)) DESC,
-              content_id ASC
-            LIMIT {search_limit}
-        """
-
-        params.extend([like_param, like_param, normalized_query, normalized_query])
-
-        cursor.execute(search_query, tuple(params))
+        search_query, params = _build_search_query(
+            normalized_query=normalized_query,
+            content_type=content_type,
+            source=source,
+            search_limit=search_limit,
+        )
+        # Bias the planner toward the new index-backed candidate path for trigram search.
+        cursor.execute("SET LOCAL enable_seqscan = off")
+        cursor.execute(search_query, params)
         raw_rows = cursor.fetchall()
 
         results = []
@@ -1368,13 +1473,13 @@ def get_browse_contents_v3():
                     query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
                 _append_source_filter(where_parts, query_params, source_filter)
-                _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
+                _append_browse_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
 
                 return f"""
                     SELECT content_id, title, status, meta, source, content_type
                     FROM contents
                     WHERE {' AND '.join(where_parts)}
-                    ORDER BY title ASC, source ASC, content_id ASC
+                    ORDER BY {_browse_order_by_clause()}
                     LIMIT %s
                 """, (*query_params, limit_value)
 
@@ -1470,7 +1575,7 @@ def get_browse_contents_v3():
                 query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
             _append_source_filter(where_parts, query_params, source_filter)
-            _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
+            _append_browse_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
 
             if content_type == "webtoon" and requested_status == "ongoing":
                 days = _parse_browse_days_args()
@@ -1491,7 +1596,7 @@ def get_browse_contents_v3():
                 SELECT content_id, title, status, meta, source, content_type
                 FROM contents
                 WHERE {' AND '.join(where_parts)}
-                ORDER BY title ASC, source ASC, content_id ASC
+                ORDER BY {_browse_order_by_clause()}
                 LIMIT %s
                 """,
                 (*query_params, per_page),
