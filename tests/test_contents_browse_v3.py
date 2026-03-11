@@ -90,6 +90,7 @@ def test_browse_v3_webtoon_applies_compact_filters(monkeypatch, client):
     assert 'title COLLATE "ko-KR-x-icu"' in query
     assert "char_length(title)" in query
     assert "(meta->'attributes'->'weekdays') ? %s" in query
+    assert query.count("%s") == len(params)
     assert params[-1] == 5
     assert payload["filters"]["type"] == "webtoon"
     assert payload["filters"]["status"] == "ongoing"

@@ -645,18 +645,21 @@ def _append_browse_cursor_filter(where_parts, params, cursor_title, cursor_sourc
         return False
     title_group_expr = _browse_title_group_expr("title")
     cursor_title_group_expr = _browse_title_group_expr("%s")
+    title_group_params = [cursor_title] * cursor_title_group_expr.count("%s")
     if cursor_source is not None:
         where_parts.append(
             f'({title_group_expr}, char_length(title), title COLLATE "ko-KR-x-icu", source COLLATE "ko-KR-x-icu", content_id) '
             f'> ({cursor_title_group_expr}, char_length(%s), %s COLLATE "ko-KR-x-icu", %s COLLATE "ko-KR-x-icu", %s)'
         )
-        params.extend([cursor_title, cursor_title, cursor_title, cursor_source, cursor_content_id])
+        params.extend(title_group_params)
+        params.extend([cursor_title, cursor_title, cursor_source, cursor_content_id])
     else:
         where_parts.append(
             f'({title_group_expr}, char_length(title), title COLLATE "ko-KR-x-icu", content_id) '
             f'> ({cursor_title_group_expr}, char_length(%s), %s COLLATE "ko-KR-x-icu", %s)'
         )
-        params.extend([cursor_title, cursor_title, cursor_title, cursor_content_id])
+        params.extend(title_group_params)
+        params.extend([cursor_title, cursor_title, cursor_content_id])
     return True
 
 
