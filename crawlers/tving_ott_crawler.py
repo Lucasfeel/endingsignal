@@ -19,6 +19,7 @@ _NEXT_DATA_RE = re.compile(
     re.S,
 )
 _CONTENT_PATH_RE = re.compile(r"/contents/(?P<code>[A-Z0-9]+)")
+_TVING_ERROR_PATH_RE = re.compile(r"/500/?$")
 
 
 class TvingOttCrawler(CanonicalOttCrawler):
@@ -99,6 +100,46 @@ class TvingOttCrawler(CanonicalOttCrawler):
             entries[entry["canonical_content_id"]] = entry
         return entries or self._parse_dom_page(html)
 
+    def _fetch_with_requests(self):
+        request_attempts = [
+            ("crawler_headers", config.CRAWLER_HEADERS),
+            ("default_headers", None),
+        ]
+        errors = []
+
+        for attempt_name, headers in request_attempts:
+            response = None
+            try:
+                response = requests.get(
+                    TVING_PAGE_URL,
+                    headers=headers,
+                    timeout=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
+                )
+                final_url = str(response.url or "").strip()
+                response.raise_for_status()
+                if final_url and _TVING_ERROR_PATH_RE.search(final_url):
+                    raise requests.HTTPError(
+                        f"TVING redirected to error page: {final_url}",
+                        response=response,
+                    )
+
+                html = response.text
+                parsed = self._parse_page(html)
+                if parsed:
+                    return html, parsed, f"requests:{attempt_name}", errors
+
+                errors.append(
+                    f"REQUEST_EMPTY:{attempt_name}:status={response.status_code}:final_url={final_url or TVING_PAGE_URL}"
+                )
+            except Exception as exc:
+                final_url = ""
+                if response is not None:
+                    final_url = str(response.url or "").strip()
+                suffix = f":final_url={final_url}" if final_url else ""
+                errors.append(f"REQUEST_FETCH_FAILED:{attempt_name}:{type(exc).__name__}:{exc}{suffix}")
+
+        return "", {}, "requests", errors
+
     async def _fetch_with_playwright(self) -> str:
         from playwright.async_api import async_playwright
 
@@ -129,25 +170,7 @@ class TvingOttCrawler(CanonicalOttCrawler):
                 await browser.close()
 
     async def fetch_all_data(self):
-        errors = []
-        fetch_method = "requests"
-
-        def _get() -> str:
-            response = requests.get(
-                TVING_PAGE_URL,
-                headers=config.CRAWLER_HEADERS,
-                timeout=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            return response.text
-
-        html = ""
-        try:
-            html = await asyncio.to_thread(_get)
-        except Exception as exc:
-            errors.append(f"REQUEST_FETCH_FAILED:{type(exc).__name__}:{exc}")
-
-        ongoing_today = self._parse_page(html)
+        html, ongoing_today, fetch_method, errors = await asyncio.to_thread(self._fetch_with_requests)
         if not ongoing_today:
             try:
                 html = await self._fetch_with_playwright()

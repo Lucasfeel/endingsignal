@@ -1,5 +1,6 @@
 import asyncio
 import json
+import requests
 
 from crawlers.coupang_play_ott_crawler import CoupangPlayOttCrawler
 from crawlers.disney_plus_ott_crawler import DisneyPlusOttCrawler
@@ -299,6 +300,61 @@ def test_tving_fetch_uses_playwright_fallback_when_request_fails(monkeypatch):
     assert len(all_content) == 1
     assert meta["fetch_method"] == "playwright"
     assert any("REQUEST_FETCH_FAILED" in item for item in meta["errors"])
+
+
+def test_tving_fetch_retries_without_headers_when_crawler_headers_fail(monkeypatch):
+    crawler = TvingOttCrawler()
+    payload = {
+        "props": {
+            "pageProps": {
+                "dehydratedState": {
+                    "queries": [
+                        {
+                            "state": {
+                                "data": {
+                                    "pages": [
+                                        {
+                                            "data": {
+                                                "band": {
+                                                    "items": [
+                                                        {"code": "P001", "title": "Series A", "imageUrl": "https://img/a.jpg"},
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload)}</script>'
+
+    class DummyResponse:
+        def __init__(self, *, status_code, url, text):
+            self.status_code = status_code
+            self.url = url
+            self.text = text
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError(f"{self.status_code} error", response=self)
+
+    def _fake_get(_url, headers=None, timeout=None):
+        if headers:
+            return DummyResponse(status_code=500, url="https://www.tving.com/500", text="")
+        return DummyResponse(status_code=200, url="https://www.tving.com/more/band/HM257176", text=html)
+
+    monkeypatch.setattr("crawlers.tving_ott_crawler.requests.get", _fake_get)
+
+    _, _, _, all_content, meta = asyncio.run(crawler.fetch_all_data())
+
+    assert len(all_content) == 1
+    assert meta["fetch_method"] == "requests:default_headers"
+    assert any("REQUEST_FETCH_FAILED:crawler_headers" in item for item in meta["errors"])
 
 
 def test_wavve_extract_raw_items_from_html_uses_dom_titles():
