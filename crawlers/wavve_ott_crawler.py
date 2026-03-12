@@ -23,6 +23,11 @@ WAVVE_REQUEST_HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
     "User-Agent": "Mozilla/5.0",
 }
+WAVVE_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/145.0.0.0 Safari/537.36"
+)
 WAVVE_CATALOG_QUERY = {
     "broadcastid": "EN100000",
     "catalogType": "manualband",
@@ -154,6 +159,26 @@ class WavveOttCrawler(CanonicalOttCrawler):
             availability_status="scheduled" if release_start_at and release_start_at > now_kst_naive() else "available",
             raw_schedule_note=schedule_note or raw_title or None,
         )
+
+    def _entries_from_visible_rows(self, rows: Sequence[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        entries: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            raw_title = clean_text(row.get("title") or row.get("imgAlt") or row.get("text"))
+            schedule_note = clean_text(row.get("schedule_note"))
+            entry = self._entry_from_raw_item(
+                {
+                    "title": raw_title,
+                    "schedule_note": schedule_note,
+                    "href": row.get("href"),
+                    "thumbnail_url": row.get("thumbnail_url"),
+                }
+            )
+            if entry is None:
+                continue
+            entries[entry["canonical_content_id"]] = entry
+        return entries
 
     def _entry_from_catalog_row(self, row: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         manualband = dict(row.get("manualband") or {})
@@ -292,26 +317,19 @@ class WavveOttCrawler(CanonicalOttCrawler):
                 headless=True,
                 args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"],
             )
-            context = await browser.new_context(locale="ko-KR", ignore_https_errors=True)
+            context = await browser.new_context(
+                locale="ko-KR",
+                ignore_https_errors=True,
+                viewport={"width": 1440, "height": 2000},
+                user_agent=WAVVE_BROWSER_USER_AGENT,
+                timezone_id="Asia/Seoul",
+                extra_http_headers={
+                    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+                    "Referer": "https://www.wavve.com/",
+                },
+            )
             page = await context.new_page()
-
-            request_payloads, request_meta = await self._collect_payloads_from_request_context(context)
-            payloads.extend(request_payloads)
-            response_urls.extend(request_meta.get("response_urls") or [])
-            errors.extend(request_meta.get("errors") or [])
-            if payloads:
-                body_text = ""
-                try:
-                    await page.goto(WAVVE_VIEW_MORE_URL, wait_until="domcontentloaded", timeout=60_000)
-                    body_text = clean_text(await page.text_content("body") or "")
-                except Exception:
-                    body_text = ""
-                return payloads, {
-                    "errors": errors,
-                    "response_urls": response_urls,
-                    "final_url": page.url if page.url else WAVVE_VIEW_MORE_URL,
-                    "body_excerpt": body_text[:240],
-                }, []
+            visible_rows: List[Dict[str, str]] = []
 
             async def _handle_response(response) -> None:
                 url = clean_text(getattr(response, "url", ""))
@@ -330,10 +348,40 @@ class WavveOttCrawler(CanonicalOttCrawler):
 
             try:
                 await page.goto(WAVVE_VIEW_MORE_URL, wait_until="domcontentloaded", timeout=60_000)
-                await page.wait_for_timeout(6_000)
+                for wait_ms in (1_500, 3_500, 6_000):
+                    await page.wait_for_timeout(wait_ms)
+                    try:
+                        visible_rows = await page.locator("main a").evaluate_all(
+                            """(anchors) => anchors.map((anchor) => {
+                                const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                                const title1 = clean(anchor.querySelector('.title1')?.textContent || '');
+                                const title2 = clean(anchor.querySelector('.title2')?.textContent || '');
+                                const img = anchor.querySelector('img');
+                                return {
+                                    href: anchor.getAttribute('href') || '',
+                                    text: clean(anchor.textContent || ''),
+                                    title: title1,
+                                    schedule_note: title2,
+                                    imgAlt: clean(img?.getAttribute('alt') || ''),
+                                    thumbnail_url: clean(img?.getAttribute('src') || ''),
+                                };
+                            }).filter((row) => row.title || row.imgAlt || row.text)"""
+                        )
+                    except Exception as exc:  # pragma: no cover - runtime only
+                        errors.append(f"VISIBLE_DOM_CAPTURE_FAILED:{type(exc).__name__}:{exc}")
+                        visible_rows = []
+                    if payloads or visible_rows:
+                        break
+
+                if not payloads and not visible_rows:
+                    request_payloads, request_meta = await self._collect_payloads_from_request_context(context)
+                    payloads.extend(request_payloads)
+                    response_urls.extend(request_meta.get("response_urls") or [])
+                    errors.extend(request_meta.get("errors") or [])
+
                 html = await page.content()
                 body_text = clean_text(await page.text_content("body") or "")
-                raw_items = self._extract_raw_items_from_html(html)
+                raw_items = visible_rows or self._extract_raw_items_from_html(html)
                 meta = {
                     "errors": errors,
                     "response_urls": response_urls,

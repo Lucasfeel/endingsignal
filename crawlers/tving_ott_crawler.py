@@ -29,6 +29,11 @@ _TVING_BROWSER_USER_AGENT = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 _TVING_ACCEPT_LANGUAGE = "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
+_TVING_BROWSER_HEADERS = {
+    "Accept-Language": _TVING_ACCEPT_LANGUAGE,
+    "Referer": TVING_HOME_URL,
+    "User-Agent": _TVING_BROWSER_USER_AGENT,
+}
 
 
 class TvingOttCrawler(CanonicalOttCrawler):
@@ -72,6 +77,15 @@ class TvingOttCrawler(CanonicalOttCrawler):
             if entry is not None:
                 entries[entry["canonical_content_id"]] = entry
         return entries
+
+    @staticmethod
+    def _merge_headers(headers: Dict[str, str] | None) -> Dict[str, str] | None:
+        if headers is None:
+            return dict(_TVING_BROWSER_HEADERS)
+        merged = dict(headers)
+        for key, value in _TVING_BROWSER_HEADERS.items():
+            merged.setdefault(key, value)
+        return merged
 
     def _parse_dom_page(self, html: str) -> Dict[str, Dict[str, Any]]:
         soup = BeautifulSoup(html or "", "html.parser")
@@ -240,6 +254,72 @@ class TvingOttCrawler(CanonicalOttCrawler):
         except Exception as exc:
             errors.append(f"PLAYWRIGHT_WARMUP_FAILED:{type(exc).__name__}:{exc}")
 
+    async def _fetch_data_route_with_playwright_request_context(self, context, errors: list[str]) -> tuple[str, Dict[str, Dict[str, Any]], str]:
+        request_attempts = [
+            ("crawler_headers", self._merge_headers(config.CRAWLER_HEADERS)),
+            ("browser_headers", dict(_TVING_BROWSER_HEADERS)),
+            ("default_headers", None),
+        ]
+
+        for attempt_name, headers in request_attempts:
+            home_response = None
+            data_response = None
+            try:
+                home_response = await context.request.get(
+                    TVING_HOME_URL,
+                    headers=headers,
+                    timeout=60_000,
+                )
+                if not home_response.ok:
+                    raise requests.HTTPError(f"{home_response.status} error")
+                home_html = await home_response.text()
+                build_id = self._extract_build_id(home_html)
+                if not build_id:
+                    raise ValueError("TVING buildId not found on home page")
+
+                data_route_url = f"https://www.tving.com/_next/data/{build_id}/more/band/HM257176.json?key=HM257176"
+                data_response = await context.request.get(
+                    data_route_url,
+                    headers=headers,
+                    timeout=60_000,
+                )
+                if not data_response.ok:
+                    raise requests.HTTPError(f"{data_response.status} error")
+                data_text = await data_response.text()
+                parsed = self._parse_data_route_json(data_text)
+                if parsed:
+                    return data_text, parsed, f"playwright:data_route:{attempt_name}"
+                errors.append(f"PLAYWRIGHT_DATA_ROUTE_EMPTY:{attempt_name}:build_id={build_id}")
+            except Exception as exc:
+                final_url = ""
+                if data_response is not None:
+                    final_url = str(getattr(data_response, "url", "") or "").strip()
+                elif home_response is not None:
+                    final_url = str(getattr(home_response, "url", "") or "").strip()
+                suffix = f":final_url={final_url}" if final_url else ""
+                errors.append(
+                    f"PLAYWRIGHT_DATA_ROUTE_FETCH_FAILED:{attempt_name}:{type(exc).__name__}:{exc}{suffix}"
+                )
+
+        return "", {}, ""
+
+    async def _collect_visible_dom_items(self, page, errors: list[str]) -> list[dict[str, Any]]:
+        try:
+            return await page.locator('main a[href*="/contents/"]').evaluate_all(
+                """(anchors) => anchors.map((anchor) => {
+                    const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                    const img = anchor.querySelector('img');
+                    return {
+                        href: anchor.getAttribute('href') || '',
+                        titleText: clean(anchor.textContent || ''),
+                        imgAlt: clean(img?.getAttribute('alt') || '').replace(/\\s*포스터(?:\\s+포스터)?$/, ''),
+                    };
+                }).filter((row) => row.titleText || row.imgAlt)"""
+            )
+        except Exception as exc:
+            errors.append(f"PLAYWRIGHT_VISIBLE_DOM_CAPTURE_FAILED:{type(exc).__name__}:{exc}")
+            return []
+
     async def _parse_playwright_target_page(self, page, errors: list[str]) -> tuple[str, Dict[str, Dict[str, Any]]]:
         try:
             await page.wait_for_load_state("networkidle", timeout=10_000)
@@ -253,18 +333,7 @@ class TvingOttCrawler(CanonicalOttCrawler):
 
         for delay_ms in (1_500, 3_500, 7_000):
             await page.wait_for_timeout(delay_ms)
-            dom_items = await page.evaluate(
-                """() => Array.from(document.querySelectorAll('a[href*="/contents/"]')).map((anchor) => {
-                    const href = anchor.getAttribute('href') || '';
-                    const text = (anchor.textContent || '').replace(/\\s+/g, ' ').trim();
-                    const img = anchor.querySelector('img[alt]');
-                    return {
-                        href,
-                        titleText: text,
-                        imgAlt: img ? (img.getAttribute('alt') || '') : '',
-                    };
-                })"""
-            )
+            dom_items = await self._collect_visible_dom_items(page, errors)
             parsed = self._entries_from_dom_link_items(dom_items)
             if parsed:
                 return await page.content(), parsed
@@ -302,6 +371,11 @@ class TvingOttCrawler(CanonicalOttCrawler):
             )
             page = await context.new_page()
             try:
+                html, parsed, fetch_method = await self._fetch_data_route_with_playwright_request_context(context, errors)
+                if parsed:
+                    errors.append(f"PLAYWRIGHT_FETCH_METHOD:{fetch_method}")
+                    return html, parsed, errors
+
                 await self._warmup_browser_session(page, errors)
 
                 for attempt_name in ("primary", "retry_after_warmup"):
@@ -331,6 +405,11 @@ class TvingOttCrawler(CanonicalOttCrawler):
             try:
                 html, ongoing_today, play_errors = await self._fetch_with_playwright()
                 fetch_method = "playwright"
+                for error in list(play_errors):
+                    if error.startswith("PLAYWRIGHT_FETCH_METHOD:"):
+                        fetch_method = error.split(":", 1)[1]
+                        play_errors.remove(error)
+                        break
                 errors.extend(play_errors)
             except Exception as exc:
                 errors.append(f"PLAYWRIGHT_FETCH_FAILED:{type(exc).__name__}:{exc}")
