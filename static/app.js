@@ -3001,6 +3001,7 @@ function syncSubscribeModalUI(content) {
   const modalState = STATE.subscribeModalState || { isLoading: false, loadFailed: false };
   const completionSubscribed =
     !modalState.isLoading && !modalState.loadFailed ? isCompletionSubscribed(content) : null;
+  const isCompletedContent = isContentCompletedForBadge(content);
   const showLoadingState = modalState.isLoading;
   const showSubscribedState = completionSubscribed === true;
   const shouldShowStateLine = showLoadingState || !modalState.loadFailed;
@@ -3024,33 +3025,74 @@ function syncSubscribeModalUI(content) {
     else if (showLoadingState) UI.subscribeStateDot.classList.add('is-loading');
   }
 
+  const primaryAction = (() => {
+    if (modalState.isLoading) {
+      return {
+        action: 'loading',
+        label: '불러오는 중',
+        isSubscribed: completionSubscribed,
+        visualSubscribed: completionSubscribed,
+      };
+    }
+
+    if (modalState.loadFailed) {
+      if (isCompletedContent) {
+        return {
+          action: 'visit',
+          label: '보러가기',
+          isSubscribed: completionSubscribed,
+          visualSubscribed: true,
+        };
+      }
+
+      return {
+        action: 'retry',
+        label: '다시 시도',
+        isSubscribed: completionSubscribed,
+        visualSubscribed: completionSubscribed,
+      };
+    }
+
+    if (isCompletedContent && completionSubscribed !== true) {
+      return {
+        action: 'visit',
+        label: '보러가기',
+        isSubscribed: completionSubscribed,
+        visualSubscribed: true,
+      };
+    }
+
+    return {
+      action: 'toggle',
+      label: completionSubscribed ? '완결 해제' : '완결 구독',
+      isSubscribed: completionSubscribed,
+      visualSubscribed: completionSubscribed,
+    };
+  })();
+
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
-  const shouldDisable = modalState.isLoading || STATE.subscribeToggleInFlight;
-  const setButtonState = (btn, { label, isSubscribed }) => {
+  const shouldDisable =
+    primaryAction.action === 'loading' || (STATE.subscribeToggleInFlight && primaryAction.action !== 'visit');
+  const setButtonState = (btn, { label, isSubscribed, visualSubscribed = isSubscribed }) => {
     if (!btn) return;
     if (shouldDisable) btn.classList.add(...disabledClasses);
     else btn.classList.remove(...disabledClasses);
     btn.disabled = shouldDisable;
-    if (modalState.isLoading) {
+    if (primaryAction.action === 'loading') {
       btn.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span><span>${label}</span>`;
     } else {
       btn.textContent = label;
     }
-    btn.dataset.subscribed = isSubscribed === null ? '' : isSubscribed ? '1' : '0';
-    btn.classList.toggle('is-active', isSubscribed === true);
+    btn.dataset.action = primaryAction.action;
+    btn.dataset.subscribed = visualSubscribed === null ? '' : visualSubscribed ? '1' : '0';
+    btn.classList.toggle('is-active', visualSubscribed === true);
   };
 
   if (UI.subscribeCompletionButton) {
-    const completionLabel = modalState.isLoading
-      ? '불러오는 중'
-      : modalState.loadFailed
-        ? '다시 시도'
-        : completionSubscribed
-          ? '완결 해제'
-          : '완결 구독';
     setButtonState(UI.subscribeCompletionButton, {
-      label: completionLabel,
-      isSubscribed: completionSubscribed,
+      label: primaryAction.label,
+      isSubscribed: primaryAction.isSubscribed,
+      visualSubscribed: primaryAction.visualSubscribed,
     });
   }
 }
@@ -6517,6 +6559,20 @@ function getContentUrl(content) {
   return '';
 }
 
+function openContentUrl(content) {
+  const url = getContentUrl(content);
+  if (!url) {
+    showToast('작품 링크를 찾지 못했습니다.', { type: 'error' });
+    return false;
+  }
+
+  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!openedWindow) {
+    window.location.href = url;
+  }
+  return true;
+}
+
 function openSubscribeModal(content, opts = {}) {
   const viewKey = getCurrentScrollViewKey();
   saveScroll(viewKey);
@@ -6655,6 +6711,15 @@ window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
   const modalState = STATE.subscribeModalState || {};
+  const isCompletedContent = isContentCompletedForBadge(content);
+  const completionSubscribed =
+    !modalState.isLoading && !modalState.loadFailed ? isCompletionSubscribed(content) : null;
+
+  if (isCompletedContent && (modalState.loadFailed || completionSubscribed !== true) && !modalState.isLoading) {
+    openContentUrl(content);
+    return;
+  }
+
   if (modalState.isLoading) return;
   if (STATE.subscribeToggleInFlight) return;
 
