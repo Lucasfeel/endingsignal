@@ -50,6 +50,43 @@ def test_tving_parser_filters_movie_codes():
     assert item["platform_source"] == "tving"
 
 
+def test_tving_data_route_parser_filters_movie_codes():
+    crawler = TvingOttCrawler()
+    payload = {
+        "pageProps": {
+            "dehydratedState": {
+                "queries": [
+                    {
+                        "state": {
+                            "data": {
+                                "pages": [
+                                    {
+                                        "data": {
+                                            "band": {
+                                                "items": [
+                                                    {"code": "P001", "title": "Series A", "imageUrl": "https://img/a.jpg"},
+                                                    {"code": "M001", "title": "Movie B", "imageUrl": "https://img/b.jpg"},
+                                                ]
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    parsed = crawler._parse_data_route_json(json.dumps(payload))
+
+    assert len(parsed) == 1
+    item = next(iter(parsed.values()))
+    assert item["title"] == "Series A"
+    assert item["platform_source"] == "tving"
+
+
 def test_coupang_parser_only_uses_weekly_tv_row():
     crawler = CoupangPlayOttCrawler()
     payload = {

@@ -19,6 +19,8 @@ _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
     re.S,
 )
+_NEXT_BUILD_ID_RE = re.compile(r'"buildId":"([^"]+)"')
+_NEXT_BUILD_MANIFEST_RE = re.compile(r'/_next/static/([^/]+)/_buildManifest\.js')
 _CONTENT_PATH_RE = re.compile(r"/contents/(?P<code>[A-Z0-9]+)")
 _TVING_ERROR_PATH_RE = re.compile(r"/500/?$")
 _TVING_BROWSER_USER_AGENT = (
@@ -89,15 +91,17 @@ class TvingOttCrawler(CanonicalOttCrawler):
                 entries[entry["canonical_content_id"]] = entry
         return entries
 
-    def _parse_page(self, html: str) -> Dict[str, Dict[str, Any]]:
-        match = _NEXT_DATA_RE.search(str(html or ""))
-        if not match:
-            return self._parse_dom_page(html)
+    def _parse_payload(self, payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        page_props = {}
+        if isinstance(payload, dict):
+            props = payload.get("props")
+            if isinstance(props, dict) and isinstance(props.get("pageProps"), dict):
+                page_props = props.get("pageProps") or {}
+            elif isinstance(payload.get("pageProps"), dict):
+                page_props = payload.get("pageProps") or {}
 
-        payload = json.loads(match.group(1))
         queries = (
-            payload.get("props", {})
-            .get("pageProps", {})
+            page_props
             .get("dehydratedState", {})
             .get("queries", [])
         )
@@ -122,7 +126,29 @@ class TvingOttCrawler(CanonicalOttCrawler):
             )
             if entry is not None:
                 entries[entry["canonical_content_id"]] = entry
+        return entries
+
+    def _parse_data_route_json(self, text: str) -> Dict[str, Dict[str, Any]]:
+        payload = json.loads(str(text or ""))
+        return self._parse_payload(payload)
+
+    def _parse_page(self, html: str) -> Dict[str, Dict[str, Any]]:
+        match = _NEXT_DATA_RE.search(str(html or ""))
+        if not match:
+            return self._parse_dom_page(html)
+
+        payload = json.loads(match.group(1))
+        entries = self._parse_payload(payload)
         return entries or self._parse_dom_page(html)
+
+    @staticmethod
+    def _extract_build_id(html: str) -> str:
+        text = str(html or "")
+        for pattern in (_NEXT_BUILD_ID_RE, _NEXT_BUILD_MANIFEST_RE):
+            match = pattern.search(text)
+            if match:
+                return str(match.group(1) or "").strip()
+        return ""
 
     def _fetch_with_requests(self):
         request_attempts = [
@@ -130,6 +156,41 @@ class TvingOttCrawler(CanonicalOttCrawler):
             ("default_headers", None),
         ]
         errors = []
+
+        for attempt_name, headers in request_attempts:
+            home_response = None
+            data_response = None
+            try:
+                home_response = requests.get(
+                    TVING_HOME_URL,
+                    headers=headers,
+                    timeout=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
+                )
+                home_response.raise_for_status()
+                build_id = self._extract_build_id(home_response.text)
+                if not build_id:
+                    raise ValueError("TVING buildId not found on home page")
+
+                data_route_url = f"https://www.tving.com/_next/data/{build_id}/more/band/HM257176.json?key=HM257176"
+                data_response = requests.get(
+                    data_route_url,
+                    headers=headers,
+                    timeout=config.CRAWLER_HTTP_TOTAL_TIMEOUT_SECONDS,
+                )
+                data_response.raise_for_status()
+                parsed = self._parse_data_route_json(data_response.text)
+                if parsed:
+                    return data_response.text, parsed, f"requests:data_route:{attempt_name}", errors
+
+                errors.append(f"DATA_ROUTE_EMPTY:{attempt_name}:build_id={build_id}")
+            except Exception as exc:
+                final_url = ""
+                if data_response is not None:
+                    final_url = str(data_response.url or "").strip()
+                elif home_response is not None:
+                    final_url = str(home_response.url or "").strip()
+                suffix = f":final_url={final_url}" if final_url else ""
+                errors.append(f"DATA_ROUTE_FETCH_FAILED:{attempt_name}:{type(exc).__name__}:{exc}{suffix}")
 
         for attempt_name, headers in request_attempts:
             response = None
