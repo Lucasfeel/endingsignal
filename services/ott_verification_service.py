@@ -349,6 +349,43 @@ def _fetch_document(session: requests.Session, url: str) -> Optional[Dict[str, A
     }
 
 
+def _build_official_source_item_document(candidate: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    source_item = dict(candidate.get("source_item") or {})
+    url = clean_text(
+        candidate.get("content_url")
+        or source_item.get("platform_url")
+        or source_item.get("content_url")
+    )
+    title = clean_text(source_item.get("title")) or clean_text(candidate.get("title"))
+    if not url or not title or not _allowed_public_host(url):
+        return None
+
+    payload_titles = _normalize_title_tokens(
+        title,
+        source_item.get("title_alias"),
+        source_item.get("alt_title"),
+    )
+    body_parts = payload_titles + _normalize_title_tokens(source_item.get("cast"))
+    for key in ("description", "raw_schedule_note", "episode_hint"):
+        value = clean_text(source_item.get(key))
+        if value:
+            body_parts.append(value)
+
+    return {
+        "url": url,
+        "ok": True,
+        "title": title,
+        "payload_titles": payload_titles,
+        "body_text": clean_text(" ".join(body_parts)),
+        "description": clean_text(source_item.get("description")),
+        "cast": _normalize_title_tokens(source_item.get("cast")),
+        "release_start_at": _coerce_datetime(source_item.get("release_start_at")),
+        "release_end_at": _coerce_datetime(source_item.get("release_end_at")),
+        "release_end_status": clean_text(source_item.get("release_end_status")).lower() or "unknown",
+        "source": "official_crawl_metadata",
+    }
+
+
 def _merge_verification_metadata(
     *,
     candidate: Mapping[str, Any],
@@ -412,6 +449,15 @@ def _merge_verification_metadata(
                     release_end_at = release_start_at
                 break
 
+    deduped_evidence_urls = []
+    seen_urls = set()
+    for url in evidence_urls:
+        cleaned = clean_text(url)
+        if not cleaned or cleaned in seen_urls:
+            continue
+        seen_urls.add(cleaned)
+        deduped_evidence_urls.append(cleaned)
+
     return {
         "matched_docs": matched_docs,
         "matched_count": len(matched_docs),
@@ -422,7 +468,7 @@ def _merge_verification_metadata(
         "cast": cast_values,
         "description": description,
         "title_alias": title_alias,
-        "evidence_urls": [url for url in evidence_urls if url],
+        "evidence_urls": deduped_evidence_urls,
     }
 
 
@@ -627,6 +673,9 @@ def verify_ott_write_plan(write_plan: Mapping[str, Any], *, source_name: str) ->
         for candidate in targets:
             candidate_id = clean_text(candidate.get("content_id"))
             documents = []
+            source_item_doc = _build_official_source_item_document(candidate)
+            if isinstance(source_item_doc, dict):
+                documents.append(source_item_doc)
             official_url = clean_text(candidate.get("content_url"))
             if official_url:
                 official_doc = _fetch_document(session, official_url)
@@ -651,6 +700,16 @@ def verify_ott_write_plan(write_plan: Mapping[str, Any], *, source_name: str) ->
             metadata = _merge_verification_metadata(candidate=candidate, documents=documents)
             matched_docs = metadata.get("matched_docs") or []
             ok = bool(matched_docs)
+            has_external_match = any(
+                clean_text(doc.get("source")) != "official_crawl_metadata"
+                for doc in matched_docs
+                if isinstance(doc, Mapping)
+            )
+            watchlist_resolved = bool(
+                has_external_match
+                or metadata.get("release_end_at") is not None
+                or metadata.get("release_end_status") in {"scheduled", "confirmed"}
+            )
 
             entry = all_content_today.get(candidate_id)
             if ok and isinstance(entry, dict):
@@ -669,7 +728,11 @@ def verify_ott_write_plan(write_plan: Mapping[str, Any], *, source_name: str) ->
                     "content_id": candidate_id,
                     "title": clean_text(candidate.get("title")) or candidate_id,
                     "ok": ok or is_watchlist_recheck,
-                    "reason": "evidence_matched" if ok else ("watchlist_unresolved" if is_watchlist_recheck else "no_web_evidence"),
+                    "reason": (
+                        "evidence_matched"
+                        if ok and (not is_watchlist_recheck or watchlist_resolved)
+                        else ("watchlist_unresolved" if is_watchlist_recheck else "no_web_evidence")
+                    ),
                     "verification_method": "official_public_web",
                     "watchlist_recheck": is_watchlist_recheck,
                     "matched_count": metadata.get("matched_count", 0),

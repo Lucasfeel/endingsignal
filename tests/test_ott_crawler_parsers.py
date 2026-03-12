@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from crawlers.coupang_play_ott_crawler import CoupangPlayOttCrawler
@@ -250,3 +251,74 @@ def test_parse_flexible_datetime_supports_month_day_without_year():
     assert parsed is not None
     assert parsed.month == 3
     assert parsed.day == 14
+
+
+def test_tving_fetch_uses_playwright_fallback_when_request_fails(monkeypatch):
+    crawler = TvingOttCrawler()
+    payload = {
+        "props": {
+            "pageProps": {
+                "dehydratedState": {
+                    "queries": [
+                        {
+                            "state": {
+                                "data": {
+                                    "pages": [
+                                        {
+                                            "data": {
+                                                "band": {
+                                                    "items": [
+                                                        {"code": "P001", "title": "Series A", "imageUrl": "https://img/a.jpg"},
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload)}</script>'
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("crawlers.tving_ott_crawler.requests.get", _raise)
+    monkeypatch.setattr(
+        TvingOttCrawler,
+        "_fetch_with_playwright",
+        lambda self: asyncio.sleep(0, result=html),
+    )
+
+    _, _, _, all_content, meta = asyncio.run(crawler.fetch_all_data())
+
+    assert len(all_content) == 1
+    assert meta["fetch_method"] == "playwright"
+    assert any("REQUEST_FETCH_FAILED" in item for item in meta["errors"])
+
+
+def test_wavve_extract_raw_items_from_html_uses_dom_titles():
+    crawler = WavveOttCrawler()
+    html = """
+    <div>
+      <a class="click-area" href="javascript:void(0)">
+        <img alt="웨이브 라인업 3월에도 JUST DIVE, Wavve!" src="hero.jpg" />
+        <div class="title1">웨이브 라인업</div>
+        <div class="title2">3월에도 JUST DIVE, Wavve!</div>
+      </a>
+      <a class="click-area" href="javascript:void(0)">
+        <img alt="" src="show.jpg" />
+        <div class="title1">대한민국에서 건물주 되는 법</div>
+        <div class="title2">3월 14일, 밤 9시 10분 첫 방송</div>
+      </a>
+    </div>
+    """
+
+    rows = crawler._extract_raw_items_from_html(html)
+
+    assert len(rows) == 2
+    assert rows[1]["title"] == "대한민국에서 건물주 되는 법 3월 14일, 밤 9시 10분 첫 방송"

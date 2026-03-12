@@ -5,10 +5,12 @@ import re
 from typing import Any, Dict
 from urllib.parse import urljoin
 
+from bs4 import BeautifulSoup
+
 from services.ott_content_service import build_canonical_ott_entry
 
 from .canonical_ott_crawler import CanonicalOttCrawler
-from .ott_parser_utils import parse_flexible_datetime
+from .ott_parser_utils import clean_text, parse_flexible_datetime
 
 WAVVE_VIEW_MORE_URL = "https://www.wavve.com/view-more?code=EN100000----GN51"
 _ID_RE = re.compile(r"([A-Z0-9]{8,}|[0-9]{6,})")
@@ -38,32 +40,71 @@ class WavveOttCrawler(CanonicalOttCrawler):
             title = match.group("title").strip()
         return title
 
-    async def fetch_all_data(self):
-        try:
-            from playwright.async_api import async_playwright
-        except Exception as exc:  # pragma: no cover - runtime only
-            return {}, {}, {}, {}, {
-                "fetched_count": 0,
-                "force_no_ratio": True,
-                "errors": [f"PLAYWRIGHT_IMPORT_FAILED:{exc}"],
-                "is_suspicious_empty": True,
-                "source_page": WAVVE_VIEW_MORE_URL,
-            }
+    @staticmethod
+    def _extract_raw_items_from_html(html: str) -> list[dict[str, str]]:
+        soup = BeautifulSoup(html or "", "html.parser")
+        rows = []
+        seen = set()
+        for anchor in soup.select("a.click-area"):
+            href = clean_text(anchor.get("href"))
+            img = anchor.select_one("img[alt]")
+            alt = clean_text(img.get("alt")) if img is not None else ""
+            title1_node = anchor.select_one(".title1")
+            title2_node = anchor.select_one(".title2")
+            title1 = clean_text(title1_node.get_text(" ", strip=True)) if title1_node is not None else ""
+            title2 = clean_text(title2_node.get_text(" ", strip=True)) if title2_node is not None else ""
+            title = alt or clean_text(" ".join(part for part in [title1, title2] if part))
+            if not title or len(title) < 2 or title in seen:
+                continue
+            seen.add(title)
+            rows.append(
+                {
+                    "title": title,
+                    "href": href,
+                    "thumbnail_url": clean_text(img.get("src")) if img is not None else "",
+                }
+            )
+        return rows
 
-        ongoing_today: Dict[str, Dict[str, Any]] = {}
-        errors = []
-        try:
-            async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(headless=True, args=["--disable-dev-shm-usage", "--no-sandbox"])
-                context = await browser.new_context(locale="ko-KR")
-                page = await context.new_page()
+    async def _collect_raw_items_with_playwright(self) -> list[dict[str, str]]:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"],
+            )
+            context = await browser.new_context(locale="ko-KR", ignore_https_errors=True)
+            page = await context.new_page()
+            try:
                 await page.goto(WAVVE_VIEW_MORE_URL, wait_until="domcontentloaded", timeout=60_000)
-                await page.wait_for_timeout(2_000)
-                for _ in range(5):
-                    await page.mouse.wheel(0, 1800)
-                    await page.wait_for_timeout(500)
+                try:
+                    await page.wait_for_selector("a.click-area, .click-area", state="attached", timeout=15_000)
+                except Exception:
+                    pass
 
-                raw_items = await page.evaluate(
+                stable_rounds = 0
+                previous_count = -1
+                for _ in range(8):
+                    html = await page.content()
+                    current_items = self._extract_raw_items_from_html(html)
+                    current_count = len(current_items)
+                    if current_count > 0 and current_count == previous_count:
+                        stable_rounds += 1
+                    else:
+                        stable_rounds = 0
+                    previous_count = current_count
+                    if current_count >= 6 and stable_rounds >= 1:
+                        return current_items
+                    await page.mouse.wheel(0, 1800)
+                    await page.wait_for_timeout(700)
+
+                html = await page.content()
+                raw_items = self._extract_raw_items_from_html(html)
+                if raw_items:
+                    return raw_items
+
+                return await page.evaluate(
                     """
                     () => {
                       const rows = [];
@@ -86,8 +127,26 @@ class WavveOttCrawler(CanonicalOttCrawler):
                     }
                     """
                 )
+            finally:
                 await context.close()
                 await browser.close()
+
+    async def fetch_all_data(self):
+        try:
+            from playwright.async_api import async_playwright  # noqa: F401
+        except Exception as exc:  # pragma: no cover - runtime only
+            return {}, {}, {}, {}, {
+                "fetched_count": 0,
+                "force_no_ratio": True,
+                "errors": [f"PLAYWRIGHT_IMPORT_FAILED:{exc}"],
+                "is_suspicious_empty": True,
+                "source_page": WAVVE_VIEW_MORE_URL,
+            }
+
+        ongoing_today: Dict[str, Dict[str, Any]] = {}
+        errors = []
+        try:
+            raw_items = await self._collect_raw_items_with_playwright()
         except Exception as exc:  # pragma: no cover - runtime only
             errors.append(f"PLAYWRIGHT_FETCH_FAILED:{exc}")
             raw_items = []

@@ -70,7 +70,39 @@ class TvingOttCrawler(CanonicalOttCrawler):
             entries[entry["canonical_content_id"]] = entry
         return entries
 
+    async def _fetch_with_playwright(self) -> str:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"],
+            )
+            context = await browser.new_context(
+                locale="ko-KR",
+                ignore_https_errors=True,
+            )
+            page = await context.new_page()
+            try:
+                await page.goto(
+                    TVING_PAGE_URL,
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=10_000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(1_500)
+                return await page.content()
+            finally:
+                await context.close()
+                await browser.close()
+
     async def fetch_all_data(self):
+        errors = []
+        fetch_method = "requests"
+
         def _get() -> str:
             response = requests.get(
                 TVING_PAGE_URL,
@@ -80,14 +112,28 @@ class TvingOttCrawler(CanonicalOttCrawler):
             response.raise_for_status()
             return response.text
 
-        html = await asyncio.to_thread(_get)
+        html = ""
+        try:
+            html = await asyncio.to_thread(_get)
+        except Exception as exc:
+            errors.append(f"REQUEST_FETCH_FAILED:{type(exc).__name__}:{exc}")
+
         ongoing_today = self._parse_page(html)
+        if not ongoing_today:
+            try:
+                html = await self._fetch_with_playwright()
+                fetch_method = "playwright"
+                ongoing_today = self._parse_page(html)
+            except Exception as exc:
+                errors.append(f"PLAYWRIGHT_FETCH_FAILED:{type(exc).__name__}:{exc}")
+
         all_content_today = dict(ongoing_today)
         fetch_meta = {
             "fetched_count": len(all_content_today),
             "force_no_ratio": True,
-            "errors": [],
+            "errors": errors,
             "source_page": TVING_PAGE_URL,
+            "fetch_method": fetch_method,
         }
         if not all_content_today:
             fetch_meta["is_suspicious_empty"] = True

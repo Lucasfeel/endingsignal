@@ -148,7 +148,7 @@ def test_verify_ott_write_plan_blocks_changed_candidate_without_external_evidenc
         "all_content_today": {
             _canonical_id(): {
                 "title": "Unverified Series",
-                "platform_url": "https://www.wavve.com/player/contents/12345",
+                "platform_url": "https://untrusted.example/series/12345",
             }
         },
         "verification_candidates": [
@@ -156,10 +156,11 @@ def test_verify_ott_write_plan_blocks_changed_candidate_without_external_evidenc
                 "content_id": _canonical_id(),
                 "source_name": "wavve",
                 "title": "Unverified Series",
-                "content_url": "https://www.wavve.com/player/contents/12345",
+                "content_url": "https://untrusted.example/series/12345",
                 "change_kinds": ["new_content"],
                 "source_item": {
                     "title": "Unverified Series",
+                    "platform_url": "https://untrusted.example/series/12345",
                     "release_end_status": "unknown",
                 },
             }
@@ -226,3 +227,50 @@ def test_verify_ott_write_plan_rechecks_watchlist_without_blocking_apply(monkeyp
     assert verdict["items"][0]["watchlist_recheck"] is True
     assert verdict["items"][0]["ok"] is True
     assert verdict["items"][0]["reason"] == "watchlist_unresolved"
+
+
+def test_verify_ott_write_plan_accepts_official_crawl_metadata_when_public_docs_are_missing(monkeypatch):
+    write_plan = {
+        "source_name": "disney_plus",
+        "all_content_today": {
+            _canonical_id(): {
+                "title": "High Potential",
+                "platform_url": "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce",
+                "content_url": "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce",
+                "title_alias": ["하이 포텐셜"],
+                "release_end_status": "unknown",
+            }
+        },
+        "verification_candidates": [
+            {
+                "content_id": _canonical_id(),
+                "source_name": "disney_plus",
+                "title": "하이 포텐셜",
+                "content_url": "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce",
+                "change_kinds": ["new_content"],
+                "source_item": {
+                    "title": "High Potential",
+                    "title_alias": ["하이 포텐셜"],
+                    "platform_url": "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce",
+                    "content_url": "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce",
+                    "release_end_status": "unknown",
+                },
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_fetch_document",
+        lambda _session, _url: {"url": _url, "ok": False, "error": "unreachable"},
+    )
+    monkeypatch.setattr(service, "_search_public_result_urls", lambda *_args, **_kwargs: [])
+
+    verdict = service.verify_ott_write_plan(write_plan, source_name="disney_plus")
+
+    assert verdict["gate"] == "passed"
+    assert verdict["apply_allowed"] is True
+    assert verdict["verified_count"] == 1
+    assert verdict["items"][0]["evidence_urls"] == [
+        "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce"
+    ]
