@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 from utils.time import now_kst_naive
@@ -17,6 +17,33 @@ WAVVE_CATALOG_URL_MARKER = "apis.wavve.com/v1/catalog"
 WAVVE_CODE_MARKER = "code=EN100000----GN51"
 WAVVE_NOISE_TITLES = {"웨이브 라인업"}
 WAVVE_NOISE_KEYWORDS = ("라인업", "챔피언십", "KLPGA")
+WAVVE_REQUEST_HEADERS = {
+    "Referer": WAVVE_VIEW_MORE_URL,
+    "Origin": "https://www.wavve.com",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+    "User-Agent": "Mozilla/5.0",
+}
+WAVVE_CATALOG_QUERY = {
+    "broadcastid": "EN100000",
+    "catalogType": "manualband",
+    "code": "EN100000----GN51",
+    "limit": "40",
+    "manualbandId": "100000",
+    "orderby": "default",
+    "uicode": "EN100000",
+    "uiparent": "GN51-EN100000",
+    "uirank": "0",
+    "uitype": "band_82",
+    "apikey": "E5F3E0D30947AA5440556471321BB6D9",
+    "device": "pc",
+    "partner": "pooq",
+    "region": "kor",
+    "targetage": "all",
+    "pooqzone": "none",
+    "guid": "none",
+    "drm": "wm",
+    "client_version": "7.1.40",
+}
 _CONTENT_ID_RE = re.compile(r"(?:contentid=)?(?P<id>[A-Z0-9_]{8,}(?:\.\d+)?)", re.IGNORECASE)
 _DATE_SPLIT_RE = re.compile(r"^(?P<title>.+?)\s+\d{1,2}\s*월\s*\d{1,2}\s*일")
 
@@ -193,6 +220,64 @@ class WavveOttCrawler(CanonicalOttCrawler):
                 entries[entry["canonical_content_id"]] = entry
         return entries
 
+    @staticmethod
+    def _build_catalog_request_url(offset: int) -> str:
+        params = {
+            **WAVVE_CATALOG_QUERY,
+            "offset": str(max(0, int(offset))),
+        }
+        return f"https://apis.wavve.com/v1/catalog?{urlencode(params)}"
+
+    async def _collect_payloads_from_request_context(
+        self,
+        context,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        payloads: List[Dict[str, Any]] = []
+        response_urls: List[str] = []
+        errors: List[str] = []
+        offset = 0
+        limit = int(WAVVE_CATALOG_QUERY["limit"])
+
+        for _ in range(4):
+            url = self._build_catalog_request_url(offset)
+            try:
+                response = await context.request.get(
+                    url,
+                    headers=WAVVE_REQUEST_HEADERS,
+                    timeout=60_000,
+                )
+            except Exception as exc:  # pragma: no cover - runtime only
+                errors.append(f"REQUEST_CONTEXT_FETCH_FAILED:{type(exc).__name__}:{exc}")
+                break
+
+            response_urls.append(clean_text(getattr(response, "url", url)) or url)
+            if not response.ok:
+                errors.append(f"REQUEST_CONTEXT_HTTP_{response.status}")
+                break
+
+            try:
+                payload = await response.json()
+            except Exception as exc:  # pragma: no cover - runtime only
+                errors.append(f"REQUEST_CONTEXT_JSON_PARSE_FAILED:{type(exc).__name__}:{exc}")
+                break
+
+            if not isinstance(payload, dict):
+                errors.append("REQUEST_CONTEXT_INVALID_PAYLOAD")
+                break
+
+            payloads.append(payload)
+            data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+            rows = data.get("context_list") or []
+            total_count = int(str(data.get("count") or 0) or 0)
+            offset += limit
+            if not rows or total_count <= offset:
+                break
+
+        return payloads, {
+            "errors": errors,
+            "response_urls": response_urls,
+        }
+
     async def _collect_payloads_with_playwright(
         self,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[Dict[str, str]]]:
@@ -209,6 +294,24 @@ class WavveOttCrawler(CanonicalOttCrawler):
             )
             context = await browser.new_context(locale="ko-KR", ignore_https_errors=True)
             page = await context.new_page()
+
+            request_payloads, request_meta = await self._collect_payloads_from_request_context(context)
+            payloads.extend(request_payloads)
+            response_urls.extend(request_meta.get("response_urls") or [])
+            errors.extend(request_meta.get("errors") or [])
+            if payloads:
+                body_text = ""
+                try:
+                    await page.goto(WAVVE_VIEW_MORE_URL, wait_until="domcontentloaded", timeout=60_000)
+                    body_text = clean_text(await page.text_content("body") or "")
+                except Exception:
+                    body_text = ""
+                return payloads, {
+                    "errors": errors,
+                    "response_urls": response_urls,
+                    "final_url": page.url if page.url else WAVVE_VIEW_MORE_URL,
+                    "body_excerpt": body_text[:240],
+                }, []
 
             async def _handle_response(response) -> None:
                 url = clean_text(getattr(response, "url", ""))
