@@ -139,7 +139,8 @@ def test_verify_ott_write_plan_enriches_changed_entry_and_passes(monkeypatch):
     assert entry["release_start_at"] == release_start_at
     assert entry["release_end_at"] == release_end_at
     assert entry["release_end_status"] == "scheduled"
-    assert verdict["items"][0]["evidence_urls"] == ["https://www.netflix.com/kr/title/123", "https://namu.wiki/w/Example_Series"]
+    assert verdict["items"][0]["evidence_urls"][0] == "https://www.netflix.com/kr/title/123"
+    assert "https://namu.wiki/w/Example_Series" in verdict["items"][0]["evidence_urls"]
 
 
 def test_verify_ott_write_plan_blocks_changed_candidate_without_external_evidence(monkeypatch):

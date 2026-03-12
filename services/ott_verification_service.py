@@ -17,7 +17,7 @@ SEARCH_ENDPOINT = "https://html.duckduckgo.com/html/"
 SEARCH_TIMEOUT_SECONDS = 20
 DOCUMENT_TIMEOUT_SECONDS = 20
 MAX_SEARCH_RESULTS = 4
-MAX_PUBLIC_DOCUMENTS = 3
+MAX_PUBLIC_DOCUMENTS = 6
 
 ALLOWED_PUBLIC_HOST_SUFFIXES = (
     "namu.wiki",
@@ -41,10 +41,15 @@ PLATFORM_QUERY_LABELS = {
     "wavve": "웨이브",
 }
 
+_DATE_TOKEN_RE = r"(?:\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}\s*월\s*\d{1,2}\s*일)"
+_LABELED_RANGE_RE = re.compile(
+    rf"(?:방송\s*기간|방영\s*기간|공개\s*기간)\s*[:|]?\s*(?P<start>{_DATE_TOKEN_RE})\s*[~〜∼-]\s*(?P<end>{_DATE_TOKEN_RE})(?:\s*\((?P<hint>예정|확정)\))?",
+    re.I,
+)
 _KOREAN_RANGE_RE = re.compile(
     r"(?P<start>\d{4}\D+\d{1,2}\D+\d{1,2}|\d{1,2}\s*월\s*\d{1,2}\s*일)\s*"
     r"(?:\((?:예정|확정)\))?\s*[~〜\-]\s*"
-    r"(?P<end>\d{4}\D+\d{1,2}\D+\d{1,2}|\d{1,2}\s*월\s*\d{1,2}\s*일)"
+    r"(?P<end>\d{4}\D+\d{1,2}\D+\d{1,2}|\d{1,2}\s*월\s*\d{1,2}\s*일)(?:\s*\((?P<hint>예정|확정)\))?"
 )
 _LABELED_SINGLE_DATE_RE = re.compile(
     r"(?:공개일|첫\s*공개|첫\s*방송|방영일|방송일|startDate|dateCreated)\s*[:：]?\s*"
@@ -156,6 +161,35 @@ def _build_search_queries(candidate: Mapping[str, Any]) -> List[str]:
     return _normalize_title_tokens(queries)
 
 
+def _dedupe_urls(urls: Iterable[str]) -> List[str]:
+    deduped: List[str] = []
+    seen = set()
+    for url in urls:
+        cleaned = clean_text(url)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _build_direct_public_result_urls(candidate: Mapping[str, Any]) -> List[str]:
+    source_item = dict(candidate.get("source_item") or {})
+    titles = _normalize_title_tokens(
+        candidate.get("title"),
+        source_item.get("title_alias"),
+        source_item.get("alt_title"),
+    )
+
+    urls: List[str] = []
+    for title in titles[:4]:
+        namu_slug = quote(title, safe="")
+        urls.append(f"https://namu.wiki/w/{namu_slug}")
+        urls.append(f"https://namu.wiki/w/{quote(f'{title} (드라마)', safe='')}")
+
+    return _dedupe_urls(url for url in urls if _allowed_public_host(url))
+
+
 def _search_public_result_urls(session: requests.Session, candidate: Mapping[str, Any]) -> List[str]:
     urls: List[str] = []
     seen = set()
@@ -180,6 +214,15 @@ def _search_public_result_urls(session: requests.Session, candidate: Mapping[str
             if len(urls) >= MAX_SEARCH_RESULTS:
                 return urls
     return urls
+
+
+def _collect_public_result_urls(session: requests.Session, candidate: Mapping[str, Any]) -> List[str]:
+    return _dedupe_urls(
+        [
+            *_build_direct_public_result_urls(candidate),
+            *_search_public_result_urls(session, candidate),
+        ]
+    )
 
 
 def _extract_json_ld_payloads(soup: BeautifulSoup) -> List[Dict[str, Any]]:
@@ -241,21 +284,21 @@ def _extract_cast_from_text(text: str) -> List[str]:
     return deduped[:10]
 
 
-def _parse_range_dates(text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+def _parse_range_dates(text: str) -> Tuple[Optional[datetime], Optional[datetime], Optional[str]]:
     compact = clean_text(text)
-    match = _KOREAN_RANGE_RE.search(compact)
+    match = _LABELED_RANGE_RE.search(compact) or _KOREAN_RANGE_RE.search(compact)
     if not match:
-        return None, None
+        return None, None, None
     start = parse_flexible_datetime(match.group("start"))
     end = parse_flexible_datetime(match.group("end"))
     if start and end and start.year != end.year and "월" in match.group("end") and not re.search(r"\d{4}", match.group("end")):
         end = end.replace(year=start.year)
-    return start, end
+    return start, end, clean_text(match.groupdict().get("hint")).lower() or None
 
 
 def _extract_date_signals(text: str, *, fallback_start: Any = None) -> Dict[str, Any]:
     compact = clean_text(text)
-    start_dt, end_dt = _parse_range_dates(compact)
+    start_dt, end_dt, range_hint = _parse_range_dates(compact)
     if start_dt is None:
         labeled = _LABELED_SINGLE_DATE_RE.search(compact)
         if labeled:
@@ -270,8 +313,14 @@ def _extract_date_signals(text: str, *, fallback_start: Any = None) -> Dict[str,
 
     release_end_status = "unknown"
     if end_dt is not None:
-        if confirmed_hint or end_dt <= now_value:
+        if range_hint == "예정":
+            release_end_status = "scheduled"
+        elif range_hint == "확정":
+            release_end_status = "confirmed" if end_dt <= now_value else "scheduled"
+        elif end_dt <= now_value:
             release_end_status = "confirmed"
+        elif confirmed_hint:
+            release_end_status = "scheduled"
         else:
             release_end_status = "scheduled"
     elif start_dt is not None and binge and not weekly:
@@ -430,6 +479,11 @@ def _merge_verification_metadata(
 
     release_start_at = min([item for item in start_candidates if item is not None], default=None)
     distinct_end_dates = sorted({item.isoformat(): item for item in end_candidates}.values(), key=lambda item: item.isoformat())
+    if release_start_at is not None:
+        distinct_end_dates = [
+            item for item in distinct_end_dates
+            if item >= release_start_at
+        ]
 
     release_end_at = None
     release_end_status = clean_text(source_item.get("release_end_status")).lower() or "unknown"
@@ -443,6 +497,13 @@ def _merge_verification_metadata(
 
     if release_end_at is None:
         for doc in matched_docs:
+            doc_end_at = _coerce_datetime(doc.get("release_end_at"))
+            if (
+                doc_end_at is not None
+                and release_start_at is not None
+                and doc_end_at < release_start_at
+            ):
+                continue
             if doc.get("release_end_status") in {"scheduled", "confirmed"}:
                 release_end_status = str(doc["release_end_status"])
                 if release_end_status == "confirmed" and release_start_at and doc.get("binge_hint"):
@@ -691,7 +752,7 @@ def verify_ott_write_plan(write_plan: Mapping[str, Any], *, source_name: str) ->
                 or bool(candidate.get("watchlist_recheck"))
             )
             if need_public_search:
-                public_urls = _search_public_result_urls(session, candidate)
+                public_urls = _collect_public_result_urls(session, candidate)
                 for url in public_urls[:MAX_PUBLIC_DOCUMENTS]:
                     doc = _fetch_document(session, url)
                     if isinstance(doc, dict):

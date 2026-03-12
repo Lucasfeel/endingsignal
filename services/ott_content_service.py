@@ -372,10 +372,17 @@ def _compute_schedule_state(
     existing_ott = safe_existing.get("ott")
     existing_ott = existing_ott if isinstance(existing_ott, dict) else {}
 
-    candidate_dates = _distinct_datetimes(
-        existing_ott.get("release_end_at"),
-        entry.get("release_end_at"),
-    )
+    entry_end_at = entry.get("release_end_at")
+    if (
+        str(entry.get("release_end_status") or "").strip().lower() == RELEASE_END_STATUS_UNKNOWN
+        and _coerce_datetime(entry_end_at) is None
+    ):
+        candidate_dates = _distinct_datetimes(entry_end_at)
+    else:
+        candidate_dates = _distinct_datetimes(
+            existing_ott.get("release_end_at"),
+            entry_end_at,
+        )
     resolution_state = str(
         entry.get("resolution_state")
         or existing_ott.get("resolution_state")
@@ -391,9 +398,15 @@ def _compute_schedule_state(
         release_end_status = RELEASE_END_STATUS_UNKNOWN
     elif entry_status == RELEASE_END_STATUS_CONFIRMED:
         release_end_status = RELEASE_END_STATUS_CONFIRMED
+    elif entry_status == RELEASE_END_STATUS_SCHEDULED:
+        release_end_status = RELEASE_END_STATUS_SCHEDULED
+    elif candidate_dates:
+        release_end_status = RELEASE_END_STATUS_SCHEDULED
+    elif entry_status == RELEASE_END_STATUS_UNKNOWN:
+        release_end_status = RELEASE_END_STATUS_UNKNOWN
     elif existing_status == RELEASE_END_STATUS_CONFIRMED:
         release_end_status = RELEASE_END_STATUS_CONFIRMED
-    elif candidate_dates:
+    elif existing_status == RELEASE_END_STATUS_SCHEDULED:
         release_end_status = RELEASE_END_STATUS_SCHEDULED
     else:
         release_end_status = RELEASE_END_STATUS_UNKNOWN
