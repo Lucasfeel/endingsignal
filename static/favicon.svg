@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 600 600" role="img" aria-label="End Signal favicon">
+  <rect x="48" y="48" width="504" height="504" rx="132" fill="#3182f6" />
+  <path
+    fill="#ffffff"
+    d="M300 120c16 0 30 14 30 30v17c56 11 99 61 99 120v72c0 42 16 81 45 111l13 13c17 17 5 46-19 46H132c-24 0-36-29-19-46l13-13c29-30 45-69 45-111v-72c0-59 43-109 99-120v-17c0-16 14-30 30-30zm0 362c25 0 45 20 45 45s-20 45-45 45-45-20-45-45 20-45 45-45z"
+  />
+</svg>
