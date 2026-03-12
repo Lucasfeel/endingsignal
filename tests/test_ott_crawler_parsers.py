@@ -292,7 +292,14 @@ def test_tving_fetch_uses_playwright_fallback_when_request_fails(monkeypatch):
     monkeypatch.setattr(
         TvingOttCrawler,
         "_fetch_with_playwright",
-        lambda self: asyncio.sleep(0, result=html),
+        lambda self: asyncio.sleep(
+            0,
+            result=(
+                html,
+                crawler._parse_page(html),
+                ["PLAYWRIGHT_SELECTOR_TIMEOUT"],
+            ),
+        ),
     )
 
     _, _, _, all_content, meta = asyncio.run(crawler.fetch_all_data())
@@ -300,6 +307,7 @@ def test_tving_fetch_uses_playwright_fallback_when_request_fails(monkeypatch):
     assert len(all_content) == 1
     assert meta["fetch_method"] == "playwright"
     assert any("REQUEST_FETCH_FAILED" in item for item in meta["errors"])
+    assert "PLAYWRIGHT_SELECTOR_TIMEOUT" in meta["errors"]
 
 
 def test_tving_fetch_retries_without_headers_when_crawler_headers_fail(monkeypatch):
@@ -355,6 +363,22 @@ def test_tving_fetch_retries_without_headers_when_crawler_headers_fail(monkeypat
     assert len(all_content) == 1
     assert meta["fetch_method"] == "requests:default_headers"
     assert any("REQUEST_FETCH_FAILED:crawler_headers" in item for item in meta["errors"])
+
+
+def test_tving_entries_from_dom_link_items_prefers_text_then_image_alt():
+    crawler = TvingOttCrawler()
+
+    parsed = crawler._entries_from_dom_link_items(
+        [
+            {"href": "/contents/P001", "titleText": "  Series A  ", "imgAlt": "Poster A"},
+            {"href": "/contents/P002", "titleText": "", "imgAlt": "Poster B"},
+            {"href": "/contents/M003", "titleText": "Movie", "imgAlt": "Movie"},
+        ]
+    )
+
+    assert len(parsed) == 2
+    titles = sorted(item["title"] for item in parsed.values())
+    assert titles == ["Poster B", "Series A"]
 
 
 def test_wavve_extract_raw_items_from_html_uses_dom_titles():

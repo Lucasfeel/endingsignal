@@ -20,6 +20,11 @@ _NEXT_DATA_RE = re.compile(
 )
 _CONTENT_PATH_RE = re.compile(r"/contents/(?P<code>[A-Z0-9]+)")
 _TVING_ERROR_PATH_RE = re.compile(r"/500/?$")
+_TVING_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/145.0.0.0 Safari/537.36"
+)
 
 
 class TvingOttCrawler(CanonicalOttCrawler):
@@ -32,6 +37,37 @@ class TvingOttCrawler(CanonicalOttCrawler):
     @staticmethod
     def _build_content_url(code: str) -> str:
         return f"https://www.tving.com/contents/{code}"
+
+    def _build_entry(self, *, code: str, title: str, thumbnail_url: str | None = None) -> Dict[str, Any] | None:
+        clean_code = str(code or "").strip()
+        clean_title = " ".join(str(title or "").split()).strip()
+        if not clean_code or not clean_title or not clean_code.startswith("P"):
+            return None
+        return build_canonical_ott_entry(
+            platform_source=self.source_name,
+            title=clean_title,
+            platform_content_id=clean_code,
+            platform_url=self._build_content_url(clean_code),
+            thumbnail_url=str(thumbnail_url or "").strip() or None,
+            upcoming=True,
+            availability_status="scheduled",
+        )
+
+    def _entries_from_dom_link_items(self, items: list[dict[str, Any]] | None) -> Dict[str, Dict[str, Any]]:
+        entries: Dict[str, Dict[str, Any]] = {}
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            href = str(item.get("href") or "").strip()
+            match = _CONTENT_PATH_RE.search(href)
+            if not match:
+                continue
+            code = str(match.group("code") or "").strip()
+            title = str(item.get("titleText") or "").strip() or str(item.get("imgAlt") or "").strip()
+            entry = self._build_entry(code=code, title=title)
+            if entry is not None:
+                entries[entry["canonical_content_id"]] = entry
+        return entries
 
     def _parse_dom_page(self, html: str) -> Dict[str, Dict[str, Any]]:
         soup = BeautifulSoup(html or "", "html.parser")
@@ -46,18 +82,9 @@ class TvingOttCrawler(CanonicalOttCrawler):
             if not title:
                 img = anchor.select_one("img[alt]")
                 title = str(img.get("alt") or "").strip() if img is not None else ""
-            if not code or not title or not code.startswith("P"):
-                continue
-            entry = build_canonical_ott_entry(
-                platform_source=self.source_name,
-                title=title,
-                platform_content_id=code,
-                platform_url=self._build_content_url(code),
-                thumbnail_url=None,
-                upcoming=True,
-                availability_status="scheduled",
-            )
-            entries[entry["canonical_content_id"]] = entry
+            entry = self._build_entry(code=code, title=title)
+            if entry is not None:
+                entries[entry["canonical_content_id"]] = entry
         return entries
 
     def _parse_page(self, html: str) -> Dict[str, Dict[str, Any]]:
@@ -86,18 +113,13 @@ class TvingOttCrawler(CanonicalOttCrawler):
                 continue
             code = str(item.get("code") or "").strip()
             title = str(item.get("title") or "").strip()
-            if not code or not title or not code.startswith("P"):
-                continue
-            entry = build_canonical_ott_entry(
-                platform_source=self.source_name,
+            entry = self._build_entry(
+                code=code,
                 title=title,
-                platform_content_id=code,
-                platform_url=self._build_content_url(code),
                 thumbnail_url=str(item.get("imageUrl") or "").strip() or None,
-                upcoming=True,
-                availability_status="scheduled",
             )
-            entries[entry["canonical_content_id"]] = entry
+            if entry is not None:
+                entries[entry["canonical_content_id"]] = entry
         return entries or self._parse_dom_page(html)
 
     def _fetch_with_requests(self):
@@ -140,8 +162,10 @@ class TvingOttCrawler(CanonicalOttCrawler):
 
         return "", {}, "requests", errors
 
-    async def _fetch_with_playwright(self) -> str:
+    async def _fetch_with_playwright(self) -> tuple[str, Dict[str, Dict[str, Any]], list[str]]:
         from playwright.async_api import async_playwright
+
+        errors: list[str] = []
 
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
@@ -151,6 +175,8 @@ class TvingOttCrawler(CanonicalOttCrawler):
             context = await browser.new_context(
                 locale="ko-KR",
                 ignore_https_errors=True,
+                viewport={"width": 1440, "height": 2000},
+                user_agent=_TVING_BROWSER_USER_AGENT,
             )
             page = await context.new_page()
             try:
@@ -162,9 +188,40 @@ class TvingOttCrawler(CanonicalOttCrawler):
                 try:
                     await page.wait_for_load_state("networkidle", timeout=10_000)
                 except Exception:
-                    pass
-                await page.wait_for_timeout(1_500)
-                return await page.content()
+                    errors.append("PLAYWRIGHT_NETWORKIDLE_TIMEOUT")
+
+                try:
+                    await page.wait_for_selector('a[href^="/contents/P"]', state="attached", timeout=20_000)
+                except Exception:
+                    errors.append("PLAYWRIGHT_SELECTOR_TIMEOUT")
+
+                for delay_ms in (1_500, 3_500, 7_000):
+                    await page.wait_for_timeout(delay_ms)
+                    dom_items = await page.evaluate(
+                        """() => Array.from(document.querySelectorAll('a[href*="/contents/"]')).map((anchor) => {
+                            const href = anchor.getAttribute('href') || '';
+                            const text = (anchor.textContent || '').replace(/\\s+/g, ' ').trim();
+                            const img = anchor.querySelector('img[alt]');
+                            return {
+                                href,
+                                titleText: text,
+                                imgAlt: img ? (img.getAttribute('alt') || '') : '',
+                            };
+                        })"""
+                    )
+                    parsed = self._entries_from_dom_link_items(dom_items)
+                    if parsed:
+                        return await page.content(), parsed, errors
+
+                    html = await page.content()
+                    parsed = self._parse_page(html)
+                    if parsed:
+                        return html, parsed, errors
+
+                final_url = str(page.url or "").strip()
+                title = (await page.title()).strip()
+                errors.append(f"PLAYWRIGHT_EMPTY:title={title}:url={final_url or TVING_PAGE_URL}")
+                return await page.content(), {}, errors
             finally:
                 await context.close()
                 await browser.close()
@@ -173,9 +230,9 @@ class TvingOttCrawler(CanonicalOttCrawler):
         html, ongoing_today, fetch_method, errors = await asyncio.to_thread(self._fetch_with_requests)
         if not ongoing_today:
             try:
-                html = await self._fetch_with_playwright()
+                html, ongoing_today, play_errors = await self._fetch_with_playwright()
                 fetch_method = "playwright"
-                ongoing_today = self._parse_page(html)
+                errors.extend(play_errors)
             except Exception as exc:
                 errors.append(f"PLAYWRIGHT_FETCH_FAILED:{type(exc).__name__}:{exc}")
 
