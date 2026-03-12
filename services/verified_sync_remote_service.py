@@ -19,6 +19,12 @@ def _serialize_value(value):
 
 
 def load_source_snapshot(conn, source_name: str) -> Dict[str, Any]:
+    crawler_class = resolve_crawler_class(source_name)
+    crawler = crawler_class()
+    custom_loader = getattr(crawler, "load_remote_snapshot", None)
+    if callable(custom_loader):
+        return _serialize_value(custom_loader(conn))
+
     cursor = get_cursor(conn)
     try:
         cursor.execute(

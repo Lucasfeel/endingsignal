@@ -878,6 +878,9 @@ class ContentCrawler(ABC):
             "new_content_items": new_content_items,
             "newly_completed_items": newly_completed_items,
             "verification_candidates": list(verification_candidates_by_id.values()),
+            "snapshot_existing_rows": list((self.get_prefetch_context() or {}).get("snapshot_existing_rows") or []),
+            "platform_links": list((self.get_prefetch_context() or {}).get("platform_links") or []),
+            "watchlist_rows": list((self.get_prefetch_context() or {}).get("watchlist_rows") or []),
             "pending_cdc_records": [
                 {
                     "content_id": content_id,
@@ -1428,6 +1431,9 @@ class ContentCrawler(ABC):
                 "new_content_items": new_content_items,
                 "newly_completed_items": newly_completed_items,
                 "verification_candidates": list(verification_candidates_by_id.values()),
+                "snapshot_existing_rows": list((self.get_prefetch_context() or {}).get("snapshot_existing_rows") or []),
+                "platform_links": list((self.get_prefetch_context() or {}).get("platform_links") or []),
+                "watchlist_rows": list((self.get_prefetch_context() or {}).get("watchlist_rows") or []),
                 "pending_cdc_records": [
                     {
                         "content_id": content_id,

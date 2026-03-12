@@ -8,6 +8,8 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Seq
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
+import requests
+from services.ott_verification_service import verify_ott_write_plan
 from services.kakaopage_parser import parse_kakaopage_detail, parse_kakaopage_listing_items
 from services.naver_series_parser import parse_naver_series_list
 from services.novel_seed_catalog import NAVER_SERIES_SEEDS, build_webnoveldb_kakao_seeds
@@ -1013,6 +1015,120 @@ register_source_verifier("naver_series", verify_naver_series)
 register_source_verifier("kakao_page", verify_kakaopage)
 register_source_verifier("ridi", verify_ridi)
 register_source_verifier("laftel", verify_laftel)
+
+
+def _http_verify_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    title = str(candidate.get("title") or "").strip()
+    content_id = str(candidate.get("content_id") or "").strip()
+    content_url = str(candidate.get("content_url") or "").strip()
+    if not title or not content_url:
+        return {
+            "content_id": content_id,
+            "title": title or content_id,
+            "ok": False,
+            "reason": "missing_content_url",
+        }
+
+    try:
+        response = requests.get(
+            content_url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        html = response.text
+    except Exception as exc:
+        return {
+            "content_id": content_id,
+            "title": title or content_id,
+            "ok": False,
+            "reason": "http_fetch_failed",
+            "message": str(exc),
+            "content_url": content_url,
+        }
+
+    soup = BeautifulSoup(html, "html.parser")
+    body_text = soup.get_text(" ", strip=True)
+    ok = _titles_match(title, body_text)
+    return {
+        "content_id": content_id,
+        "title": title or content_id,
+        "ok": ok,
+        "reason": "title_match" if ok else "title_not_found",
+        "content_url": content_url,
+    }
+
+
+async def _run_http_verifier(write_plan: Dict[str, Any], *, source_name: str) -> Dict[str, Any]:
+    candidates = _candidate_items(write_plan)
+    if not candidates:
+        return {
+            "gate": "not_applicable",
+            "mode": "http_fetch",
+            "reason": "no_candidate_changes",
+            "message": f"no new or newly completed items to verify for {source_name}",
+            "apply_allowed": True,
+            "changed_count": 0,
+            "verified_count": 0,
+            "items": [],
+        }
+
+    results = []
+    for candidate in candidates:
+        results.append(await asyncio.to_thread(_http_verify_candidate, candidate))
+
+    failed_items = [item for item in results if not item.get("ok")]
+    verified_count = len(results) - len(failed_items)
+    if failed_items:
+        return {
+            "gate": "blocked",
+            "mode": "http_fetch",
+            "reason": "verification_mismatch",
+            "message": f"{source_name} verified {verified_count}/{len(results)} changed items via HTTP",
+            "apply_allowed": False,
+            "changed_count": len(results),
+            "verified_count": verified_count,
+            "failed_count": len(failed_items),
+            "items": results,
+        }
+
+    return {
+        "gate": "passed",
+        "mode": "http_fetch",
+        "reason": "verified_all_changed_items",
+        "message": f"{source_name} verified {verified_count}/{len(results)} changed items via HTTP",
+        "apply_allowed": True,
+        "changed_count": len(results),
+        "verified_count": verified_count,
+        "items": results,
+    }
+
+
+async def verify_tving(write_plan: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(verify_ott_write_plan, write_plan, source_name="tving")
+
+
+async def verify_wavve(write_plan: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(verify_ott_write_plan, write_plan, source_name="wavve")
+
+
+async def verify_coupangplay(write_plan: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(verify_ott_write_plan, write_plan, source_name="coupangplay")
+
+
+async def verify_disney_plus(write_plan: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(verify_ott_write_plan, write_plan, source_name="disney_plus")
+
+
+async def verify_netflix(write_plan: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(verify_ott_write_plan, write_plan, source_name="netflix")
+
+
+register_source_verifier("tving", verify_tving)
+register_source_verifier("wavve", verify_wavve)
+register_source_verifier("coupangplay", verify_coupangplay)
+register_source_verifier("disney_plus", verify_disney_plus)
+register_source_verifier("netflix", verify_netflix)
 
 
 def build_verification_gate(

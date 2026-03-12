@@ -1742,6 +1742,74 @@ def setup_database_standalone():
 
         current_step = "remaining schema"
 
+        print("LOG: [DB Setup] Creating 'content_platform_links' table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS content_platform_links (
+                canonical_content_id TEXT NOT NULL,
+                platform_source TEXT NOT NULL,
+                platform_content_id TEXT NOT NULL,
+                platform_url TEXT,
+                availability_status TEXT NOT NULL DEFAULT 'available',
+                verified_at TIMESTAMP,
+                is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (canonical_content_id, platform_source)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_content_platform_links_platform_source
+            ON content_platform_links (platform_source)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_content_platform_links_platform_content_id
+            ON content_platform_links (platform_source, platform_content_id)
+            """
+        )
+        ensure_updated_at_trigger(
+            cursor,
+            "content_platform_links",
+            "trg_content_platform_links_updated_at",
+        )
+        print("LOG: [DB Setup] 'content_platform_links' table created or already exists.")
+
+        print("LOG: [DB Setup] Creating 'ott_schedule_watchlist' table...")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ott_schedule_watchlist (
+                canonical_content_id TEXT NOT NULL,
+                platform_source TEXT NOT NULL,
+                release_start_at TIMESTAMP,
+                release_end_at TIMESTAMP,
+                release_end_status TEXT NOT NULL DEFAULT 'unknown',
+                last_checked_at TIMESTAMP,
+                next_check_at TIMESTAMP,
+                check_fail_count INTEGER NOT NULL DEFAULT 0,
+                resolution_state TEXT NOT NULL DEFAULT 'tracking',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (canonical_content_id, platform_source)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ott_schedule_watchlist_recheck
+            ON ott_schedule_watchlist (platform_source, release_end_status, next_check_at)
+            """
+        )
+        ensure_updated_at_trigger(
+            cursor,
+            "ott_schedule_watchlist",
+            "trg_ott_schedule_watchlist_updated_at",
+        )
+        print("LOG: [DB Setup] 'ott_schedule_watchlist' table created or already exists.")
+
         current_step = "create users table"
         print("LOG: [DB Setup] Creating 'users' table...")
         cursor.execute("""
@@ -1922,6 +1990,7 @@ def setup_database_standalone():
                 "\ud2f0\ube59",
                 "\ub514\uc988\ub2c8 \ud50c\ub7ec\uc2a4",
                 "\uc6e8\uc774\ube0c",
+                "\ucfe0\ud321\ud50c\ub808\uc774",
                 "\ub77c\ud504\ud154",
             ),
         }

@@ -12,6 +12,42 @@ def test_verify_naver_webtoon_skips_browser_when_no_candidates():
     assert verdict["items"] == []
 
 
+def test_verify_tving_uses_official_public_web_verifier(monkeypatch):
+    captured = {}
+
+    def fake_verify_ott_write_plan(write_plan, *, source_name):
+        captured["source_name"] = source_name
+        captured["source_name_in_plan"] = write_plan["source_name"]
+        return {
+            "gate": "passed",
+            "mode": "official_public_web",
+            "reason": "verified_all_changed_items",
+            "message": "verified:tving",
+            "apply_allowed": True,
+            "changed_count": 1,
+            "verified_count": 1,
+            "items": [{"content_id": "OTT-1", "ok": True}],
+        }
+
+    monkeypatch.setattr(service, "verify_ott_write_plan", fake_verify_ott_write_plan)
+
+    verdict = asyncio.run(
+        service.verify_tving(
+            {
+                "source_name": "tving",
+                "verification_candidates": [{"content_id": "OTT-1"}],
+            }
+        )
+    )
+
+    assert captured == {
+        "source_name": "tving",
+        "source_name_in_plan": "tving",
+    }
+    assert verdict["mode"] == "official_public_web"
+    assert verdict["verified_count"] == 1
+
+
 def test_build_verification_gate_preserves_registered_verifier_payload(monkeypatch):
     async def _fake_verifier(write_plan):
         return {

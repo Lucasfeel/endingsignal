@@ -15,10 +15,15 @@ load_dotenv()
 
 from crawlers.kakaopage_novel_crawler import KakaoPageNovelCrawler
 from crawlers.kakao_webtoon_crawler import KakaoWebtoonCrawler
+from crawlers.coupang_play_ott_crawler import CoupangPlayOttCrawler
+from crawlers.disney_plus_ott_crawler import DisneyPlusOttCrawler
 from crawlers.laftel_ott_crawler import LaftelOttCrawler
+from crawlers.netflix_ott_crawler import NetflixOttCrawler
 from crawlers.naver_series_novel_crawler import NaverSeriesNovelCrawler
 from crawlers.naver_webtoon_crawler import NaverWebtoonCrawler
 from crawlers.ridi_novel_crawler import RidiNovelCrawler
+from crawlers.tving_ott_crawler import TvingOttCrawler
+from crawlers.wavve_ott_crawler import WavveOttCrawler
 from database import create_standalone_connection, get_cursor
 from services.cdc_event_service import (
     record_due_scheduled_completions,
@@ -36,6 +41,11 @@ ALL_CRAWLERS = [
     NaverSeriesNovelCrawler,
     KakaoPageNovelCrawler,
     RidiNovelCrawler,
+    TvingOttCrawler,
+    WavveOttCrawler,
+    CoupangPlayOttCrawler,
+    DisneyPlusOttCrawler,
+    NetflixOttCrawler,
     LaftelOttCrawler,
 ]
 
@@ -56,6 +66,11 @@ FINAL_COLLECTION_ORDER = (
     "naver_series",
     "kakao_page",
     "ridi",
+    "tving",
+    "wavve",
+    "coupangplay",
+    "disney_plus",
+    "netflix",
     "laftel",
 )
 
@@ -65,6 +80,11 @@ FINAL_COLLECTION_LABELS = {
     "naver_series": "\ub124\uc774\ubc84 \uc2dc\ub9ac\uc988",
     "kakao_page": "\uce74\uce74\uc624\ud398\uc774\uc9c0",
     "ridi": "\ub9ac\ub514",
+    "tving": "\ud2f0\ube59",
+    "wavve": "\uc6e8\uc774\ube0c",
+    "coupangplay": "\ucfe0\ud321\ud50c\ub808\uc774",
+    "disney_plus": "\ub514\uc988\ub2c8 \ud50c\ub7ec\uc2a4",
+    "netflix": "\ub137\ud50c\ub9ad\uc2a4",
     "laftel": "\ub77c\ud504\ud154",
 }
 
@@ -81,8 +101,19 @@ SOURCE_NAME_ALIASES = {
     "kakaopage_novel": "kakao_page",
     "kakaopage_novel_crawler": "kakao_page",
     "kakao_page": "kakao_page",
+    "coupang_play": "coupangplay",
+    "coupangplay": "coupangplay",
+    "coupang_play_ott": "coupangplay",
+    "coupang_play_ott_crawler": "coupangplay",
+    "disney_plus": "disney_plus",
+    "disneyplus": "disney_plus",
+    "disney_plus_ott": "disney_plus",
+    "disney_plus_ott_crawler": "disney_plus",
     "laftel": "laftel",
     "laftel_ott": "laftel",
+    "netflix": "netflix",
+    "netflix_ott": "netflix",
+    "netflix_ott_crawler": "netflix",
     "naver_series": "naver_series",
     "naver_series_novel": "naver_series",
     "naver_series_novel_crawler": "naver_series",
@@ -91,6 +122,12 @@ SOURCE_NAME_ALIASES = {
     "ridi": "ridi",
     "ridi_novel": "ridi",
     "ridi_novel_crawler": "ridi",
+    "tving": "tving",
+    "tving_ott": "tving",
+    "tving_ott_crawler": "tving",
+    "wavve": "wavve",
+    "wavve_ott": "wavve",
+    "wavve_ott_crawler": "wavve",
 }
 
 

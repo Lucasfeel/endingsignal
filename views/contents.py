@@ -2,6 +2,12 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from database import get_db, get_cursor
+from services.ott_content_service import (
+    OTT_CANONICAL_SOURCE,
+    OTT_PLATFORM_SOURCE_SET,
+    is_ott_platform_source,
+    resolve_display_meta,
+)
 from utils.perf import jsonify_timed
 from utils.text import normalize_search_text
 from utils.ttl_cache import TTLCache
@@ -46,7 +52,8 @@ jsonb_strip_nulls(jsonb_build_object(
     'sub_genres', meta->'attributes'->'sub_genres'
   )),
   'genres', meta->'genres',
-  'genre', meta->'genre'
+  'genre', meta->'genre',
+  'ott', meta->'ott'
 ))
 """.strip()
 
@@ -473,10 +480,29 @@ def _normalize_string_list(value):
     return []
 
 
+def _resolve_row_for_display(row, *, requested_sources=None):
+    coerced = coerce_row_dict(row)
+    safe_meta = normalize_meta(coerced.get("meta"))
+    content_type = str(coerced.get("content_type") or "").strip().lower()
+    source_name = str(coerced.get("source") or "").strip()
+    if content_type == "ott" or source_name == OTT_CANONICAL_SOURCE:
+        resolved_meta, resolved_source = resolve_display_meta(
+            safe_meta,
+            requested_sources=requested_sources,
+        )
+        coerced["meta"] = resolved_meta
+        coerced["source"] = resolved_source
+        coerced["__cursor_source"] = OTT_CANONICAL_SOURCE
+    else:
+        coerced["meta"] = safe_meta
+    return coerced
+
+
 def _extract_display_meta(meta):
     safe_meta = normalize_meta(meta)
     attrs = safe_get_dict(safe_meta.get("attributes"))
     common = safe_get_dict(safe_meta.get("common"))
+    ott_meta = safe_get_dict(safe_meta.get("ott"))
     content_url = (common.get("content_url") or common.get("url") or "") if isinstance(common, dict) else ""
     genres = _normalize_string_list(
         attrs.get("genres")
@@ -495,11 +521,18 @@ def _extract_display_meta(meta):
         "title_alias": common.get("title_alias") or "",
         "weekdays": normalize_weekdays(attrs.get("weekdays")),
         "genres": genres,
+        "platforms": ott_meta.get("platforms") or [],
+        "cast": _normalize_string_list(ott_meta.get("cast")),
+        "upcoming": bool(ott_meta.get("upcoming")),
+        "release_start_at": ott_meta.get("release_start_at"),
+        "release_end_at": ott_meta.get("release_end_at"),
+        "release_end_status": ott_meta.get("release_end_status") or "",
+        "needs_end_date_verification": bool(ott_meta.get("needs_end_date_verification")),
     }
 
 
 def _serialize_card_payload(row):
-    coerced = coerce_row_dict(row)
+    coerced = _resolve_row_for_display(row)
     display_meta = _extract_display_meta(coerced.get("meta"))
     status = coerced.get("status")
     return {
@@ -515,7 +548,7 @@ def _serialize_card_payload(row):
         "cursor": encode_cursor(
             coerced.get("title"),
             coerced.get("content_id"),
-            source=coerced.get("source"),
+            source=coerced.get("__cursor_source") or coerced.get("source"),
         ),
     }
 
@@ -615,16 +648,65 @@ def _parse_browse_days_args():
     return resolved_days if resolved_days else ["all"]
 
 
-def _append_source_filter(where_parts, params, source_filter):
+def _append_source_filter(
+    where_parts,
+    params,
+    source_filter,
+    *,
+    content_type=None,
+    source_column="source",
+    content_id_column="content_id",
+):
     mode = source_filter.get("mode")
     sources = source_filter.get("sources") or []
+    if str(content_type or "").strip().lower() == "ott":
+        ott_sources = [source_name for source_name in sources if is_ott_platform_source(source_name)]
+        regular_sources = [source_name for source_name in sources if not is_ott_platform_source(source_name)]
+        if mode == "multi" and sources:
+            branches = []
+            if regular_sources:
+                placeholders = ", ".join(["%s"] * len(regular_sources))
+                branches.append(f"{source_column} IN ({placeholders})")
+                params.extend(regular_sources)
+            if ott_sources:
+                placeholders = ", ".join(["%s"] * len(ott_sources))
+                branches.append(
+                    f"({source_column} = %s AND EXISTS (SELECT 1 FROM content_platform_links cpl "
+                    f"WHERE cpl.canonical_content_id = {content_id_column} "
+                    f"AND cpl.platform_source IN ({placeholders})))"
+                )
+                params.append(OTT_CANONICAL_SOURCE)
+                params.extend(ott_sources)
+            if branches:
+                where_parts.append(f"({' OR '.join(branches)})")
+            else:
+                where_parts.append("1 = 0")
+            return
+        if mode == "single" and sources:
+            if regular_sources:
+                where_parts.append(f"{source_column} = %s")
+                params.append(regular_sources[0])
+                return
+            if not ott_sources:
+                where_parts.append("1 = 0")
+                return
+            where_parts.append(f"{source_column} = %s")
+            params.append(OTT_CANONICAL_SOURCE)
+            where_parts.append(
+                f"EXISTS (SELECT 1 FROM content_platform_links cpl "
+                f"WHERE cpl.canonical_content_id = {content_id_column} "
+                f"AND cpl.platform_source = %s)"
+            )
+            params.append(ott_sources[0])
+            return
+
     if mode == "multi" and sources:
         placeholders = ", ".join(["%s"] * len(sources))
-        where_parts.append(f"source IN ({placeholders})")
+        where_parts.append(f"{source_column} IN ({placeholders})")
         params.extend(sources)
         return
     if mode == "single" and sources:
-        where_parts.append("source = %s")
+        where_parts.append(f"{source_column} = %s")
         params.append(sources[0])
 
 
@@ -826,7 +908,83 @@ def _apply_threshold_overrides(defaults, _q_len):
     return title_threshold, author_threshold
 
 
+def _build_ott_search_query(*, normalized_query, content_type, source, search_limit):
+    meta_expr = _meta_select_expr_for("c")
+    filters = [
+        "c.source = %s",
+        "COALESCE(c.is_deleted, FALSE) = FALSE",
+    ]
+    params = [OTT_CANONICAL_SOURCE]
+
+    if content_type:
+        filters.append("c.content_type = %s")
+        params.append(content_type)
+    else:
+        filters.append("c.content_type = 'ott'")
+
+    if source != "all" and is_ott_platform_source(source):
+        filters.append(
+            "EXISTS (SELECT 1 FROM content_platform_links cpl "
+            "WHERE cpl.canonical_content_id = c.content_id "
+            "AND cpl.platform_source = %s)"
+        )
+        params.append(source)
+
+    substring_param = f"%{normalized_query}%"
+    query = f"""
+        SELECT
+            c.content_id,
+            c.title,
+            c.status,
+            {meta_expr} AS meta,
+            c.source,
+            c.content_type
+        FROM contents c
+        WHERE {' AND '.join(filters)}
+          AND (
+            c.normalized_title = %s
+            OR c.normalized_title LIKE %s
+            OR c.normalized_authors LIKE %s
+            OR c.search_document %% %s
+          )
+        ORDER BY
+            CASE WHEN c.normalized_title = %s THEN 1 ELSE 0 END DESC,
+            CASE WHEN c.normalized_title LIKE %s THEN 1 ELSE 0 END DESC,
+            GREATEST(
+                similarity(COALESCE(c.normalized_title, ''), %s),
+                similarity(COALESCE(c.normalized_authors, ''), %s),
+                similarity(COALESCE(c.search_document, ''), %s)
+            ) DESC,
+            char_length(c.title) ASC,
+            c.title COLLATE "ko-KR-x-icu" ASC,
+            c.content_id ASC
+        LIMIT {search_limit}
+    """
+    params.extend(
+        [
+            normalized_query,
+            substring_param,
+            substring_param,
+            normalized_query,
+            normalized_query,
+            substring_param,
+            normalized_query,
+            normalized_query,
+            normalized_query,
+        ]
+    )
+    return query, tuple(params)
+
+
 def _build_search_query(*, normalized_query, content_type, source, search_limit):
+    if is_ott_platform_source(source):
+        return _build_ott_search_query(
+            normalized_query=normalized_query,
+            content_type=content_type,
+            source=source,
+            search_limit=search_limit,
+        )
+
     base_filters = ["COALESCE(is_deleted, FALSE) = FALSE"]
     base_params = []
 
@@ -981,10 +1139,10 @@ def search_contents():
         cursor.execute(search_query, params)
         raw_rows = cursor.fetchall()
 
+        requested_sources = [source] if source != "all" else None
         results = []
         for row in raw_rows:
-            coerced = coerce_row_dict(row)
-            coerced['meta'] = normalize_meta(coerced.get('meta'))
+            coerced = _resolve_row_for_display(row, requested_sources=requested_sources)
             results.append(coerced)
 
         return _json_response(results)
@@ -1020,17 +1178,36 @@ def get_content_detail():
 
         conn = get_db()
         cursor = get_cursor(conn)
-        cursor.execute(
-            """
-            SELECT content_id, title, status, meta, source, content_type
-            FROM contents
-            WHERE content_id = %s
-              AND source = %s
-              AND COALESCE(is_deleted, FALSE) = FALSE
-            LIMIT 1
-            """,
-            (content_id, source),
-        )
+        if is_ott_platform_source(source):
+            cursor.execute(
+                """
+                SELECT c.content_id, c.title, c.status, c.meta, c.source, c.content_type
+                FROM contents c
+                WHERE c.content_id = %s
+                  AND c.source = %s
+                  AND COALESCE(c.is_deleted, FALSE) = FALSE
+                  AND EXISTS (
+                    SELECT 1
+                    FROM content_platform_links cpl
+                    WHERE cpl.canonical_content_id = c.content_id
+                      AND cpl.platform_source = %s
+                  )
+                LIMIT 1
+                """,
+                (content_id, OTT_CANONICAL_SOURCE, source),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT content_id, title, status, meta, source, content_type
+                FROM contents
+                WHERE content_id = %s
+                  AND source = %s
+                  AND COALESCE(is_deleted, FALSE) = FALSE
+                LIMIT 1
+                """,
+                (content_id, source),
+            )
         row = cursor.fetchone()
         if not row:
             return _json_response(
@@ -1041,8 +1218,8 @@ def get_content_detail():
                 status_code=404,
             )
 
-        result = coerce_row_dict(row)
-        result["meta"] = normalize_meta(result.get("meta"))
+        requested_sources = [source] if is_ott_platform_source(source) else None
+        result = _resolve_row_for_display(row, requested_sources=requested_sources)
         return _json_response(result)
     except Exception:
         current_app.logger.exception("Unhandled error in get_content_detail")
@@ -1334,7 +1511,7 @@ def get_ongoing_contents_v2():
         ]
         query_params = [content_type, STATUS_ONGOING, STATUS_HIATUS]
 
-        _append_source_filter(where_parts, query_params, source_filter)
+        _append_source_filter(where_parts, query_params, source_filter, content_type=content_type)
         _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
 
         if content_type in {"webtoon", "novel"} and days != ["all"]:
@@ -1475,7 +1652,7 @@ def get_browse_contents_v3():
                     where_parts.append("status IN (%s, %s)")
                     query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
-                _append_source_filter(where_parts, query_params, source_filter)
+                _append_source_filter(where_parts, query_params, source_filter, content_type="novel")
                 _append_browse_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
 
                 return f"""
@@ -1577,7 +1754,7 @@ def get_browse_contents_v3():
                 where_parts.append("status IN (%s, %s)")
                 query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
-            _append_source_filter(where_parts, query_params, source_filter)
+            _append_source_filter(where_parts, query_params, source_filter, content_type=content_type)
             _append_browse_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id)
 
             if content_type == "webtoon" and requested_status == "ongoing":
@@ -1614,7 +1791,12 @@ def get_browse_contents_v3():
                     source=last_row.get("source"),
                 )
 
-        serialized = [_serialize_card_payload(row) for row in result_rows]
+        requested_sources = source_filter.get("sources") or []
+        hydrated_rows = [
+            _resolve_row_for_display(row, requested_sources=requested_sources)
+            for row in result_rows
+        ]
+        serialized = [_serialize_card_payload(row) for row in hydrated_rows]
         payload = {
             "contents": serialized,
             "next_cursor": next_cursor,
@@ -1689,7 +1871,7 @@ def get_novel_contents_v2():
                 where_parts.append("status IN (%s, %s)")
                 query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
-            _append_source_filter(where_parts, query_params, source_filter)
+            _append_source_filter(where_parts, query_params, source_filter, content_type="novel")
             _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
 
             return f"""
@@ -1854,7 +2036,7 @@ def get_hiatus_contents():
             "COALESCE(is_deleted, FALSE) = FALSE",
         ]
 
-        _append_source_filter(where_parts, query_params, source_filter)
+        _append_source_filter(where_parts, query_params, source_filter, content_type=content_type)
         if not _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id) and last_title:
             where_parts.append("title > %s")
             query_params.append(last_title)
@@ -1962,7 +2144,7 @@ def get_completed_contents():
             "COALESCE(is_deleted, FALSE) = FALSE",
         ]
 
-        _append_source_filter(where_parts, query_params, source_filter)
+        _append_source_filter(where_parts, query_params, source_filter, content_type=content_type)
         if not _append_cursor_filter(where_parts, query_params, cursor_title, cursor_source, cursor_content_id) and last_title:
             where_parts.append("title > %s")
             query_params.append(last_title)
