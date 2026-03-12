@@ -14,6 +14,7 @@ from services.ott_content_service import build_canonical_ott_entry
 from .canonical_ott_crawler import CanonicalOttCrawler
 
 TVING_PAGE_URL = "https://www.tving.com/more/band/HM257176"
+TVING_HOME_URL = "https://www.tving.com/"
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
     re.S,
@@ -25,6 +26,7 @@ _TVING_BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/145.0.0.0 Safari/537.36"
 )
+_TVING_ACCEPT_LANGUAGE = "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
 
 
 class TvingOttCrawler(CanonicalOttCrawler):
@@ -162,6 +164,60 @@ class TvingOttCrawler(CanonicalOttCrawler):
 
         return "", {}, "requests", errors
 
+    async def _warmup_browser_session(self, page, errors: list[str]):
+        try:
+            await page.goto(
+                TVING_HOME_URL,
+                wait_until="domcontentloaded",
+                timeout=60_000,
+            )
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10_000)
+            except Exception:
+                errors.append("PLAYWRIGHT_WARMUP_NETWORKIDLE_TIMEOUT")
+            await page.wait_for_timeout(2_500)
+        except Exception as exc:
+            errors.append(f"PLAYWRIGHT_WARMUP_FAILED:{type(exc).__name__}:{exc}")
+
+    async def _parse_playwright_target_page(self, page, errors: list[str]) -> tuple[str, Dict[str, Dict[str, Any]]]:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10_000)
+        except Exception:
+            errors.append("PLAYWRIGHT_NETWORKIDLE_TIMEOUT")
+
+        try:
+            await page.wait_for_selector('a[href^="/contents/P"]', state="attached", timeout=20_000)
+        except Exception:
+            errors.append("PLAYWRIGHT_SELECTOR_TIMEOUT")
+
+        for delay_ms in (1_500, 3_500, 7_000):
+            await page.wait_for_timeout(delay_ms)
+            dom_items = await page.evaluate(
+                """() => Array.from(document.querySelectorAll('a[href*="/contents/"]')).map((anchor) => {
+                    const href = anchor.getAttribute('href') || '';
+                    const text = (anchor.textContent || '').replace(/\\s+/g, ' ').trim();
+                    const img = anchor.querySelector('img[alt]');
+                    return {
+                        href,
+                        titleText: text,
+                        imgAlt: img ? (img.getAttribute('alt') || '') : '',
+                    };
+                })"""
+            )
+            parsed = self._entries_from_dom_link_items(dom_items)
+            if parsed:
+                return await page.content(), parsed
+
+            html = await page.content()
+            parsed = self._parse_page(html)
+            if parsed:
+                return html, parsed
+
+        final_url = str(page.url or "").strip()
+        title = (await page.title()).strip()
+        errors.append(f"PLAYWRIGHT_EMPTY:title={title}:url={final_url or TVING_PAGE_URL}")
+        return await page.content(), {}
+
     async def _fetch_with_playwright(self) -> tuple[str, Dict[str, Dict[str, Any]], list[str]]:
         from playwright.async_api import async_playwright
 
@@ -177,50 +233,32 @@ class TvingOttCrawler(CanonicalOttCrawler):
                 ignore_https_errors=True,
                 viewport={"width": 1440, "height": 2000},
                 user_agent=_TVING_BROWSER_USER_AGENT,
+                timezone_id="Asia/Seoul",
+                extra_http_headers={
+                    "Accept-Language": _TVING_ACCEPT_LANGUAGE,
+                    "Referer": TVING_HOME_URL,
+                },
             )
             page = await context.new_page()
             try:
-                await page.goto(
-                    TVING_PAGE_URL,
-                    wait_until="domcontentloaded",
-                    timeout=60_000,
-                )
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=10_000)
-                except Exception:
-                    errors.append("PLAYWRIGHT_NETWORKIDLE_TIMEOUT")
+                await self._warmup_browser_session(page, errors)
 
-                try:
-                    await page.wait_for_selector('a[href^="/contents/P"]', state="attached", timeout=20_000)
-                except Exception:
-                    errors.append("PLAYWRIGHT_SELECTOR_TIMEOUT")
-
-                for delay_ms in (1_500, 3_500, 7_000):
-                    await page.wait_for_timeout(delay_ms)
-                    dom_items = await page.evaluate(
-                        """() => Array.from(document.querySelectorAll('a[href*="/contents/"]')).map((anchor) => {
-                            const href = anchor.getAttribute('href') || '';
-                            const text = (anchor.textContent || '').replace(/\\s+/g, ' ').trim();
-                            const img = anchor.querySelector('img[alt]');
-                            return {
-                                href,
-                                titleText: text,
-                                imgAlt: img ? (img.getAttribute('alt') || '') : '',
-                            };
-                        })"""
+                for attempt_name in ("primary", "retry_after_warmup"):
+                    await page.goto(
+                        TVING_PAGE_URL,
+                        wait_until="domcontentloaded",
+                        timeout=60_000,
                     )
-                    parsed = self._entries_from_dom_link_items(dom_items)
-                    if parsed:
-                        return await page.content(), parsed, errors
-
-                    html = await page.content()
-                    parsed = self._parse_page(html)
+                    html, parsed = await self._parse_playwright_target_page(page, errors)
                     if parsed:
                         return html, parsed, errors
 
-                final_url = str(page.url or "").strip()
-                title = (await page.title()).strip()
-                errors.append(f"PLAYWRIGHT_EMPTY:title={title}:url={final_url or TVING_PAGE_URL}")
+                    final_url = str(page.url or "").strip()
+                    if final_url and _TVING_ERROR_PATH_RE.search(final_url):
+                        errors.append(f"PLAYWRIGHT_ERROR_PAGE:{attempt_name}:{final_url}")
+                    if attempt_name == "primary":
+                        await self._warmup_browser_session(page, errors)
+
                 return await page.content(), {}, errors
             finally:
                 await context.close()
