@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict
 
 import requests
+from bs4 import BeautifulSoup
 
 import config
 from services.ott_content_service import build_canonical_ott_entry
@@ -17,6 +18,7 @@ _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
     re.S,
 )
+_CONTENT_PATH_RE = re.compile(r"/contents/(?P<code>[A-Z0-9]+)")
 
 
 class TvingOttCrawler(CanonicalOttCrawler):
@@ -30,10 +32,37 @@ class TvingOttCrawler(CanonicalOttCrawler):
     def _build_content_url(code: str) -> str:
         return f"https://www.tving.com/contents/{code}"
 
+    def _parse_dom_page(self, html: str) -> Dict[str, Dict[str, Any]]:
+        soup = BeautifulSoup(html or "", "html.parser")
+        entries: Dict[str, Dict[str, Any]] = {}
+        for anchor in soup.select('a[href*="/contents/"]'):
+            href = str(anchor.get("href") or "").strip()
+            match = _CONTENT_PATH_RE.search(href)
+            if not match:
+                continue
+            code = str(match.group("code") or "").strip()
+            title = " ".join(anchor.get_text(" ", strip=True).split()).strip()
+            if not title:
+                img = anchor.select_one("img[alt]")
+                title = str(img.get("alt") or "").strip() if img is not None else ""
+            if not code or not title or not code.startswith("P"):
+                continue
+            entry = build_canonical_ott_entry(
+                platform_source=self.source_name,
+                title=title,
+                platform_content_id=code,
+                platform_url=self._build_content_url(code),
+                thumbnail_url=None,
+                upcoming=True,
+                availability_status="scheduled",
+            )
+            entries[entry["canonical_content_id"]] = entry
+        return entries
+
     def _parse_page(self, html: str) -> Dict[str, Dict[str, Any]]:
         match = _NEXT_DATA_RE.search(str(html or ""))
         if not match:
-            return {}
+            return self._parse_dom_page(html)
 
         payload = json.loads(match.group(1))
         queries = (
@@ -68,7 +97,7 @@ class TvingOttCrawler(CanonicalOttCrawler):
                 availability_status="scheduled",
             )
             entries[entry["canonical_content_id"]] = entry
-        return entries
+        return entries or self._parse_dom_page(html)
 
     async def _fetch_with_playwright(self) -> str:
         from playwright.async_api import async_playwright
