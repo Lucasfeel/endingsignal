@@ -1181,6 +1181,8 @@ const STATE = {
     requestSeq: 0,
     activeIndex: -1,
     recentlyOpened: [],
+    idleFallbackByTab: {},
+    idleFetchPromises: {},
   },
   isMyPageOpen: false,
   overlayStack: [],
@@ -1197,6 +1199,7 @@ const STATE = {
     user: null,
     isChecking: false,
     uiMode: 'login',
+    modalReason: 'default',
     avatarImageFailed: false,
     lastAvatarUrl: null,
   },
@@ -1465,6 +1468,7 @@ const UI = {
   filtersWrapper: document.getElementById('filtersWrapper'),
   subscribeModal: document.getElementById('subscribeModal'),
   subscribeCompletionButton: document.getElementById('subscribeCompletionButton'),
+  subscribeVisitButton: document.getElementById('subscribeVisitButton'),
   subscribeStateLine: document.getElementById('subscribeStateLine'),
   subscribeStateDot: document.getElementById('subscribeStateDot'),
   subscribeStateText: document.getElementById('subscribeStateText'),
@@ -1493,6 +1497,7 @@ const UI = {
   searchIdle: document.getElementById('searchIdle'),
   searchResultsView: document.getElementById('searchResultsView'),
   searchResultsMeta: document.getElementById('searchResultsMeta'),
+  searchResultLabel: document.getElementById('searchResultLabel'),
   searchPageResults: document.getElementById('searchPageResults'),
   searchPageEmpty: document.getElementById('searchPageEmpty'),
   searchPageLoading: document.getElementById('searchPageLoading'),
@@ -1507,6 +1512,9 @@ const UI = {
   searchResultCount: document.getElementById('searchResultCount'),
   myPage: document.getElementById('myPage'),
   myPageBackBtn: document.getElementById('myPageBackBtn'),
+  myPageSummaryStatus: document.getElementById('myPageSummaryStatus'),
+  myPageSummaryActiveCount: document.getElementById('myPageSummaryActiveCount'),
+  myPageSummaryCompletedCount: document.getElementById('myPageSummaryCompletedCount'),
   myPageEmailValue: document.getElementById('myPageEmailValue'),
   myPageCreatedAtRow: document.getElementById('myPageCreatedAtRow'),
   myPageCreatedAtValue: document.getElementById('myPageCreatedAtValue'),
@@ -1519,6 +1527,7 @@ const UI = {
   myPageLogoutBtn: document.getElementById('myPageLogoutBtn'),
   myPageEntryButton: document.getElementById('myPageEntryButton'),
   profileMenuMyPage: document.getElementById('profileMenuMyPage'),
+  authDescription: document.getElementById('authDescription'),
 };
 
 // DATA_UI_CLASS_MAP: maps data-ui keys in static HTML to UI_CLASSES tokens.
@@ -1715,6 +1724,16 @@ function renderEmptyState(containerEl, { title = '', message = '', actions = [] 
 
   containerEl.appendChild(wrapper);
 }
+
+const createWorksEmptyState = ({
+  title = '\uD45C\uC2DC\uD560 \uC791\uD488\uC774 \uC5C6\uC5B4\uC694',
+  message = '\uC120\uD0DD\uD55C \uC870\uAC74\uC5D0 \uB9DE\uB294 \uC791\uD488\uC774 \uC544\uC9C1 \uC5C6\uC5B4\uC694.',
+  actions = [],
+} = {}) => ({
+  title,
+  message,
+  actions: Array.isArray(actions) ? actions : [],
+});
 
 let contentGridObserver = null;
 
@@ -2164,10 +2183,7 @@ const restorePaginatedViewFromCache = async (snapshot, { requestSeq, cacheKey = 
   UI.contentGrid.innerHTML = '';
 
   if (!pg.items.length && pg.done) {
-    renderEmptyState(UI.contentGrid, {
-      title: '콘텐츠가 없습니다.',
-      message: '조건에 맞는 콘텐츠가 없습니다.',
-    });
+    renderEmptyState(UI.contentGrid, createWorksEmptyState());
     setCountIndicatorText('');
     hideLoadMoreUI();
     disconnectInfiniteObserver();
@@ -2207,8 +2223,11 @@ const updateCountIndicator = (category) => {
     return;
   }
 
-  const loadingSuffix = pg.loading ? ' (불러오는 중...)' : '';
-  setCountIndicatorText(`불러온 콘텐츠 ${pg.totalLoaded}${loadingSuffix}`);
+  setCountIndicatorText(
+    formatVisibleContentCount(pg.totalLoaded, {
+      loading: Boolean(pg.loading),
+    }),
+  );
 };
 
 const hideLoadMoreUI = () => {
@@ -2343,7 +2362,6 @@ const clearAccessToken = () => {
 const requireAuthOrPrompt = (_actionName) => {
   const token = getAccessToken();
   if (!token) {
-    showToast('로그인이 필요합니다.', { type: 'error' });
     openAuthModal({ reason: _actionName || 'auth-required' });
     return false;
   }
@@ -2554,7 +2572,7 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
   if (!response.ok) {
     const errorObj = await buildError();
 
-    if (response.status === 401) {
+    if (response.status === 401 && token) {
       logout({ silent: true });
       showToast('세션이 만료되었습니다. 다시 로그인해주세요.', { type: 'error' });
     }
@@ -2764,6 +2782,7 @@ async function loadSubscriptions(opts = {}) {
     syncAllRenderedStarBadges();
     syncMySubListInPlace();
     if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+    if (STATE.isMyPageOpen) renderMyPageSummary([], { hasData: false });
     return [];
   }
 
@@ -2819,6 +2838,9 @@ async function loadSubscriptions(opts = {}) {
         syncAllRenderedStarBadges();
         syncMySubListInPlace();
         if (STATE.currentModalContent) syncSubscribeModalUI(STATE.currentModalContent);
+      }
+      if (STATE.isMyPageOpen) {
+        renderMyPageSummary(normalized, { hasData: true });
       }
 
       return normalized;
@@ -3001,10 +3023,10 @@ function syncSubscribeModalUI(content) {
   const modalState = STATE.subscribeModalState || { isLoading: false, loadFailed: false };
   const completionSubscribed =
     !modalState.isLoading && !modalState.loadFailed ? isCompletionSubscribed(content) : null;
-  const isCompletedContent = isContentCompletedForBadge(content);
   const showLoadingState = modalState.isLoading;
   const showSubscribedState = completionSubscribed === true;
   const shouldShowStateLine = showLoadingState || !modalState.loadFailed;
+  const contentUrl = getContentUrl(content);
 
   if (UI.subscribeStateLine) {
     UI.subscribeStateLine.classList.toggle('hidden', !shouldShowStateLine);
@@ -3036,29 +3058,11 @@ function syncSubscribeModalUI(content) {
     }
 
     if (modalState.loadFailed) {
-      if (isCompletedContent) {
-        return {
-          action: 'visit',
-          label: '보러가기',
-          isSubscribed: completionSubscribed,
-          visualSubscribed: true,
-        };
-      }
-
       return {
         action: 'retry',
         label: '다시 시도',
         isSubscribed: completionSubscribed,
         visualSubscribed: completionSubscribed,
-      };
-    }
-
-    if (isCompletedContent && completionSubscribed !== true) {
-      return {
-        action: 'visit',
-        label: '보러가기',
-        isSubscribed: completionSubscribed,
-        visualSubscribed: true,
       };
     }
 
@@ -3072,7 +3076,7 @@ function syncSubscribeModalUI(content) {
 
   const disabledClasses = UI_CLASSES.btnDisabled.split(' ');
   const shouldDisable =
-    primaryAction.action === 'loading' || (STATE.subscribeToggleInFlight && primaryAction.action !== 'visit');
+    primaryAction.action === 'loading' || STATE.subscribeToggleInFlight;
   const setButtonState = (btn, { label, isSubscribed, visualSubscribed = isSubscribed }) => {
     if (!btn) return;
     if (shouldDisable) btn.classList.add(...disabledClasses);
@@ -3094,6 +3098,10 @@ function syncSubscribeModalUI(content) {
       isSubscribed: primaryAction.isSubscribed,
       visualSubscribed: primaryAction.visualSubscribed,
     });
+  }
+
+  if (UI.subscribeVisitButton) {
+    UI.subscribeVisitButton.classList.toggle('hidden', !contentUrl);
   }
 }
 function syncMySubListInPlace() {
@@ -3327,6 +3335,7 @@ const RECENTLY_SEARCHED_CONTENTS_KEY = 'es_recently_searched_contents';
 const MAX_RECENTLY_SEARCHED_CONTENTS = 12;
 const HOME_RECOMMENDATIONS_LIMIT = 12;
 const POPULAR_GRID_LIMIT = 9;
+const SEARCH_IDLE_POOL_LIMIT = 18;
 const KAKAO_THUMB_STYLE_ID = 'kakao-thumb-styles';
 const GRID_LAYOUT_CLASS_TOKENS = [
   'grid',
@@ -3423,6 +3432,28 @@ const getAspectByType = (type) => {
   if (type === 'novel') return 'aspect-[1/1.4]';
   if (type === 'ott') return 'aspect-[2/3]';
   return 'aspect-[3/4]';
+};
+
+const getTabDisplayName = (tabId) => {
+  if (tabId === 'novel') return '웹소설';
+  if (tabId === 'ott') return 'OTT';
+  if (tabId === 'my') return '내 구독';
+  return '웹툰';
+};
+
+const formatVisibleContentCount = (count, { loading = false } = {}) => {
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  if (safeCount <= 0) return '';
+  return `현재 표시 중인 작품 ${safeCount}개${loading ? ' 불러오는 중...' : ''}`;
+};
+
+const updateSearchResultMeta = (count = 0) => {
+  if (UI.searchResultLabel) {
+    UI.searchResultLabel.innerHTML = `현재 표시 중인 작품 <span id="searchResultCount">${count}</span>개`;
+    UI.searchResultCount = document.getElementById('searchResultCount');
+  } else if (UI.searchResultCount) {
+    UI.searchResultCount.textContent = String(count);
+  }
 };
 
 let searchViewportCleanup = null;
@@ -3779,7 +3810,93 @@ const shuffleArray = (arr) => {
   return arr;
 };
 
-const renderPopularGrid = () => {
+const getSearchIdleFallbackPool = (tabId) => {
+  if (
+    STATE.rendering?.tabId === tabId &&
+    Array.isArray(STATE.rendering?.list) &&
+    STATE.rendering.list.length
+  ) {
+    return STATE.rendering.list.slice(0, SEARCH_IDLE_POOL_LIMIT);
+  }
+
+  const cached = STATE.search?.idleFallbackByTab?.[tabId];
+  return Array.isArray(cached) ? cached.slice(0, SEARCH_IDLE_POOL_LIMIT) : [];
+};
+
+const normalizeSearchIdleItems = (items, tabId) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => normalizeContentForGrid(item, getSearchSource(tabId)))
+    .filter((item) => item?.content_id && item?.source);
+
+const showSearchPopularPlaceholder = (message = '작품을 준비 중입니다.') => {
+  const grid = UI.searchPopularGrid;
+  if (!grid) return;
+  grid.innerHTML = '';
+  if (message === '__skeleton__') {
+    for (let i = 0; i < 6; i += 1) {
+      const item = document.createElement('div');
+      item.className = 'h-[92px] rounded-2xl skeleton';
+      grid.appendChild(item);
+    }
+    return;
+  }
+  const placeholder = document.createElement('div');
+  placeholder.className = 'text-sm es-muted col-span-full text-center py-8';
+  placeholder.textContent = message;
+  grid.appendChild(placeholder);
+};
+
+async function fetchSearchIdleFallback(tabId, { allowWebtoonFallback = true } = {}) {
+  const existing = getSearchIdleFallbackPool(tabId);
+  if (existing.length) return existing;
+
+  if (!STATE.search.idleFetchPromises[tabId]) {
+    STATE.search.idleFetchPromises[tabId] = (async () => {
+      try {
+        const request = getPaginatedBrowseRequest(tabId, getAspectByType(tabId));
+        let items = [];
+
+        if (request?.endpointPath) {
+          const response = await apiRequest('GET', request.endpointPath, {
+            query: {
+              ...request.baseQuery,
+              per_page: SEARCH_IDLE_POOL_LIMIT,
+            },
+          });
+          items = Array.isArray(response?.contents) ? response.contents : [];
+          items = normalizeSearchIdleItems(items, tabId);
+          items = filterItemsBySources(items, request.sourceConfig?.filterSources || []);
+          if (tabId === 'ott') {
+            items = filterOttItemsByGenres(
+              items,
+              STATE.filters?.ott?.genres || DEFAULT_OTT_GENRES,
+            );
+          }
+        }
+
+        if (!items.length && allowWebtoonFallback && tabId !== 'webtoon') {
+          items = await fetchSearchIdleFallback('webtoon', {
+            allowWebtoonFallback: false,
+          });
+        }
+
+        STATE.search.idleFallbackByTab[tabId] = Array.isArray(items)
+          ? items.slice(0, SEARCH_IDLE_POOL_LIMIT)
+          : [];
+        return STATE.search.idleFallbackByTab[tabId];
+      } catch (_err) {
+        STATE.search.idleFallbackByTab[tabId] = [];
+        return [];
+      } finally {
+        delete STATE.search.idleFetchPromises[tabId];
+      }
+    })();
+  }
+
+  return STATE.search.idleFetchPromises[tabId];
+}
+
+const renderPopularGrid = async () => {
   const grid = UI.searchPopularGrid;
   if (!grid) return;
 
@@ -3803,7 +3920,7 @@ const renderPopularGrid = () => {
   if (UI.searchPopularSubtitle) {
     UI.searchPopularSubtitle.textContent = useRecent
       ? '최근에 열어본 작품이 여기에 표시됩니다.'
-      : '최근 열어본 작품이 없어서 추천 작품을 보여드려요.';
+      : `${getTabDisplayName(tabId)} 탭에서 이어서 살펴볼 작품을 보여드려요.`;
     UI.searchPopularSubtitle.classList.toggle('hidden', false);
   }
 
@@ -3813,7 +3930,7 @@ const renderPopularGrid = () => {
         .filter((item) => item?.content_id && item?.source)
         .slice(0, POPULAR_GRID_LIMIT)
     : (() => {
-        const pool = Array.isArray(STATE.rendering?.list) ? [...STATE.rendering.list] : [];
+        const pool = [...getSearchIdleFallbackPool(tabId)];
         if (!pool.length) return [];
         return shuffleArray(pool)
           .slice(0, 30)
@@ -3822,10 +3939,27 @@ const renderPopularGrid = () => {
       })();
 
   if (!items.length) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'text-sm es-muted col-span-full text-center py-8';
-    placeholder.textContent = '추천 작품을 불러오지 못했습니다.';
-    grid.appendChild(placeholder);
+    if (!useRecent) {
+      showSearchPopularPlaceholder('__skeleton__');
+      const fetched = await fetchSearchIdleFallback(tabId);
+      if (
+        STATE.search.pageOpen &&
+        !STATE.search.query &&
+        STATE.search.uiMode === 'idle' &&
+        getSearchType() === tabId
+      ) {
+        if (Array.isArray(fetched) && fetched.length) {
+          renderPopularGrid();
+        } else {
+          showSearchPopularPlaceholder(
+            `${getTabDisplayName(tabId)} 탭에서 작품을 살펴보면 여기에 이어서 보여드려요.`,
+          );
+        }
+      }
+      return;
+    }
+
+    showSearchPopularPlaceholder('최근 본 작품이 아직 없습니다.');
     return;
   }
 
@@ -3858,7 +3992,7 @@ const showSearchIdle = () => {
   setSearchUiMode('idle');
   if (UI.searchPageResults) UI.searchPageResults.innerHTML = '';
   if (UI.searchPageEmpty) UI.searchPageEmpty.classList.add('hidden');
-  if (UI.searchResultCount) UI.searchResultCount.textContent = '0';
+  updateSearchResultMeta(0);
   renderRecentSearches();
   renderPopularGrid();
 };
@@ -3874,7 +4008,7 @@ function showSearchEmpty(title, { message = '', actions = [] } = {}) {
     UI.searchPageResults.innerHTML = '';
   }
   if (UI.searchPageLoading) UI.searchPageLoading.classList.add('hidden');
-  if (UI.searchResultCount) UI.searchResultCount.textContent = '0';
+  updateSearchResultMeta(0);
 
   if (UI.searchEmptyTitle) UI.searchEmptyTitle.textContent = title || '검색 결과가 없어요';
   if (UI.searchEmptySubtitle) UI.searchEmptySubtitle.textContent = message || '다른 키워드로 검색해보세요.';
@@ -4036,7 +4170,7 @@ async function renderSearchResults(items, effectiveType) {
     ? items.map((raw) => normalizeContentForGrid(raw, getSearchSource(effectiveType)))
     : [];
   STATE.search.results = normalizedItems;
-  if (UI.searchResultCount) UI.searchResultCount.textContent = String(normalizedItems.length || 0);
+  updateSearchResultMeta(normalizedItems.length || 0);
 
   if (!normalizedItems.length) {
     const queryText = (STATE.search.query || '').trim();
@@ -4358,6 +4492,54 @@ function renderMyPageEmail(user = {}) {
   }
 }
 
+function getMyPageSummaryCounts(subscriptions = []) {
+  return (Array.isArray(subscriptions) ? subscriptions : []).reduce(
+    (acc, item) => {
+      if (item?.subscription?.wants_completion !== true) return acc;
+
+      const finalState = safeObj(item?.final_state);
+      const isCompleted =
+        finalState?.is_scheduled_completion !== true &&
+        isCompletedStatusToken(finalState?.final_status);
+
+      if (isCompleted) acc.completed += 1;
+      else acc.active += 1;
+
+      return acc;
+    },
+    { active: 0, completed: 0 },
+  );
+}
+
+function renderMyPageSummary(subscriptions = STATE.mySubscriptions, opts = {}) {
+  const loading = Boolean(opts?.loading);
+  const hasData =
+    typeof opts?.hasData === 'boolean'
+      ? opts.hasData
+      : Array.isArray(subscriptions);
+
+  const counts = getMyPageSummaryCounts(subscriptions);
+  const totalTracked = counts.active + counts.completed;
+
+  if (UI.myPageSummaryActiveCount) {
+    UI.myPageSummaryActiveCount.textContent = hasData ? String(counts.active) : '-';
+  }
+  if (UI.myPageSummaryCompletedCount) {
+    UI.myPageSummaryCompletedCount.textContent = hasData ? String(counts.completed) : '-';
+  }
+  if (UI.myPageSummaryStatus) {
+    if (loading) {
+      UI.myPageSummaryStatus.textContent = '구독 현황을 불러오는 중';
+    } else if (!hasData) {
+      UI.myPageSummaryStatus.textContent = '로그인 후 구독 현황을 확인할 수 있어요';
+    } else if (!totalTracked) {
+      UI.myPageSummaryStatus.textContent = '구독 중인 작품이 아직 없어요';
+    } else {
+      UI.myPageSummaryStatus.textContent = `현재 기준 ${totalTracked}개 작품`;
+    }
+  }
+}
+
 async function fetchMyPageUser() {
   const token = getAccessToken();
 
@@ -4388,6 +4570,7 @@ async function fetchMyPageUser() {
 }
 
 function handleMyPageUnauthorized() {
+  renderMyPageSummary([], { hasData: false });
   closeMyPage({ fromPopstate: true });
   openAuthModal({ reason: 'my-page' });
 }
@@ -4495,7 +4678,25 @@ function openMyPage() {
   UI.myPage.classList.remove('hidden');
   renderBottomNav();
 
+  const hasCachedSubscriptions =
+    Array.isArray(STATE.mySubscriptions) &&
+    (STATE.mySubscriptions.length > 0 || Boolean(STATE.subscriptionsLoadedAt));
+  renderMyPageSummary(hasCachedSubscriptions ? STATE.mySubscriptions : [], {
+    loading: !hasCachedSubscriptions,
+    hasData: hasCachedSubscriptions,
+  });
+
   if (STATE.auth.user) renderMyPageEmail(STATE.auth.user);
+  loadSubscriptions({ silent: true })
+    .then((subs) => {
+      if (!STATE.isMyPageOpen) return;
+      renderMyPageSummary(subs, { hasData: true });
+    })
+    .catch((err) => {
+      if (isAbortError(err) || !STATE.isMyPageOpen) return;
+      console.warn('Failed to load subscriptions for my page summary', err);
+      renderMyPageSummary([], { hasData: false });
+    });
   fetchMyPageUser();
 }
 
@@ -4785,10 +4986,44 @@ function setupProfileButton() {
   }
 }
 
+function getAuthDescription(reason = 'default', mode = 'login') {
+  const normalizedReason = safeString(reason, 'default');
+  if (mode === 'register') {
+    if (normalizedReason === 'my-tab') {
+      return '계정을 만들고 내 구독을 확인해보세요.';
+    }
+    if (normalizedReason === 'my-page') {
+      return '계정을 만들고 프로필과 구독 현황을 관리해보세요.';
+    }
+    if (normalizedReason === 'profile') {
+      return '계정을 만들고 프로필과 구독을 관리해보세요.';
+    }
+    if (normalizedReason === 'subscription-toggle-modal' || normalizedReason === 'subscription-auth') {
+      return '계정을 만들고 완결 알림을 바로 구독해보세요.';
+    }
+    return '이메일과 비밀번호로 계정을 만들어보세요.';
+  }
+
+  if (normalizedReason === 'my-tab') {
+    return '내 구독을 보려면 로그인해주세요.';
+  }
+  if (normalizedReason === 'my-page') {
+    return '프로필을 보려면 로그인해주세요.';
+  }
+  if (normalizedReason === 'profile') {
+    return '프로필을 보려면 로그인해주세요.';
+  }
+  if (normalizedReason === 'subscription-toggle-modal' || normalizedReason === 'subscription-auth') {
+    return '완결 알림을 구독하려면 로그인해주세요.';
+  }
+  return '이메일과 비밀번호를 입력해주세요.';
+}
+
 function applyAuthMode(mode = 'login') {
   STATE.auth.uiMode = mode;
 
   const titleEl = document.getElementById('authTitle');
+  const descriptionEl = UI.authDescription;
   const submitBtn = document.getElementById('authSubmitBtn');
   const confirmRow = document.getElementById('authPasswordConfirmRow');
   const confirmInput = document.getElementById('authPasswordConfirm');
@@ -4800,12 +5035,18 @@ function applyAuthMode(mode = 'login') {
 
   if (mode === 'register') {
     if (titleEl) titleEl.textContent = '회원가입';
+    if (descriptionEl) {
+      descriptionEl.textContent = getAuthDescription(STATE.auth.modalReason, 'register');
+    }
     if (submitBtn) submitBtn.textContent = '회원가입';
     if (confirmRow) confirmRow.classList.remove('hidden');
     if (hintTextEl) hintTextEl.textContent = '이미 계정이 있나요?';
     if (toggleBtn) toggleBtn.textContent = '로그인';
   } else {
     if (titleEl) titleEl.textContent = '로그인';
+    if (descriptionEl) {
+      descriptionEl.textContent = getAuthDescription(STATE.auth.modalReason, 'login');
+    }
     if (submitBtn) submitBtn.textContent = '로그인';
     if (confirmRow) confirmRow.classList.add('hidden');
     if (hintTextEl) hintTextEl.textContent = '계정이 없으신가요?';
@@ -4824,8 +5065,10 @@ function openAuthModal(_opts = {}) {
   if (!modal) return;
 
   const mode = typeof _opts === 'string' ? _opts : _opts?.mode || 'login';
+  const reason = typeof _opts === 'string' ? 'default' : _opts?.reason || 'default';
 
   closeProfileMenu();
+  STATE.auth.modalReason = reason;
   if (errorEl) errorEl.textContent = '';
   if (emailEl) emailEl.value = '';
   if (pwdEl) pwdEl.value = '';
@@ -4916,7 +5159,6 @@ function setupAuthModalListeners() {
       }
 
       if (errorEl) errorEl.textContent = message;
-      showToast(message, { type: 'error' });
     }
   };
 
@@ -5359,6 +5601,11 @@ const filterOttItemsByGenres = (items, genreFilters) => {
   });
 };
 
+const hasActiveOttGenreFilter = () => {
+  const selectedGenres = sanitizeOttGenres(STATE.filters?.ott?.genres, DEFAULT_OTT_GENRES);
+  return selectedGenres.length > 0 && !selectedGenres.includes(EXCLUSIVE_MULTI_ALL_ID);
+};
+
 const getPaginatedBrowseRequest = (tabId, aspectClass) => {
   if (tabId === 'webtoon' || tabId === 'ott') {
     let statusKey = 'ongoing';
@@ -5705,7 +5952,7 @@ async function renderHomeFeed({
   syncAllRenderedStarBadges();
 
   const totalCount = recommendations.length + historyItems.length;
-  setCountIndicatorText(totalCount ? `총 ${totalCount}건` : '');
+  setCountIndicatorText(formatVisibleContentCount(totalCount));
   hideLoadMoreUI();
   return { itemCount: totalCount };
 }
@@ -5867,6 +6114,28 @@ async function loadNextPage(category, { signal } = {}) {
   }
 }
 
+const OTT_GENRE_PREFETCH_PAGE_LIMIT = 4;
+
+async function primeOttGenrePagination(
+  category,
+  { signal, maxExtraPages = OTT_GENRE_PREFETCH_PAGE_LIMIT } = {}
+) {
+  const pg = STATE.pagination?.[category];
+  if (!pg || pg.tabId !== 'ott' || !hasActiveOttGenreFilter()) return;
+
+  let extraPagesLoaded = 0;
+  while (
+    !signal?.aborted &&
+    pg.requestSeq === STATE.contentRequestSeq &&
+    pg.items.length === 0 &&
+    !pg.done &&
+    extraPagesLoaded < maxExtraPages
+  ) {
+    extraPagesLoaded += 1;
+    await loadNextPage(category, { signal });
+  }
+}
+
 async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   if (!UI.contentGrid) return;
 
@@ -5893,14 +6162,16 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   const hadVisibleCards = UI.contentGrid.childElementCount > 0;
   const nextLayoutMode = tabId === 'home' ? 'home' : 'grid';
   const currentLayoutMode = getContentGridLayoutMode();
+  const hasOttGenreFilter = tabId === 'ott' && hasActiveOttGenreFilter();
   const retainExistingView =
     hadVisibleCards &&
     VIEW_CACHEABLE_TABS.has(tabId) &&
     !['my', 'search'].includes(tabId) &&
-    currentLayoutMode === nextLayoutMode;
+    currentLayoutMode === nextLayoutMode &&
+    !hasOttGenreFilter;
 
   STATE.isLoading = true;
-  if (hadVisibleCards && currentLayoutMode !== nextLayoutMode) {
+  if (hadVisibleCards && (currentLayoutMode !== nextLayoutMode || hasOttGenreFilter)) {
     UI.contentGrid.innerHTML = '';
   }
   setContentGridLayout(nextLayoutMode);
@@ -6111,15 +6382,13 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
         updateCountIndicator(category);
         setupInfiniteObserver(category);
         await loadNextPage(category, { signal });
+        await primeOttGenrePagination(category, { signal });
         if (isStale()) return { stale: true };
 
         const pg = STATE.pagination?.[category];
         if (pg && pg.items.length === 0 && pg.done) {
           UI.contentGrid.innerHTML = '';
-          renderEmptyState(UI.contentGrid, {
-            title: '콘텐츠가 없습니다.',
-            message: '조건에 맞는 콘텐츠가 없습니다.',
-          });
+          renderEmptyState(UI.contentGrid, createWorksEmptyState());
           setCountIndicatorText('');
           hideLoadMoreUI();
           disconnectInfiniteObserver();
@@ -6235,8 +6504,7 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   UI.contentGrid.innerHTML = '';
 
   if (!data.length) {
-    if (emptyStateConfig) renderEmptyState(UI.contentGrid, emptyStateConfig);
-    else renderEmptyState(UI.contentGrid, { title: '콘텐츠가 없습니다.' });
+    renderEmptyState(UI.contentGrid, emptyStateConfig || createWorksEmptyState());
     return { itemCount: 0, aspectClass };
   }
 
@@ -6246,7 +6514,10 @@ async function fetchAndRenderContent(tabId, { renderToken } = {}) {
   STATE.rendering.list = data;
   STATE.rendering.aspectClass = aspectClass;
   STATE.rendering.tabId = tabId;
-  setCountIndicatorText(`총 ${data.length}건`);
+  if (['webtoon', 'novel', 'ott'].includes(tabId)) {
+    STATE.search.idleFallbackByTab[tabId] = data.slice(0, SEARCH_IDLE_POOL_LIMIT);
+  }
+  setCountIndicatorText(formatVisibleContentCount(data.length));
 
   await renderInBatches({
     items: data,
@@ -6453,6 +6724,7 @@ function createCard(content, tabId, aspectClass) {
       badgeRow.appendChild(badgeEl);
     }
   }
+
   const textContainer = document.createElement('div');
   setClasses(textContainer, UI_CLASSES.cardTextWrap);
   if (showCompletionBell) {
@@ -6466,7 +6738,7 @@ function createCard(content, tabId, aspectClass) {
 
   const authorEl = document.createElement('p');
   setClasses(authorEl, UI_CLASSES.cardMeta);
-  authorEl.textContent = authors || '작가 정보 없음';
+  authorEl.textContent = authors || (contentType === 'ott' ? '출연진 정보 없음' : '작가 정보 없음');
 
   textContainer.appendChild(titleEl);
   textContainer.appendChild(authorEl);
@@ -6566,10 +6838,16 @@ function openContentUrl(content) {
     return false;
   }
 
-  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!openedWindow) {
-    window.location.href = url;
-  }
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+  anchor.referrerPolicy = 'no-referrer';
+  anchor.style.position = 'fixed';
+  anchor.style.left = '-9999px';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   return true;
 }
 
@@ -6629,19 +6907,7 @@ function openSubscribeModal(content, opts = {}) {
   }
 
   if (titleEl) {
-    while (titleEl.firstChild) titleEl.removeChild(titleEl.firstChild);
-
-    if (url && titleText) {
-      const anchor = document.createElement('a');
-      anchor.textContent = displayText;
-      anchor.href = url;
-      anchor.target = '_blank';
-      anchor.rel = 'noopener noreferrer';
-      anchor.className = 'es-link inline-block cursor-pointer pointer-events-auto';
-      titleEl.appendChild(anchor);
-    } else {
-      titleEl.textContent = displayText;
-    }
+    titleEl.textContent = displayText;
   } else if (modalEl) {
     const fallbackEl = modalEl.querySelector('p');
     if (fallbackEl) fallbackEl.textContent = displayText;
@@ -6651,8 +6917,17 @@ function openSubscribeModal(content, opts = {}) {
     while (linkContainer.firstChild) linkContainer.removeChild(linkContainer.firstChild);
     linkContainer.classList.add('hidden');
   }
+  if (UI.subscribeVisitButton) {
+    UI.subscribeVisitButton.classList.toggle('hidden', !url);
+  }
   if (modalEl) {
-    const initialFocusEl = UI.subscribeCompletionButton;
+    const closeButtonEl = document.getElementById('subscribeModalCloseButton');
+    const initialFocusEl =
+      (url && UI.subscribeVisitButton && !UI.subscribeVisitButton.classList.contains('hidden')
+        ? UI.subscribeVisitButton
+        : UI.subscribeCompletionButton) ||
+      closeButtonEl ||
+      modalEl;
     openModal(modalEl, {
       initialFocusEl: initialFocusEl || modalEl,
       returnFocusEl,
@@ -6711,14 +6986,6 @@ window.toggleSubscriptionFromModal = async function () {
   const content = STATE.currentModalContent;
   if (!content) return;
   const modalState = STATE.subscribeModalState || {};
-  const isCompletedContent = isContentCompletedForBadge(content);
-  const completionSubscribed =
-    !modalState.isLoading && !modalState.loadFailed ? isCompletionSubscribed(content) : null;
-
-  if (isCompletedContent && (modalState.loadFailed || completionSubscribed !== true) && !modalState.isLoading) {
-    openContentUrl(content);
-    return;
-  }
 
   if (modalState.isLoading) return;
   if (STATE.subscribeToggleInFlight) return;
@@ -6763,7 +7030,6 @@ window.toggleSubscriptionFromModal = async function () {
     }
   } catch (e) {
     if (e?.httpStatus === 401) {
-      showToast('로그인이 필요합니다.', { type: 'error' });
       openAuthModal({ reason: 'subscription-auth' });
     } else {
       if (UI.subscribeInlineError) {
@@ -6796,6 +7062,10 @@ if (DEBUG_TOOLS) {
 
 window.updateMySubTab = updateMySubTab;
 window.closeSubscribeModal = closeSubscribeModal;
+window.openContentFromModal = function () {
+  if (!STATE.currentModalContent) return;
+  openContentUrl(STATE.currentModalContent);
+};
 
 // Quick sanity test steps (manual):
 // 1) localStorage.setItem('es_access_token', '<token>')
