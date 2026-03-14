@@ -1061,6 +1061,16 @@ body.is-ait [data-modal-overlay='true'] {
   background: var(--es-success) !important;
 }
 
+#myPageSummaryCard .rounded-2xl.border {
+  border-color: var(--es-border);
+  background: var(--es-surface-2);
+}
+
+#myPageSummaryActiveCount,
+#myPageSummaryCompletedCount {
+  letter-spacing: -0.04em;
+}
+
 #subscribeInlineError,
 #authError,
 #myPagePwError {
