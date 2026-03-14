@@ -401,6 +401,42 @@ def test_run_daily_check_can_apply_verified_subset_when_enabled(monkeypatch):
     assert cdc_info["summary"]["reason"] == "verified_subset_applied"
 
 
+def test_run_daily_check_excludes_filtered_out_items_from_verified_subset(monkeypatch):
+    conn = FakeConnection()
+    conn.snapshot_cursor.fetchall_results = [[{"content_id": "existing-1", "status": "연재중"}], []]
+    crawler = VerificationCandidateCrawler(conn)
+
+    def _verification_gate(write_plan):
+        return {
+            "gate": "blocked",
+            "mode": "test",
+            "reason": "verification_mismatch",
+            "message": "filtered subset",
+            "apply_allowed": False,
+            "items": [
+                {"content_id": "existing-1", "ok": True, "reason": "filtered_out", "exclude_reason": "long_running_nonscripted_policy"},
+                {"content_id": "new-1", "ok": False},
+            ],
+            "verified_count": 0,
+            "failed_count": 1,
+        }
+
+    monkeypatch.setenv("VERIFIED_SYNC_APPLY_VERIFIED_SUBSET", "1")
+
+    added, newly_completed_items, cdc_info = asyncio.run(
+        crawler.run_daily_check(
+            conn,
+            verification_gate=_verification_gate,
+            write_enabled=False,
+        )
+    )
+
+    assert added == 0
+    assert newly_completed_items == []
+    assert cdc_info["apply_result"] == "dry_run"
+    assert cdc_info["verification"]["status"] == "passed"
+
+
 def test_prepare_remote_daily_check_builds_deferred_apply_payload():
     crawler = RemoteVerificationCandidateCrawler()
     snapshot = {

@@ -1486,6 +1486,17 @@ async def _discover_kakaopage_ids(
         no_global_growth_rounds = 0
         no_new_ids_rounds = 0
         tab_discovered_ids: Set[str] = set()
+        pending_tab_refresh_ids: Set[str] = set()
+        for existing_content_id, raw_entry in discovered.items():
+            content_id = str(existing_content_id or "").strip()
+            if not content_id:
+                continue
+            entry = _normalize_kakao_discovered_entry(raw_entry)
+            entry_genres = set(entry.get("genres", []))
+            needs_genre_refresh = bool(tab_genres) and any(genre not in entry_genres for genre in tab_genres)
+            needs_completed_refresh = tab_seed_completed and not bool(entry.get("seed_completed"))
+            if needs_genre_refresh or needs_completed_refresh:
+                pending_tab_refresh_ids.add(content_id)
         last_html = ""
         last_scroll_number = 0
         last_global_new_count = 0
@@ -1543,6 +1554,8 @@ async def _discover_kakaopage_ids(
                 used_html_fallback = True
                 discovered_tabs = []
             previous_count = len(discovered)
+            pending_tab_refresh_before_round = set(pending_tab_refresh_ids)
+            no_new_ids_rounds_before = no_new_ids_rounds
             tab_local_new_ids = set(ids) - tab_discovered_ids
             tab_local_new_count = len(tab_local_new_ids)
             last_tab_local_new_count = tab_local_new_count
@@ -1560,6 +1573,12 @@ async def _discover_kakaopage_ids(
                     entry["seed_completed"] = bool(entry.get("seed_completed")) or True
                 discovered[content_id] = entry
                 tab_discovered_ids.add(content_id)
+                if content_id in pending_tab_refresh_ids:
+                    entry_genres = set(entry.get("genres", []))
+                    needs_genre_refresh = bool(tab_genres) and any(genre not in entry_genres for genre in tab_genres)
+                    needs_completed_refresh = tab_seed_completed and not bool(entry.get("seed_completed"))
+                    if not needs_genre_refresh and not needs_completed_refresh:
+                        pending_tab_refresh_ids.discard(content_id)
                 if previous_genres != entry.get("genres") or previous_seed_completed != bool(entry.get("seed_completed")):
                     changed_any_entry = True
 
@@ -1620,6 +1639,15 @@ async def _discover_kakaopage_ids(
 
             if max_items is not None and len(discovered) >= max_items:
                 tab_stop_reason = "max_items"
+                break
+            if (
+                pending_tab_refresh_before_round
+                and not pending_tab_refresh_ids
+                and global_new_count <= 0
+                and no_new_ids_rounds_before > 0
+                and bool(tab_local_new_ids & pending_tab_refresh_before_round)
+            ):
+                tab_stop_reason = "no_new_ids"
                 break
             tab_stop_reason = _should_stop_kakao_discovery_tab(
                 strategy=strategy,
