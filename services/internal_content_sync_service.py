@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import psycopg2.extras
 
 from database import get_cursor
+from utils.novel_genres import resolve_novel_genre_columns
 
 UPSERT_PAGE_SIZE = 500
 MAX_BATCH_SIZE = 1000
@@ -20,6 +21,8 @@ INSERT INTO contents (
     normalized_authors,
     status,
     meta,
+    novel_genre_group,
+    novel_genre_groups,
     is_deleted,
     deleted_at,
     deleted_reason,
@@ -37,6 +40,8 @@ DO UPDATE SET
     normalized_authors = EXCLUDED.normalized_authors,
     status = EXCLUDED.status,
     meta = EXCLUDED.meta,
+    novel_genre_group = EXCLUDED.novel_genre_group,
+    novel_genre_groups = EXCLUDED.novel_genre_groups,
     is_deleted = EXCLUDED.is_deleted,
     deleted_at = EXCLUDED.deleted_at,
     deleted_reason = EXCLUDED.deleted_reason,
@@ -111,6 +116,11 @@ def _normalize_row(raw_row: Dict[str, Any]) -> Tuple[Any, ...]:
     meta = raw_row.get("meta")
     if meta is not None and not isinstance(meta, dict):
         raise ValueError("meta must be an object or null")
+    content_type = _coerce_required_text(raw_row, "content_type")
+    novel_genre_group = None
+    novel_genre_groups = []
+    if content_type == "novel":
+        novel_genre_group, novel_genre_groups = resolve_novel_genre_columns(meta or {})
 
     created_at = _parse_optional_timestamp(raw_row.get("created_at"))
     updated_at = _parse_optional_timestamp(raw_row.get("updated_at"))
@@ -120,12 +130,14 @@ def _normalize_row(raw_row: Dict[str, Any]) -> Tuple[Any, ...]:
     return (
         _coerce_required_text(raw_row, "content_id"),
         _coerce_required_text(raw_row, "source"),
-        _coerce_required_text(raw_row, "content_type"),
+        content_type,
         _coerce_required_text(raw_row, "title"),
         _coerce_optional_text(raw_row, "normalized_title"),
         _coerce_optional_text(raw_row, "normalized_authors"),
         _coerce_required_text(raw_row, "status"),
         psycopg2.extras.Json(meta) if meta is not None else None,
+        novel_genre_group,
+        novel_genre_groups,
         bool(raw_row.get("is_deleted", False)),
         _parse_optional_timestamp(raw_row.get("deleted_at")),
         _coerce_optional_text(raw_row, "deleted_reason"),

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from flask import Blueprint, jsonify, request, g, render_template
+import psycopg2.extras
 
 from database import get_db, get_cursor
 from services.admin_override_service import upsert_override_and_record_event
@@ -28,7 +29,9 @@ from services.report_summary_service import (
     normalize_report_status,
 )
 from services.daily_notification_report_service import build_daily_notification_text
+from services.notification_dispatch_service import DISPATCH_CONSUMER
 from utils.auth import admin_required, login_required
+from utils.novel_genres import resolve_novel_genre_columns
 from utils.text import normalize_search_text
 from utils.time import now_kst_naive, parse_iso_naive_kst
 
@@ -753,6 +756,10 @@ def create_admin_content():
                     manual_meta_payload,
                     ensure_ascii=False,
                 )
+                novel_genre_group = None
+                novel_genre_groups = []
+                if content_type_value == 'novel':
+                    novel_genre_group, novel_genre_groups = resolve_novel_genre_columns(manual_meta_payload)
 
                 cursor.execute(
                     """
@@ -764,9 +771,11 @@ def create_admin_content():
                         status,
                         meta,
                         normalized_title,
-                        normalized_authors
+                        normalized_authors,
+                        novel_genre_group,
+                        novel_genre_groups
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
                     RETURNING content_id, source, content_type, title, status, meta, created_at, updated_at
                     """,
                     (
@@ -778,6 +787,8 @@ def create_admin_content():
                         manual_meta,
                         normalized_title_value,
                         normalized_authors_value,
+                        novel_genre_group,
+                        novel_genre_groups,
                     ),
                 )
                 created_rows.append(cursor.fetchone())
@@ -1016,6 +1027,7 @@ def update_admin_content():
                     attributes_payload = {}
                 attributes_payload.pop('weekdays', None)
                 attributes_payload.pop('genres', None)
+                attributes_payload.pop('genre', None)
                 if l2_attributes:
                     attributes_payload.update(l2_attributes)
                 if attributes_payload:
@@ -1034,6 +1046,10 @@ def update_admin_content():
                 content_type_value,
                 updated_meta,
             ]
+            if content_type_value == 'novel':
+                novel_genre_group, novel_genre_groups = resolve_novel_genre_columns(meta_payload)
+                set_parts.extend(["novel_genre_group = %s", "novel_genre_groups = %s"])
+                update_params.extend([novel_genre_group, novel_genre_groups])
             if has_title_input:
                 set_parts.extend(["title = %s", "normalized_title = %s"])
                 update_params.extend([next_title, normalize_search_text(next_title)])
@@ -1776,11 +1792,43 @@ def get_daily_notification_report():
     duration_found = False
     new_contents_total = 0
     new_contents_by_type = {}
+    dispatch_report_totals = {
+        'processed_events': 0,
+        'skipped_events': 0,
+        'failed_events': 0,
+        'deferred_events': 0,
+        'sent_notifications': 0,
+        'skipped_notifications': 0,
+        'retried_notifications': 0,
+        'already_sent_notifications': 0,
+    }
+    dispatch_run_count = 0
+
+    def _safe_int(value):
+        try:
+            return int(value or 0)
+        except Exception:
+            return 0
+
+    def _parse_report_data(value):
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
+
+    subscriber_counts_by_event = {}
+    dispatch_counts_by_event = {}
+    dispatch_consumptions_by_event = {}
 
     with managed_cursor(conn) as cursor:
         cursor.execute(
             """
-            SELECT report_data
+            SELECT crawler_name, report_data
             FROM daily_crawler_reports
             WHERE created_at >= %s AND created_at < %s
             """,
@@ -1788,17 +1836,16 @@ def get_daily_notification_report():
         )
         report_rows = cursor.fetchall()
         for row in report_rows:
-            report_data = _get_row_value(row, 'report_data')
-            if isinstance(report_data, str):
-                try:
-                    report_data = json.loads(report_data)
-                except Exception:
-                    report_data = None
+            report_data = _parse_report_data(_get_row_value(row, 'report_data'))
             if isinstance(report_data, dict):
                 duration_value = report_data.get('duration')
                 if isinstance(duration_value, (int, float)):
                     duration_seconds_total += float(duration_value)
                     duration_found = True
+                if _get_row_value(row, 'crawler_name') == 'completion notification dispatch':
+                    dispatch_run_count += 1
+                    for key in dispatch_report_totals.keys():
+                        dispatch_report_totals[key] += _safe_int(report_data.get(key))
 
         cursor.execute(
             """
@@ -1829,6 +1876,7 @@ def get_daily_notification_report():
         cursor.execute(
             """
             SELECT
+                e.id AS event_id,
                 e.content_id,
                 e.source,
                 e.created_at AS event_created_at,
@@ -1848,45 +1896,166 @@ def get_daily_notification_report():
         )
         completed_rows = cursor.fetchall()
 
+        event_targets = []
+        event_ids = []
         for row in completed_rows:
-            is_deleted = bool(_get_row_value(row, 'is_deleted'))
-            if is_deleted and not include_deleted:
+            event_id = _safe_int(_get_row_value(row, 'event_id'))
+            content_id = _get_row_value(row, 'content_id')
+            source = _get_row_value(row, 'source')
+            if event_id <= 0 or not content_id or not source:
                 continue
-            content_id = row['content_id']
-            source = row['source']
+            event_ids.append(event_id)
+            event_targets.append((event_id, content_id, source))
+
+        if event_targets:
+            subscriber_rows = psycopg2.extras.execute_values(
+                cursor,
+                """
+                WITH event_targets(event_id, content_id, source) AS (VALUES %s)
+                SELECT
+                    event_targets.event_id,
+                    COUNT(DISTINCT subscriptions.user_key) AS subscriber_count
+                FROM event_targets
+                LEFT JOIN subscriptions
+                  ON subscriptions.content_id = event_targets.content_id
+                 AND subscriptions.source = event_targets.source
+                 AND subscriptions.user_key IS NOT NULL
+                 AND COALESCE(subscriptions.wants_completion, FALSE) = TRUE
+                GROUP BY event_targets.event_id
+                ORDER BY event_targets.event_id ASC
+                """,
+                event_targets,
+                template="(%s, %s, %s)",
+                page_size=min(len(event_targets), 200),
+                fetch=True,
+            )
+            subscriber_counts_by_event = {
+                _safe_int(row[0]): _safe_int(row[1])
+                for row in subscriber_rows
+                if row and len(row) >= 2
+            }
+
+            dispatch_rows = psycopg2.extras.execute_values(
+                cursor,
+                """
+                WITH event_targets(event_id) AS (VALUES %s)
+                SELECT
+                    event_targets.event_id,
+                    COUNT(notification_log.id) AS total_count,
+                    COUNT(notification_log.id) FILTER (WHERE notification_log.result = 'sent') AS sent_count,
+                    COUNT(notification_log.id) FILTER (WHERE notification_log.result = 'failed') AS failed_count,
+                    COUNT(notification_log.id) FILTER (WHERE notification_log.result = 'pending') AS pending_count
+                FROM event_targets
+                LEFT JOIN notification_log
+                  ON notification_log.event_id = event_targets.event_id
+                GROUP BY event_targets.event_id
+                ORDER BY event_targets.event_id ASC
+                """,
+                [(event_id,) for event_id in event_ids],
+                template="(%s)",
+                page_size=min(len(event_ids), 200),
+                fetch=True,
+            )
+            dispatch_counts_by_event = {
+                _safe_int(row[0]): {
+                    'total_count': _safe_int(row[1]),
+                    'sent_count': _safe_int(row[2]),
+                    'failed_count': _safe_int(row[3]),
+                    'pending_count': _safe_int(row[4]),
+                }
+                for row in dispatch_rows
+                if row and len(row) >= 5
+            }
 
             cursor.execute(
                 """
-                SELECT COUNT(*) AS subscriber_count
-                FROM subscriptions
-                WHERE content_id = %s AND source = %s AND wants_completion = TRUE
+                SELECT event_id, status, reason, created_at
+                FROM cdc_event_consumptions
+                WHERE consumer = %s
+                  AND event_id = ANY(%s)
+                ORDER BY created_at DESC, event_id DESC
                 """,
-                (content_id, source),
+                (DISPATCH_CONSUMER, event_ids),
             )
-            subscriber_row = cursor.fetchone()
-            subscriber_count = int(_get_row_value(subscriber_row, 'subscriber_count') or 0)
-
-            if not is_deleted:
-                total_recipients += subscriber_count
-
-            title = _get_row_value(row, 'title') or content_id or '-'
-            event_created_at = _get_row_value(row, 'event_created_at')
-            final_completed_at = _get_row_value(row, 'final_completed_at')
-
-            completed_items.append(
-                {
-                    'content_id': content_id,
-                    'source': source,
-                    'title': title,
-                    'content_type': _get_row_value(row, 'content_type'),
-                    'event_created_at': event_created_at.isoformat() if event_created_at else None,
-                    'final_completed_at': final_completed_at.isoformat() if final_completed_at else None,
-                    'resolved_by': _get_row_value(row, 'resolved_by'),
-                    'is_deleted': is_deleted,
-                    'subscriber_count': subscriber_count,
-                    'notification_excluded': is_deleted,
+            for consumption_row in cursor.fetchall():
+                event_id = _safe_int(_get_row_value(consumption_row, 'event_id'))
+                if event_id <= 0 or event_id in dispatch_consumptions_by_event:
+                    continue
+                dispatch_consumptions_by_event[event_id] = {
+                    'status': _get_row_value(consumption_row, 'status'),
+                    'reason': _get_row_value(consumption_row, 'reason'),
+                    'created_at': _get_row_value(consumption_row, 'created_at'),
                 }
-            )
+
+    dispatch_log_sent_total = 0
+    dispatch_log_failed_total = 0
+    dispatch_log_pending_total = 0
+
+    for row in completed_rows:
+        is_deleted = bool(_get_row_value(row, 'is_deleted'))
+        if is_deleted and not include_deleted:
+            continue
+
+        event_id = _safe_int(_get_row_value(row, 'event_id'))
+        content_id = row['content_id']
+        source = row['source']
+        subscriber_count = subscriber_counts_by_event.get(event_id, 0)
+        dispatch_counts = dispatch_counts_by_event.get(
+            event_id,
+            {
+                'total_count': 0,
+                'sent_count': 0,
+                'failed_count': 0,
+                'pending_count': 0,
+            },
+        )
+        dispatch_consumption = dispatch_consumptions_by_event.get(event_id, {})
+        dispatch_status = _get_row_value(dispatch_consumption, 'status')
+        if not dispatch_status:
+            if dispatch_counts['pending_count'] > 0:
+                dispatch_status = 'deferred'
+            elif dispatch_counts['failed_count'] > 0:
+                dispatch_status = 'failed'
+            elif dispatch_counts['sent_count'] > 0 and dispatch_counts['pending_count'] == 0:
+                dispatch_status = 'sent'
+
+        if not is_deleted:
+            total_recipients += subscriber_count
+            dispatch_log_sent_total += dispatch_counts['sent_count']
+            dispatch_log_failed_total += dispatch_counts['failed_count']
+            dispatch_log_pending_total += dispatch_counts['pending_count']
+
+        title = _get_row_value(row, 'title') or content_id or '-'
+        event_created_at = _get_row_value(row, 'event_created_at')
+        final_completed_at = _get_row_value(row, 'final_completed_at')
+        dispatch_created_at = _get_row_value(dispatch_consumption, 'created_at')
+
+        completed_items.append(
+            {
+                'event_id': event_id,
+                'content_id': content_id,
+                'source': source,
+                'title': title,
+                'content_type': _get_row_value(row, 'content_type'),
+                'event_created_at': event_created_at.isoformat() if event_created_at else None,
+                'final_completed_at': final_completed_at.isoformat() if final_completed_at else None,
+                'resolved_by': _get_row_value(row, 'resolved_by'),
+                'is_deleted': is_deleted,
+                'subscriber_count': subscriber_count,
+                'notification_excluded': is_deleted,
+                'dispatch_status': dispatch_status,
+                'dispatch_reason': _get_row_value(dispatch_consumption, 'reason'),
+                'dispatch_updated_at': dispatch_created_at.isoformat() if dispatch_created_at else None,
+                'dispatch_total_count': dispatch_counts['total_count'],
+                'dispatch_sent_count': dispatch_counts['sent_count'],
+                'dispatch_failed_count': dispatch_counts['failed_count'],
+                'dispatch_pending_count': dispatch_counts['pending_count'],
+                'dispatch_attention': (
+                    (dispatch_counts['failed_count'] > 0 or dispatch_counts['pending_count'] > 0)
+                    and not is_deleted
+                ),
+            }
+        )
 
     duration_seconds = duration_seconds_total if duration_found else None
 
@@ -1896,6 +2065,18 @@ def get_daily_notification_report():
         'new_contents_by_type': new_contents_by_type,
         'completed_total': len(completed_items),
         'total_recipients': total_recipients,
+        'dispatch_run_count': dispatch_run_count,
+        'dispatch_processed_events': dispatch_report_totals['processed_events'],
+        'dispatch_skipped_events': dispatch_report_totals['skipped_events'],
+        'dispatch_failed_events': dispatch_report_totals['failed_events'],
+        'dispatch_deferred_events': dispatch_report_totals['deferred_events'],
+        'dispatch_sent_notifications': dispatch_report_totals['sent_notifications'],
+        'dispatch_skipped_notifications': dispatch_report_totals['skipped_notifications'],
+        'dispatch_retried_notifications': dispatch_report_totals['retried_notifications'],
+        'dispatch_already_sent_notifications': dispatch_report_totals['already_sent_notifications'],
+        'dispatch_log_sent_total': dispatch_log_sent_total,
+        'dispatch_log_failed_total': dispatch_log_failed_total,
+        'dispatch_log_pending_total': dispatch_log_pending_total,
     }
 
     text_report = build_daily_notification_text(

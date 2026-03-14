@@ -165,11 +165,17 @@ class ContentCrawler(ABC):
             direct_url = str(content_data.get("content_url") or "").strip()
             if direct_url:
                 return direct_url
+            platform_url = str(content_data.get("platform_url") or "").strip()
+            if platform_url:
+                return platform_url
             meta = content_data.get("meta")
             if isinstance(meta, dict):
                 common = meta.get("common")
                 if isinstance(common, dict):
                     meta_url = str(common.get("content_url") or "").strip()
+                    if meta_url:
+                        return meta_url
+                    meta_url = str(common.get("url") or "").strip()
                     if meta_url:
                         return meta_url
         return self.build_default_content_url(content_id, content_data=content_data)
@@ -187,6 +193,8 @@ class ContentCrawler(ABC):
                 "status": row.get("status"),
                 "meta_json": canonicalize_json(row.get("meta") or {}),
                 "search_document": row.get("search_document") or "",
+                "novel_genre_group": row.get("novel_genre_group"),
+                "novel_genre_groups_json": canonicalize_json(row.get("novel_genre_groups") or []),
             }
         return snapshot
 
@@ -242,6 +250,13 @@ class ContentCrawler(ABC):
             "prefetch_context": resolved_prefetch_context,
         }
 
+    @staticmethod
+    def _attach_prefetch_context(snapshot_state, prefetch_context):
+        resolved_prefetch_context = dict(prefetch_context or {})
+        resolved_prefetch_context.setdefault("sync_snapshot", snapshot_state.get("sync_snapshot") or {})
+        snapshot_state["prefetch_context"] = resolved_prefetch_context
+        return snapshot_state
+
     def _load_snapshot_state(self, conn, cursor):
         cursor.execute(
             """
@@ -253,7 +268,9 @@ class ContentCrawler(ABC):
                 normalized_authors,
                 status,
                 meta,
-                search_document
+                search_document,
+                novel_genre_group,
+                novel_genre_groups
             FROM contents
             WHERE source = %s
             """,
@@ -281,11 +298,7 @@ class ContentCrawler(ABC):
         )
         if not isinstance(prefetch_context, dict):
             prefetch_context = {}
-        return self._build_snapshot_state(
-            existing_rows=existing_rows,
-            override_rows=override_rows,
-            prefetch_context=prefetch_context,
-        )
+        return self._attach_prefetch_context(snapshot_state, prefetch_context)
 
     @staticmethod
     def normalize_sync_result(sync_result):
@@ -900,14 +913,21 @@ class ContentCrawler(ABC):
                 verified_candidate_ids = {
                     str(item.get("content_id") or "").strip()
                     for item in verification_items
-                    if isinstance(item, dict) and item.get("ok") and str(item.get("content_id") or "").strip()
+                    if (
+                        isinstance(item, dict)
+                        and item.get("ok")
+                        and not item.get("watchlist_recheck")
+                        and str(item.get("reason") or "").strip().lower() != "filtered_out"
+                        and not item.get("exclude_reason")
+                        and str(item.get("content_id") or "").strip()
+                    )
                 }
                 failed_count = sum(
                     1
                     for item in verification_items
                     if isinstance(item, dict) and not item.get("ok")
                 )
-                if failed_count > 0 and verified_candidate_ids:
+                if failed_count > 0:
                     filtered_sets = self._filter_change_sets_by_ids(
                         selected_ids=verified_candidate_ids,
                         all_content_today=all_content_today,
@@ -1072,7 +1092,9 @@ class ContentCrawler(ABC):
                     normalized_authors,
                     status,
                     meta,
-                    search_document
+                    search_document,
+                    novel_genre_group,
+                    novel_genre_groups
                 FROM contents
                 WHERE source = %s
                 """,

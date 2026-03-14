@@ -5,8 +5,21 @@ from database import get_db, get_cursor
 from services.ott_content_service import (
     OTT_CANONICAL_SOURCE,
     OTT_PLATFORM_SOURCE_SET,
+    normalize_ott_genres,
     is_ott_platform_source,
     resolve_display_meta,
+)
+from utils.novel_genres import (
+    GENRE_GROUP_ALIAS_MAP,
+    GENRE_GROUP_ALIASES,
+    GENRE_GROUP_MAPPING,
+    expand_query_genre_groups,
+    extract_novel_genre_groups_from_meta,
+    normalize_genre_token as _normalize_genre_token,
+    resolve_genre_group as _resolve_genre_group,
+    resolve_genre_groups as _resolve_genre_groups,
+    resolve_novel_genre_columns,
+    select_compat_genre_group as _select_compat_genre_group,
 )
 from utils.perf import jsonify_timed
 from utils.text import normalize_search_text
@@ -174,90 +187,6 @@ def _json_response(payload, *, cache_enabled=False, cache_hit=False, status_code
     return response
 
 
-def _normalize_genre_token(value):
-    if not isinstance(value, str):
-        return ""
-    return re.sub(r"[\s_\-/]+", "", value.strip().lower())
-
-
-GENRE_GROUP_MAPPING = {
-    "ALL": [],
-    "FANTASY": [
-        "\uD310\uD0C0\uC9C0",
-        "\uD604\uD310",
-        "\uD604\uB300\uD310\uD0C0\uC9C0",
-        "fantasy",
-        "modern fantasy",
-        "urban fantasy",
-    ],
-    "HYEONPAN": [
-        "\uD604\uD310",
-        "hyeonpan",
-    ],
-    "ROMANCE": [
-        "\uB85C\uB9E8\uC2A4",
-        "romance",
-    ],
-    "ROMANCE_FANTASY": [
-        "\uB85C\uD310",
-        "\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0",
-        "romance fantasy",
-        "romance_fantasy",
-    ],
-    "MYSTERY": [
-        "\uBBF8\uC2A4\uD130\uB9AC",
-        "mystery",
-    ],
-    "LIGHT_NOVEL": [
-        "\uB77C\uC774\uD2B8\uB178\uBCA8",
-        "\uB77C\uB178\uBCA8",
-        "light novel",
-        "light_novel",
-        "lightnovel",
-    ],
-    "WUXIA": [
-        "\uBB34\uD611",
-        "wuxia",
-        "martial arts",
-    ],
-    "BL": [
-        "bl",
-        "\uBE44\uC5D8",
-        "boys love",
-        "boys' love",
-    ],
-}
-
-GENRE_GROUP_ALIASES = {
-    "ALL": ("all", "\uC804\uCCB4"),
-    "FANTASY": ("fantasy", "\uD310\uD0C0\uC9C0", "\uD604\uD310", "\uD604\uB300\uD310\uD0C0\uC9C0"),
-    "HYEONPAN": ("hyeonpan", "\uD604\uD310"),
-    "ROMANCE": ("romance", "\uB85C\uB9E8\uC2A4"),
-    "ROMANCE_FANTASY": (
-        "romancefantasy",
-        "romance_fantasy",
-        "\uB85C\uD310",
-        "\uB85C\uB9E8\uC2A4\uD310\uD0C0\uC9C0",
-    ),
-    "MYSTERY": ("mystery", "\uBBF8\uC2A4\uD130\uB9AC"),
-    "LIGHT_NOVEL": (
-        "lightnovel",
-        "light_novel",
-        "\uB77C\uC774\uD2B8\uB178\uBCA8",
-        "\uB77C\uB178\uBCA8",
-    ),
-    "WUXIA": ("wuxia", "\uBB34\uD611"),
-    "BL": ("bl", "\uBE44\uC5D8", "boyslove", "boys'love"),
-}
-
-GENRE_GROUP_ALIAS_MAP = {}
-for _group, _aliases in GENRE_GROUP_ALIASES.items():
-    for _alias in _aliases:
-        _normalized = _normalize_genre_token(_alias)
-        if _normalized:
-            GENRE_GROUP_ALIAS_MAP[_normalized] = _group
-
-
 def _parse_bool_arg(raw_value, default=False):
     if raw_value is None:
         return default
@@ -269,42 +198,6 @@ def _parse_bool_arg(raw_value, default=False):
     if normalized in {"0", "false", "f", "no", "n", "off"}:
         return False
     return default
-
-
-def _resolve_genre_group(raw_value):
-    normalized = _normalize_genre_token(raw_value)
-    if not normalized:
-        return "ALL"
-    return GENRE_GROUP_ALIAS_MAP.get(normalized, "ALL")
-
-
-def _resolve_genre_groups(raw_values=None):
-    entries = _coerce_genre_values(raw_values)
-    if not entries:
-        return ["ALL"]
-
-    resolved = []
-    seen = set()
-    for entry in entries:
-        group = _resolve_genre_group(entry)
-        if group == "ALL":
-            normalized = _normalize_genre_token(entry)
-            if normalized in {"all", _normalize_genre_token("\uC804\uCCB4")}:
-                return ["ALL"]
-            continue
-        if group in seen:
-            continue
-        seen.add(group)
-        resolved.append(group)
-
-    return resolved if resolved else ["ALL"]
-
-
-def _select_compat_genre_group(genre_groups):
-    groups = list(genre_groups or [])
-    if not groups:
-        return "ALL"
-    return groups[0] if len(groups) == 1 else "ALL"
 
 
 def _coerce_genre_values(raw_value):
@@ -336,31 +229,8 @@ def _coerce_genre_values(raw_value):
 
 
 def _extract_internal_genres(meta):
-    safe_meta = normalize_meta(meta)
-    attrs = safe_get_dict(safe_meta.get("attributes"))
-    common = safe_get_dict(safe_meta.get("common"))
-
-    candidates = [
-        attrs.get("genres"),
-        attrs.get("genre"),
-        attrs.get("subgenres"),
-        attrs.get("sub_genres"),
-        common.get("genres"),
-        common.get("genre"),
-        safe_meta.get("genres"),
-        safe_meta.get("genre"),
-    ]
-
-    merged = []
-    seen = set()
-    for candidate in candidates:
-        for token in _coerce_genre_values(candidate):
-            normalized = _normalize_genre_token(token)
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            merged.append(token)
-    return merged
+    groups = extract_novel_genre_groups_from_meta(normalize_meta(meta))
+    return list(groups)
 
 
 def _filter_novel_rows_by_genre_groups(rows, genre_groups):
@@ -480,19 +350,34 @@ def _normalize_string_list(value):
     return []
 
 
+def _limit_display_people(value, max_items=4):
+    if max_items <= 0:
+        return []
+    return _normalize_string_list(value)[:max_items]
+
+
 def _resolve_row_for_display(row, *, requested_sources=None):
     coerced = coerce_row_dict(row)
     safe_meta = normalize_meta(coerced.get("meta"))
     content_type = str(coerced.get("content_type") or "").strip().lower()
     source_name = str(coerced.get("source") or "").strip()
     if content_type == "ott" or source_name == OTT_CANONICAL_SOURCE:
+        effective_requested_sources = requested_sources
+        if not effective_requested_sources and source_name and source_name != OTT_CANONICAL_SOURCE:
+            effective_requested_sources = [source_name]
         resolved_meta, resolved_source = resolve_display_meta(
             safe_meta,
-            requested_sources=requested_sources,
+            requested_sources=effective_requested_sources,
         )
+        if source_name and source_name != OTT_CANONICAL_SOURCE and source_name not in OTT_PLATFORM_SOURCE_SET:
+            resolved_source = source_name
         coerced["meta"] = resolved_meta
         coerced["source"] = resolved_source
-        coerced["__cursor_source"] = OTT_CANONICAL_SOURCE
+        coerced["__cursor_source"] = (
+            source_name
+            if source_name and source_name != OTT_CANONICAL_SOURCE and source_name not in OTT_PLATFORM_SOURCE_SET
+            else OTT_CANONICAL_SOURCE
+        )
     else:
         coerced["meta"] = safe_meta
     return coerced
@@ -504,16 +389,23 @@ def _extract_display_meta(meta):
     common = safe_get_dict(safe_meta.get("common"))
     ott_meta = safe_get_dict(safe_meta.get("ott"))
     content_url = (common.get("content_url") or common.get("url") or "") if isinstance(common, dict) else ""
-    genres = _normalize_string_list(
+    genres = normalize_ott_genres(
         attrs.get("genres")
         or attrs.get("genre")
         or common.get("genres")
         or common.get("genre")
         or safe_meta.get("genres")
         or safe_meta.get("genre")
+        or ott_meta.get("genres")
+        or ott_meta.get("genre")
+        or ott_meta.get("description")
+        or ott_meta.get("raw_schedule_note")
+        or ott_meta.get("episode_hint"),
+        platform_source=ott_meta.get("display_source") or common.get("primary_source"),
     )
+    authors = _limit_display_people(common.get("authors") or ott_meta.get("cast"))
     return {
-        "authors": _normalize_string_list(common.get("authors")),
+        "authors": authors,
         "content_url": content_url or "",
         "url": common.get("url") or "",
         "thumbnail_url": common.get("thumbnail_url") or "",
@@ -522,7 +414,7 @@ def _extract_display_meta(meta):
         "weekdays": normalize_weekdays(attrs.get("weekdays")),
         "genres": genres,
         "platforms": ott_meta.get("platforms") or [],
-        "cast": _normalize_string_list(ott_meta.get("cast")),
+        "cast": _limit_display_people(ott_meta.get("cast")),
         "upcoming": bool(ott_meta.get("upcoming")),
         "release_start_at": ott_meta.get("release_start_at"),
         "release_end_at": ott_meta.get("release_end_at"),
@@ -531,8 +423,8 @@ def _extract_display_meta(meta):
     }
 
 
-def _serialize_card_payload(row):
-    coerced = _resolve_row_for_display(row)
+def _serialize_card_payload(row, *, row_is_resolved=False):
+    coerced = row if row_is_resolved else _resolve_row_for_display(row)
     display_meta = _extract_display_meta(coerced.get("meta"))
     status = coerced.get("status")
     return {
@@ -708,6 +600,14 @@ def _append_source_filter(
     if mode == "single" and sources:
         where_parts.append(f"{source_column} = %s")
         params.append(sources[0])
+
+
+def _append_novel_genre_filter(where_parts, params, genre_groups):
+    groups = expand_query_genre_groups(genre_groups)
+    if not groups:
+        return
+    where_parts.append("novel_genre_groups && %s::text[]")
+    params.append(groups)
 
 
 def _append_cursor_filter(where_parts, params, cursor_title, cursor_source, cursor_content_id):
@@ -1341,25 +1241,27 @@ def get_novel_contents():
         cursor = get_cursor(conn)
 
         query_params = ['novel']
-        where_clause = "WHERE content_type = %s AND COALESCE(is_deleted, FALSE) = FALSE"
+        where_parts = ["content_type = %s", "COALESCE(is_deleted, FALSE) = FALSE"]
 
         if source != 'all':
-            where_clause += " AND source = %s"
+            where_parts.append("source = %s")
             query_params.append(source)
 
         if is_completed:
-            where_clause += " AND status = %s"
+            where_parts.append("status = %s")
             query_params.append(STATUS_COMPLETED)
         else:
-            where_clause += " AND status IN (%s, %s)"
+            where_parts.append("status IN (%s, %s)")
             query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
+
+        _append_novel_genre_filter(where_parts, query_params, genre_groups)
 
         meta_expr = _meta_select_expr()
         cursor.execute(
             f"""
             SELECT content_id, title, status, {meta_expr} AS meta, source
             FROM contents
-            {where_clause}
+            WHERE {' AND '.join(where_parts)}
             ORDER BY title ASC, content_id ASC
             """,
             tuple(query_params),
@@ -1373,10 +1275,8 @@ def get_novel_contents():
             coerced['meta'] = normalize_meta(coerced.get('meta'))
             results.append(coerced)
 
-        filtered = _filter_novel_rows_by_genre_groups(results, genre_groups)
-
         return jsonify({
-            'contents': filtered,
+            'contents': results,
             'filters': {
                 'genre_group': genre_group,
                 'genre_groups': genre_groups,
@@ -1653,6 +1553,7 @@ def get_browse_contents_v3():
                     query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
                 _append_source_filter(where_parts, query_params, source_filter, content_type="novel")
+                _append_novel_genre_filter(where_parts, query_params, genre_groups)
                 _append_browse_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
 
                 return f"""
@@ -1663,74 +1564,22 @@ def get_browse_contents_v3():
                     LIMIT %s
                 """, (*query_params, limit_value)
 
-            result_rows = []
-            if "ALL" in genre_groups:
-                query, params = _build_base_query(
-                    per_page,
-                    cursor_title,
-                    cursor_source,
-                    cursor_content_id,
+            query, params = _build_base_query(
+                per_page,
+                cursor_title,
+                cursor_source,
+                cursor_content_id,
+            )
+            cursor.execute(query, params)
+            result_rows = [coerce_row_dict(row) for row in cursor.fetchall()]
+
+            if len(result_rows) == per_page and result_rows:
+                last_row = result_rows[-1]
+                next_cursor = encode_cursor(
+                    last_row.get("title"),
+                    last_row.get("content_id"),
+                    source=last_row.get("source"),
                 )
-                cursor.execute(query, params)
-                result_rows = [coerce_row_dict(row) for row in cursor.fetchall()]
-
-                if len(result_rows) == per_page and result_rows:
-                    last_row = result_rows[-1]
-                    next_cursor = encode_cursor(
-                        last_row.get("title"),
-                        last_row.get("content_id"),
-                        source=last_row.get("source"),
-                    )
-            else:
-                chunk_size = min(per_page * 4, 500)
-                scan_title = cursor_title
-                scan_source = cursor_source
-                scan_content_id = cursor_content_id
-                has_more_rows = False
-                last_scanned_row = None
-
-                while len(result_rows) < per_page:
-                    query, params = _build_base_query(
-                        chunk_size,
-                        scan_title,
-                        scan_source,
-                        scan_content_id,
-                    )
-                    cursor.execute(query, params)
-                    raw_rows = cursor.fetchall()
-                    if not raw_rows:
-                        has_more_rows = False
-                        break
-
-                    normalized_rows = []
-                    for row in raw_rows:
-                        coerced = coerce_row_dict(row)
-                        coerced["meta"] = normalize_meta(coerced.get("meta"))
-                        normalized_rows.append(coerced)
-
-                    last_scanned_row = normalized_rows[-1]
-                    scan_title = last_scanned_row.get("title")
-                    scan_source = last_scanned_row.get("source")
-                    scan_content_id = last_scanned_row.get("content_id")
-
-                    matched_rows = _filter_novel_rows_by_genre_groups(normalized_rows, genre_groups)
-                    if matched_rows:
-                        remaining = per_page - len(result_rows)
-                        result_rows.extend(matched_rows[:remaining])
-
-                    has_more_rows = len(raw_rows) == chunk_size
-                    if len(result_rows) >= per_page:
-                        break
-                    if len(raw_rows) < chunk_size:
-                        has_more_rows = False
-                        break
-
-                if has_more_rows and last_scanned_row:
-                    next_cursor = encode_cursor(
-                        last_scanned_row.get("title"),
-                        last_scanned_row.get("content_id"),
-                        source=last_scanned_row.get("source"),
-                    )
 
             filters.update({
                 "genre_group": genre_group,
@@ -1796,7 +1645,7 @@ def get_browse_contents_v3():
             _resolve_row_for_display(row, requested_sources=requested_sources)
             for row in result_rows
         ]
-        serialized = [_serialize_card_payload(row) for row in hydrated_rows]
+        serialized = [_serialize_card_payload(row, row_is_resolved=True) for row in hydrated_rows]
         payload = {
             "contents": serialized,
             "next_cursor": next_cursor,
@@ -1872,6 +1721,7 @@ def get_novel_contents_v2():
                 query_params.extend([STATUS_ONGOING, STATUS_HIATUS])
 
             _append_source_filter(where_parts, query_params, source_filter, content_type="novel")
+            _append_novel_genre_filter(where_parts, query_params, genre_groups)
             _append_cursor_filter(where_parts, query_params, scan_title, scan_source, scan_content_id)
 
             return f"""
@@ -1885,78 +1735,27 @@ def get_novel_contents_v2():
         results = []
         next_cursor = None
 
-        if "ALL" in genre_groups:
-            query, params = _build_base_query(
-                per_page,
-                cursor_title,
-                cursor_source,
-                cursor_content_id,
+        query, params = _build_base_query(
+            per_page,
+            cursor_title,
+            cursor_source,
+            cursor_content_id,
+        )
+        cursor.execute(query, params)
+        raw_rows = cursor.fetchall()
+
+        for row in raw_rows:
+            coerced = coerce_row_dict(row)
+            coerced["meta"] = normalize_meta(coerced.get("meta"))
+            results.append(coerced)
+
+        if len(results) == per_page and results:
+            last_row = results[-1]
+            next_cursor = encode_cursor(
+                last_row.get("title"),
+                last_row.get("content_id"),
+                source=last_row.get("source"),
             )
-            cursor.execute(query, params)
-            raw_rows = cursor.fetchall()
-
-            for row in raw_rows:
-                coerced = coerce_row_dict(row)
-                coerced["meta"] = normalize_meta(coerced.get("meta"))
-                results.append(coerced)
-
-            if len(results) == per_page and results:
-                last_row = results[-1]
-                next_cursor = encode_cursor(
-                    last_row.get("title"),
-                    last_row.get("content_id"),
-                    source=last_row.get("source"),
-                )
-        else:
-            chunk_size = min(per_page * 4, 500)
-            scan_title = cursor_title
-            scan_source = cursor_source
-            scan_content_id = cursor_content_id
-            has_more_rows = False
-            last_scanned_row = None
-
-            while len(results) < per_page:
-                query, params = _build_base_query(
-                    chunk_size,
-                    scan_title,
-                    scan_source,
-                    scan_content_id,
-                )
-                cursor.execute(query, params)
-                raw_rows = cursor.fetchall()
-                if not raw_rows:
-                    has_more_rows = False
-                    break
-
-                normalized_rows = []
-                for row in raw_rows:
-                    coerced = coerce_row_dict(row)
-                    coerced["meta"] = normalize_meta(coerced.get("meta"))
-                    normalized_rows.append(coerced)
-
-                last_scanned_row = normalized_rows[-1]
-                scan_title = last_scanned_row.get("title")
-                scan_source = last_scanned_row.get("source")
-                scan_content_id = last_scanned_row.get("content_id")
-
-                matched_rows = _filter_novel_rows_by_genre_groups(normalized_rows, genre_groups)
-                if matched_rows:
-                    remaining = per_page - len(results)
-                    results.extend(matched_rows[:remaining])
-
-                has_more_rows = len(raw_rows) == chunk_size
-                if len(results) >= per_page:
-                    break
-                if len(raw_rows) < chunk_size:
-                    has_more_rows = False
-                    break
-
-            if has_more_rows and last_scanned_row:
-                next_cursor = encode_cursor(
-                    last_scanned_row.get("title"),
-                    last_scanned_row.get("content_id"),
-                    source=last_scanned_row.get("source"),
-                )
 
         response_payload = {
             "contents": results,

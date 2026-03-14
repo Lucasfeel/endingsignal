@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import psycopg2.extras
 
 from database import get_cursor
+from utils.novel_genres import resolve_novel_genre_columns
 from utils.content_indexing import build_search_document, canonicalize_json
 
 
@@ -45,7 +46,9 @@ def load_existing_content_snapshot(
                 normalized_authors,
                 status,
                 meta,
-                search_document
+                search_document,
+                novel_genre_group,
+                novel_genre_groups
             FROM contents
             WHERE source = %s
             """,
@@ -61,6 +64,8 @@ def load_existing_content_snapshot(
                 "status": row.get("status"),
                 "meta_json": canonicalize_json(row.get("meta") or {}),
                 "search_document": row.get("search_document") or "",
+                "novel_genre_group": row.get("novel_genre_group"),
+                "novel_genre_groups_json": canonicalize_json(row.get("novel_genre_groups") or []),
             }
             for row in rows
         }
@@ -78,8 +83,18 @@ def build_sync_row(
     normalized_authors: str,
     status: str,
     meta: Mapping[str, Any],
+    novel_genre_group: Optional[str] = None,
+    novel_genre_groups: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     safe_meta = dict(meta) if isinstance(meta, Mapping) else {}
+    resolved_genre_group = novel_genre_group
+    resolved_genre_groups = list(novel_genre_groups or [])
+    if str(content_type).strip().lower() == "novel":
+        if resolved_genre_group is None and not resolved_genre_groups:
+            resolved_genre_group, resolved_genre_groups = resolve_novel_genre_columns(safe_meta)
+    else:
+        resolved_genre_group = None
+        resolved_genre_groups = []
     return {
         "content_id": str(content_id),
         "source": str(source),
@@ -96,6 +111,9 @@ def build_sync_row(
             normalized_authors=normalized_authors,
             meta=safe_meta,
         ),
+        "novel_genre_group": resolved_genre_group,
+        "novel_genre_groups": resolved_genre_groups,
+        "novel_genre_groups_json": canonicalize_json(resolved_genre_groups),
     }
 
 
@@ -132,6 +150,8 @@ def sync_prepared_content_rows(
             "status": row["status"],
             "meta_json": row["meta_json"],
             "search_document": row["search_document"],
+            "novel_genre_group": row.get("novel_genre_group"),
+            "novel_genre_groups_json": row.get("novel_genre_groups_json") or canonicalize_json([]),
         }
 
         existing = snapshot.get(content_id)
@@ -147,12 +167,17 @@ def sync_prepared_content_rows(
                     row["status"],
                     psycopg2.extras.Json(row["meta"]),
                     row["search_document"],
+                    row.get("novel_genre_group"),
+                    row.get("novel_genre_groups") or [],
                 )
             )
             stats.inserted_count += 1
             continue
 
-        if all(existing.get(key) == value for key, value in comparable.items()):
+        existing_comparable = dict(existing)
+        existing_comparable.setdefault("novel_genre_group", None)
+        existing_comparable.setdefault("novel_genre_groups_json", canonicalize_json([]))
+        if all(existing_comparable.get(key) == value for key, value in comparable.items()):
             stats.unchanged_count += 1
             continue
 
@@ -165,6 +190,8 @@ def sync_prepared_content_rows(
                 row["status"],
                 psycopg2.extras.Json(row["meta"]),
                 row["search_document"],
+                row.get("novel_genre_group"),
+                row.get("novel_genre_groups") or [],
                 content_id,
                 source_name,
             )
@@ -184,6 +211,8 @@ def sync_prepared_content_rows(
                     status=%s,
                     meta=%s,
                     search_document=%s,
+                    novel_genre_group=%s,
+                    novel_genre_groups=%s,
                     updated_at=NOW()
                 WHERE content_id=%s
                   AND source=%s
@@ -203,9 +232,11 @@ def sync_prepared_content_rows(
                     normalized_authors,
                     status,
                     meta,
-                    search_document
+                    search_document,
+                    novel_genre_group,
+                    novel_genre_groups
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (content_id, source) DO NOTHING
                 """,
                 inserts,

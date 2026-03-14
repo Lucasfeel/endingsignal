@@ -63,9 +63,20 @@ def test_daily_notification_text_handles_empty_and_zero_subscribers():
         "duration_seconds": None,
         "new_contents_total": 0,
         "total_recipients": 0,
+        "completed_total": 0,
+        "dispatch_processed_events": 0,
+        "dispatch_deferred_events": 0,
+        "dispatch_failed_events": 0,
+        "dispatch_skipped_events": 0,
+        "dispatch_log_sent_total": 0,
+        "dispatch_log_failed_total": 0,
+        "dispatch_log_pending_total": 0,
+        "dispatch_retried_notifications": 0,
+        "dispatch_already_sent_notifications": 0,
     }
     text = build_daily_notification_text("2025-01-02T10:00:00", stats, [])
     assert "- (없음)" in text
+    assert "디스패치 처리" in text
 
     text_with_item = build_daily_notification_text(
         "2025-01-02T10:00:00",
@@ -76,18 +87,36 @@ def test_daily_notification_text_handles_empty_and_zero_subscribers():
                 "content_id": "CID",
                 "source": "SRC",
                 "subscriber_count": 0,
+                "dispatch_status": "deferred",
+                "dispatch_sent_count": 0,
+                "dispatch_failed_count": 0,
+                "dispatch_pending_count": 1,
             }
         ],
     )
     assert "구독자 없음" in text_with_item
+    assert "dispatch=보류" in text_with_item
 
 
 def test_admin_daily_notification_report_payload(monkeypatch, client, auth_headers):
     created_at = datetime(2025, 1, 2, 9, 0, 0)
     fetchall_results = [
         [
-            {"report_data": {"duration": 1.5}},
-            {"report_data": "{\"duration\": 2}"},
+            {"crawler_name": "naver webtoon", "report_data": {"duration": 1.5}},
+            {
+                "crawler_name": "completion notification dispatch",
+                "report_data": {
+                    "duration": 2,
+                    "processed_events": 1,
+                    "deferred_events": 1,
+                    "failed_events": 0,
+                    "skipped_events": 0,
+                    "sent_notifications": 5,
+                    "skipped_notifications": 2,
+                    "retried_notifications": 1,
+                    "already_sent_notifications": 1,
+                },
+            },
         ],
         [
             {"content_type": "webtoon", "total": 2},
@@ -95,6 +124,7 @@ def test_admin_daily_notification_report_payload(monkeypatch, client, auth_heade
         ],
         [
             {
+                "event_id": 101,
                 "content_id": "C1",
                 "source": "S1",
                 "event_created_at": created_at,
@@ -105,6 +135,7 @@ def test_admin_daily_notification_report_payload(monkeypatch, client, auth_heade
                 "is_deleted": False,
             },
             {
+                "event_id": 102,
                 "content_id": "C2",
                 "source": "S2",
                 "event_created_at": created_at,
@@ -112,19 +143,38 @@ def test_admin_daily_notification_report_payload(monkeypatch, client, auth_heade
                 "resolved_by": "crawler",
                 "title": "Title 2",
                 "content_type": "webtoon",
-                "is_deleted": True,
+                "is_deleted": False,
             },
+        ],
+        [
+            (101, 5),
+            (102, 2),
+        ],
+        [
+            (101, 5, 5, 0, 0),
+            (102, 2, 1, 0, 1),
+        ],
+        [
+            {
+                "event_id": 101,
+                "status": "processed",
+                "reason": "notifications_dispatched",
+                "created_at": created_at,
+            }
         ],
     ]
     fetchone_results = [
         {"total": 3},
-        {"subscriber_count": 5},
-        {"subscriber_count": 2},
     ]
     fake_cursor = FakeCursor(fetchall_results=fetchall_results, fetchone_results=fetchone_results)
     monkeypatch.setattr(admin_view, "get_db", lambda: FakeConnection())
     monkeypatch.setattr(admin_view, "get_cursor", lambda conn: fake_cursor)
     monkeypatch.setattr(admin_view, "now_kst_naive", lambda: created_at)
+    monkeypatch.setattr(
+        admin_view.psycopg2.extras,
+        "execute_values",
+        lambda cursor, sql, argslist, **kwargs: (cursor.execute(sql, argslist), cursor.fetchall())[1],
+    )
 
     response = client.get(
         "/api/admin/reports/daily-notification",
@@ -137,6 +187,16 @@ def test_admin_daily_notification_report_payload(monkeypatch, client, auth_heade
     assert payload["success"] is True
     assert payload["stats"]["duration_seconds"] == pytest.approx(3.5)
     assert payload["stats"]["new_contents_total"] == 3
-    assert payload["stats"]["total_recipients"] == 5
+    assert payload["stats"]["total_recipients"] == 7
     assert payload["stats"]["completed_total"] == 2
-    assert payload["completed_items"][1]["notification_excluded"] is True
+    assert payload["stats"]["dispatch_processed_events"] == 1
+    assert payload["stats"]["dispatch_deferred_events"] == 1
+    assert payload["stats"]["dispatch_sent_notifications"] == 5
+    assert payload["stats"]["dispatch_retried_notifications"] == 1
+    assert payload["stats"]["dispatch_already_sent_notifications"] == 1
+    assert payload["stats"]["dispatch_log_sent_total"] == 6
+    assert payload["stats"]["dispatch_log_pending_total"] == 1
+    assert payload["completed_items"][0]["dispatch_status"] == "processed"
+    assert payload["completed_items"][0]["dispatch_sent_count"] == 5
+    assert payload["completed_items"][1]["dispatch_status"] == "deferred"
+    assert payload["completed_items"][1]["dispatch_pending_count"] == 1

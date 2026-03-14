@@ -19,7 +19,21 @@ class RecordingCursor:
             return []
         rows = self.fetchall_batches[self._fetchall_idx]
         self._fetchall_idx += 1
-        return list(rows)
+        rows = list(rows)
+        if not self.executed:
+            return rows
+        query, params = self.executed[-1]
+        if "novel_genre_groups &&" not in str(query):
+            return rows
+        requested_groups = next((param for param in (params or ()) if isinstance(param, list)), [])
+        if not requested_groups:
+            return rows
+        requested_set = set(requested_groups)
+        return [
+            row
+            for row in rows
+            if requested_set & set(contents_view.extract_novel_genre_groups_from_meta(row.get("meta") or {}))
+        ]
 
     def close(self):
         self.closed = True
@@ -134,4 +148,40 @@ def test_browse_v3_novel_completed_respects_genre_groups(monkeypatch, client):
     assert payload["filters"]["is_completed"] is True
     ids = {item["content_id"] for item in payload["contents"]}
     assert ids == {"fantasy-1"}
+    query, _ = fake_cursor.executed[0]
+    assert "novel_genre_groups && %s::text[]" in query
+    assert fake_cursor.closed is True
+
+
+def test_browse_v3_resolves_rows_once_before_serializing(monkeypatch, client):
+    fake_cursor = _stub_db(
+        monkeypatch,
+        [[
+            _row(
+                "ott-1",
+                source=contents_view.OTT_CANONICAL_SOURCE,
+                content_type="ott",
+                meta={
+                    "common": {"authors": ["author"], "content_url": "https://example.com/ott-1"},
+                    "ott": {"platforms": ["netflix"]},
+                },
+            )
+        ]],
+    )
+
+    original_resolver = contents_view._resolve_row_for_display
+    resolve_calls = []
+
+    def _recording_resolver(row, *, requested_sources=None):
+        resolve_calls.append((row.get("content_id"), tuple(requested_sources or [])))
+        return original_resolver(row, requested_sources=requested_sources)
+
+    monkeypatch.setattr(contents_view, "_resolve_row_for_display", _recording_resolver)
+
+    response = client.get("/api/contents/browse_v3?type=ott&sources=netflix&per_page=5")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["returned"] == 1
+    assert resolve_calls == [("ott-1", ("netflix",))]
     assert fake_cursor.closed is True

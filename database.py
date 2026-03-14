@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from flask import g, has_request_context
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2 import sql
+from utils.novel_genres import CANONICAL_NOVEL_GENRE_GROUPS, resolve_novel_genre_columns
 from utils.perf import add_db_borrow_or_connect_ms, add_db_fetch_ms, add_db_sql_ms
 
 load_dotenv()
@@ -1479,6 +1480,110 @@ def run_contents_backfill_in_batches(conn, cursor, *, settings):
                     print(f"{message}. Continuing because DB_INIT_STRICT_MAINTENANCE=false.", file=sys.stderr)
                     break
                 raise
+
+
+def _backfill_novel_genre_columns_in_batches(conn, cursor, *, settings):
+    batch_size = int(settings.get("backfill_batch_size") or DEFAULT_DB_INIT_BACKFILL_BATCH_SIZE)
+    strict_maintenance = bool(
+        settings.get("strict_maintenance", DEFAULT_DB_INIT_STRICT_MAINTENANCE)
+    )
+    max_batches = int(settings.get("backfill_max_batches") or 0)
+    max_seconds = float(settings.get("backfill_max_seconds") or 0.0)
+    progress_every = int(settings.get("backfill_progress_every") or 0)
+    total_updated = 0
+    total_unknown = 0
+    unknown_samples = []
+    batches = 0
+    start_time = time.monotonic()
+
+    while True:
+        if max_batches > 0 and batches >= max_batches:
+            message = (
+                "WARN: [DB Setup] Novel genre backfill reached max-batches breaker "
+                f"(max_batches={max_batches}, total_updated={total_updated})."
+            )
+            if strict_maintenance:
+                print(message, file=sys.stderr)
+                raise RuntimeError("Novel genre backfill max-batches breaker reached.")
+            print(f"{message} Continuing because DB_INIT_STRICT_MAINTENANCE=false.", file=sys.stderr)
+            break
+
+        elapsed = time.monotonic() - start_time
+        if max_seconds > 0 and elapsed >= max_seconds:
+            message = (
+                "WARN: [DB Setup] Novel genre backfill reached max-seconds breaker "
+                f"(max_seconds={max_seconds:g}, elapsed={elapsed:.2f}, total_updated={total_updated})."
+            )
+            if strict_maintenance:
+                print(message, file=sys.stderr)
+                raise RuntimeError("Novel genre backfill max-seconds breaker reached.")
+            print(f"{message} Continuing because DB_INIT_STRICT_MAINTENANCE=false.", file=sys.stderr)
+            break
+
+        cursor.execute(
+            """
+            SELECT content_id, source, meta
+            FROM contents
+            WHERE content_type = 'novel'
+              AND novel_genre_groups IS NULL
+            ORDER BY content_id ASC, source ASC
+            LIMIT %s
+            """,
+            (batch_size,),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        if not rows:
+            break
+
+        update_rows = []
+        batch_unknown = []
+        for row in rows:
+            content_id = str(row.get("content_id") or "").strip()
+            source = str(row.get("source") or "").strip()
+            novel_genre_group, novel_genre_groups = resolve_novel_genre_columns(row.get("meta") or {})
+            update_rows.append((novel_genre_group, novel_genre_groups, content_id, source))
+            if not novel_genre_groups:
+                total_unknown += 1
+                batch_unknown.append(f"{source}:{content_id}")
+                if len(unknown_samples) < 5:
+                    unknown_samples.append(f"{source}:{content_id}")
+
+        psycopg2.extras.execute_values(
+            cursor,
+            """
+            UPDATE contents AS contents
+            SET novel_genre_group = data.novel_genre_group,
+                novel_genre_groups = data.novel_genre_groups
+            FROM (VALUES %s) AS data(novel_genre_group, novel_genre_groups, content_id, source)
+            WHERE contents.content_id = data.content_id
+              AND contents.source = data.source
+            """,
+            update_rows,
+            template="(%s, %s, %s, %s)",
+            page_size=min(len(update_rows), 200),
+        )
+        conn.commit()
+        total_updated += len(update_rows)
+        batches += 1
+
+        if progress_every > 0 and batches % progress_every == 0:
+            print(
+                "LOG: [DB Setup] Novel genre backfill progress "
+                f"(batches={batches}, total_updated={total_updated}, unknown_rows={total_unknown})."
+            )
+        if batch_unknown:
+            print(
+                "WARN: [DB Setup] Novel genre normalization left rows unclassified "
+                f"(batch={batches}, count={len(batch_unknown)}, sample={batch_unknown[:5]}).",
+                file=sys.stderr,
+            )
+
+    print(
+        "LOG: [DB Setup] Novel genre backfill complete "
+        f"(updated_rows={total_updated}, unknown_rows={total_unknown}, sample_unknown_ids={unknown_samples})."
+    )
+
+
 def setup_database_standalone():
     """Create and reconcile tables for standalone bootstrap/migration scripts."""
     conn = None
@@ -1574,6 +1679,8 @@ def setup_database_standalone():
                         normalized_title TEXT,
                         normalized_authors TEXT,
                         search_document TEXT,
+                        novel_genre_group TEXT,
+                        novel_genre_groups TEXT[],
                         status TEXT NOT NULL,
                         meta JSONB,
                         PRIMARY KEY (content_id, source)
@@ -1614,6 +1721,24 @@ def setup_database_standalone():
             "contents",
             "search_document",
             "TEXT",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "novel_genre_group",
+            "TEXT",
+            settings=settings,
+            relation="contents",
+        )
+        ensure_column_exists_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "novel_genre_groups",
+            "TEXT[]",
             settings=settings,
             relation="contents",
         )
@@ -1703,6 +1828,36 @@ def setup_database_standalone():
             "NOW()",
             settings=settings,
             relation="contents",
+        )
+        cursor.execute(
+            f"""
+            DO $$
+            BEGIN
+                ALTER TABLE contents
+                ADD CONSTRAINT contents_novel_genre_group_check
+                CHECK (
+                    novel_genre_group IS NULL
+                    OR novel_genre_group = ANY (ARRAY{list(CANONICAL_NOVEL_GENRE_GROUPS)!r}::text[])
+                );
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+            """
+        )
+        cursor.execute(
+            f"""
+            DO $$
+            BEGIN
+                ALTER TABLE contents
+                ADD CONSTRAINT contents_novel_genre_groups_check
+                CHECK (
+                    novel_genre_groups IS NULL
+                    OR novel_genre_groups <@ ARRAY{list(CANONICAL_NOVEL_GENRE_GROUPS)!r}::text[]
+                );
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+            """
         )
 
         current_step = "ensure set_updated_at function"
@@ -2378,6 +2533,24 @@ def setup_database_standalone():
         current_step = "contents backfill and hardening"
         print("LOG: [DB Setup] Starting contents backfill/hardening phase...")
         run_contents_backfill_in_batches(conn, cursor, settings=settings)
+        _backfill_novel_genre_columns_in_batches(conn, cursor, settings=settings)
+        cursor.execute(
+            """
+            UPDATE contents
+            SET novel_genre_groups = '{}'::text[]
+            WHERE novel_genre_groups IS NULL
+            """
+        )
+        conn.commit()
+        ensure_column_default_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "novel_genre_groups",
+            "'{}'::text[]",
+            settings=settings,
+            relation="contents",
+        )
         for column_name in ("is_deleted", "created_at", "updated_at"):
             try:
                 ensure_column_not_null_with_retry(
@@ -2404,6 +2577,14 @@ def setup_database_standalone():
                         pass
                     continue
                 raise
+        ensure_column_not_null_with_retry(
+            conn,
+            cursor,
+            "contents",
+            "novel_genre_groups",
+            settings=settings,
+            relation="contents",
+        )
         print("LOG: [DB Setup] Contents backfill/hardening phase complete.")
 
         current_step = "maintenance"
@@ -2548,6 +2729,18 @@ def setup_database_standalone():
                 """
                 CREATE INDEX idx_contents_source_content_id
                 ON contents (source, content_id);
+                """,
+            )
+            create_index_if_missing(
+                cursor,
+                "public",
+                "idx_contents_active_novel_genre_groups_gin",
+                """
+                CREATE INDEX idx_contents_active_novel_genre_groups_gin
+                ON contents
+                USING gin (novel_genre_groups)
+                WHERE content_type = 'novel'
+                  AND COALESCE(is_deleted, FALSE) = FALSE;
                 """,
             )
             create_index_if_missing(

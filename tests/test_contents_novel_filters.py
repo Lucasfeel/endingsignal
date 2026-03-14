@@ -14,7 +14,21 @@ class RecordingCursor:
         self.executed.append((query, params))
 
     def fetchall(self):
-        return list(self.rows)
+        rows = list(self.rows)
+        if not self.executed:
+            return rows
+        query, params = self.executed[-1]
+        if "novel_genre_groups &&" not in str(query):
+            return rows
+        requested_groups = next((param for param in (params or ()) if isinstance(param, list)), [])
+        if not requested_groups:
+            return rows
+        requested_set = set(requested_groups)
+        return [
+            row
+            for row in rows
+            if requested_set & set(contents_view.extract_novel_genre_groups_from_meta(row.get("meta") or {}))
+        ]
 
     def close(self):
         self.closed = True
@@ -77,15 +91,15 @@ def test_novel_endpoint_ignores_weekday_params(monkeypatch, client):
     assert "weekdays" not in executed_query.lower()
 
 
-def test_novel_genre_group_filters_fantasy_and_includes_hyeonpan(monkeypatch, client):
+def test_novel_genre_group_filters_fantasy_only(monkeypatch, client):
     rows = [
         _row(
             "fantasy-1",
-            meta={"attributes": {"genres": ["\uD604\uD310"]}},
+            meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
         ),
         _row(
-            "romance-1",
-            meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+            "hyeonpan-1",
+            meta={"attributes": {"genres": ["\uD604\uD310"]}},
         ),
     ]
     _stub_db(monkeypatch, rows)
@@ -95,8 +109,7 @@ def test_novel_genre_group_filters_fantasy_and_includes_hyeonpan(monkeypatch, cl
 
     assert response.status_code == 200
     ids = {item["content_id"] for item in payload["contents"]}
-    assert "fantasy-1" in ids
-    assert "romance-1" not in ids
+    assert ids == {"fantasy-1"}
 
 
 def test_novel_genre_group_filters_hyeonpan_explicitly(monkeypatch, client):
@@ -179,12 +192,12 @@ def test_novel_genre_group_does_not_hide_all_when_genre_metadata_missing(monkeyp
 
     assert response.status_code == 200
     ids = {item["content_id"] for item in payload["contents"]}
-    assert ids == {"no-genre-1", "no-genre-2"}
+    assert ids == set()
 
 
 def test_novel_genre_group_supports_comma_separated_multi_select(monkeypatch, client):
     rows = [
-        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}}),
         _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
         _row("wuxia-1", meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
     ]
@@ -202,7 +215,7 @@ def test_novel_genre_group_supports_comma_separated_multi_select(monkeypatch, cl
 
 def test_novel_genre_group_supports_repeated_params_multi_select(monkeypatch, client):
     rows = [
-        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}}),
         _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
         _row("wuxia-1", meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
     ]
@@ -219,7 +232,7 @@ def test_novel_genre_group_supports_repeated_params_multi_select(monkeypatch, cl
 
 def test_novel_genre_group_legacy_alias_supports_multi_select(monkeypatch, client):
     rows = [
-        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}}),
         _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
         _row("wuxia-1", meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
     ]
@@ -236,7 +249,7 @@ def test_novel_genre_group_legacy_alias_supports_multi_select(monkeypatch, clien
 
 def test_novel_genre_group_ignores_unknown_tokens_when_valid_exists(monkeypatch, client):
     rows = [
-        _row("fantasy-1", meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("fantasy-1", meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}}),
         _row("romance-1", meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
     ]
     _stub_db(monkeypatch, rows)
@@ -253,7 +266,7 @@ def test_novel_genre_group_ignores_unknown_tokens_when_valid_exists(monkeypatch,
 
 def test_novel_completed_filter_combines_with_multi_genres(monkeypatch, client):
     rows = [
-        _row("fantasy-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uD604\uD310"]}}),
+        _row("fantasy-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}}),
         _row("romance-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}}),
         _row("wuxia-completed", status=contents_view.STATUS_COMPLETED, meta={"attributes": {"genres": ["\uBB34\uD611"]}}),
     ]

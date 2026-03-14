@@ -42,9 +42,10 @@ def _settings(**overrides):
     return base
 
 
-def test_backfill_normalized_sql_is_convergent():
+def test_backfill_normalized_sql_is_convergent(monkeypatch):
     conn = FakeConn()
     cursor = FakeCursor([0, 0, 0, 0, 0, 0])
+    monkeypatch.setattr(database, "_backfill_novel_genre_columns_in_batches", lambda *_args, **_kwargs: None)
 
     database.run_contents_backfill_in_batches(conn, cursor, settings=_settings())
 
@@ -64,9 +65,10 @@ def test_backfill_normalized_sql_is_convergent():
     assert cursor.executed[5][1] == (25,)
 
 
-def test_backfill_uses_general_batch_size_for_non_search_updates():
+def test_backfill_uses_general_batch_size_for_non_search_updates(monkeypatch):
     conn = FakeConn()
     cursor = FakeCursor([0, 0, 0, 0, 0, 0])
+    monkeypatch.setattr(database, "_backfill_novel_genre_columns_in_batches", lambda *_args, **_kwargs: None)
 
     database.run_contents_backfill_in_batches(conn, cursor, settings=_settings())
 
@@ -79,9 +81,10 @@ def test_backfill_uses_general_batch_size_for_non_search_updates():
     ]
 
 
-def test_backfill_max_batches_breaks_infinite_progress_non_strict():
+def test_backfill_max_batches_breaks_infinite_progress_non_strict(monkeypatch):
     conn = FakeConn()
     cursor = FakeCursor([0, 0, 0, 0, 1, 1, 1])
+    monkeypatch.setattr(database, "_backfill_novel_genre_columns_in_batches", lambda *_args, **_kwargs: None)
     settings = _settings(
         backfill_batch_size=10,
         backfill_max_batches=3,
@@ -94,9 +97,10 @@ def test_backfill_max_batches_breaks_infinite_progress_non_strict():
     assert conn.commit_calls == 8
 
 
-def test_backfill_max_batches_raises_when_strict():
+def test_backfill_max_batches_raises_when_strict(monkeypatch):
     conn = FakeConn()
     cursor = FakeCursor([0, 0, 0, 0, 1, 1, 1])
+    monkeypatch.setattr(database, "_backfill_novel_genre_columns_in_batches", lambda *_args, **_kwargs: None)
     settings = _settings(
         backfill_batch_size=10,
         backfill_max_batches=3,

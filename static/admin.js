@@ -1,4 +1,10 @@
 (() => {
+  const reportException = (error, context = {}) => {
+    if (typeof window.esReportException === 'function') {
+      window.esReportException(error, context);
+    }
+  };
+
   const getAccessToken = () => {
     try {
       return localStorage.getItem('es_access_token');
@@ -74,11 +80,19 @@
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await fetch(path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response;
+    try {
+      response = await fetch(path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (error) {
+      reportException(error, {
+        tags: { area: 'admin-api', method, path, kind: 'network' },
+      });
+      throw error;
+    }
 
     const contentType = response.headers.get('content-type') || '';
     let payload = null;
@@ -104,12 +118,16 @@
         payload?.detail ||
         response.statusText ||
         '요청에 실패했습니다.';
-      const error = {
-        httpStatus: response.status,
-        message,
-      };
+      const error = new Error(message);
+      error.httpStatus = response.status;
       if (payload?.error?.code) error.code = payload.error.code;
       if (payload?.code) error.code = payload.code;
+      if (response.status >= 500) {
+        reportException(error, {
+          tags: { area: 'admin-api', method, path, kind: 'server' },
+          extra: { httpStatus: response.status },
+        });
+      }
       throw error;
     }
 
@@ -3389,6 +3407,110 @@
     setButtonDisabled(copyBtn, !STATE.crawlerReports.dailyNotificationText);
   };
 
+  const renderEnhancedDailyNotificationReport = (payload) => {
+    const summaryEl = document.getElementById('dailyNotificationSummary');
+    const listEl = document.getElementById('dailyNotificationCompletedList');
+    const copyBtn = document.getElementById('dailyNotificationCopyBtn');
+    if (!summaryEl || !listEl) return;
+
+    const stats = payload?.stats || {};
+    const durationValue = stats.duration_seconds;
+    const durationText =
+      durationValue === null || durationValue === undefined
+        ? '-'
+        : `${Number(durationValue).toFixed(2)}초`;
+
+    const dispatchSummary = [
+      `processed ${stats.dispatch_processed_events ?? 0}`,
+      `deferred ${stats.dispatch_deferred_events ?? 0}`,
+      `failed ${stats.dispatch_failed_events ?? 0}`,
+      `skipped ${stats.dispatch_skipped_events ?? 0}`,
+    ].join(' / ');
+    const logSummary = [
+      `sent ${stats.dispatch_log_sent_total ?? 0}`,
+      `failed ${stats.dispatch_log_failed_total ?? 0}`,
+      `pending ${stats.dispatch_log_pending_total ?? 0}`,
+    ].join(' / ');
+    const recoverySummary = [
+      `retried ${stats.dispatch_retried_notifications ?? 0}`,
+      `already_sent ${stats.dispatch_already_sent_notifications ?? 0}`,
+    ].join(' / ');
+
+    summaryEl.textContent = `작업 시간: ${payload?.generated_at || '-'} · 실행 시간: ${durationText} · 신규 DB 등록 콘텐츠: ${
+      stats.new_contents_total ?? 0
+    }개 · 총 알림 대상 구독자: ${stats.total_recipients ?? 0}명 · 완결 이벤트: ${
+      stats.completed_total ?? 0
+    }건 · 디스패치 처리: ${dispatchSummary} · 로그: ${logSummary} · 복구/재사용: ${recoverySummary}`;
+
+    listEl.innerHTML = '';
+    const items = payload?.completed_items || [];
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white/50';
+      empty.textContent = '(없음)';
+      listEl.appendChild(empty);
+    } else {
+      items.forEach((item) => {
+        const card = document.createElement('div');
+        card.className = 'rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80';
+
+        const header = document.createElement('div');
+        header.className = 'flex flex-wrap items-center gap-2';
+
+        const title = document.createElement('div');
+        title.className = 'font-semibold text-white';
+        title.textContent = item.title || item.content_id || '-';
+        header.appendChild(title);
+
+        if (item.notification_excluded) {
+          const excludedBadge = document.createElement('span');
+          excludedBadge.className =
+            'inline-flex rounded-full border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-100';
+          excludedBadge.textContent = '제외됨';
+          header.appendChild(excludedBadge);
+        }
+
+        if (item.dispatch_attention) {
+          const attentionBadge = document.createElement('span');
+          attentionBadge.className =
+            'inline-flex rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100';
+          attentionBadge.textContent = '조치 필요';
+          header.appendChild(attentionBadge);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'mt-1 text-xs text-white/60';
+        meta.textContent = `${item.content_id || '-'} · ${item.source || '-'} · ${
+          item.subscriber_count ? `${item.subscriber_count}명` : '구독자 없음'
+        }`;
+
+        const dispatchMeta = document.createElement('div');
+        dispatchMeta.className = 'mt-1 text-xs text-white/50';
+        const dispatchStatus =
+          item.dispatch_status ||
+          (item.dispatch_pending_count > 0 ? 'deferred' : item.dispatch_failed_count > 0 ? 'failed' : 'pending');
+        const dispatchBits = [
+          `status=${dispatchStatus}`,
+          `sent=${item.dispatch_sent_count ?? 0}`,
+          `failed=${item.dispatch_failed_count ?? 0}`,
+          `pending=${item.dispatch_pending_count ?? 0}`,
+        ];
+        if (item.dispatch_reason) {
+          dispatchBits.push(`reason=${item.dispatch_reason}`);
+        }
+        dispatchMeta.textContent = dispatchBits.join(' · ');
+
+        card.appendChild(header);
+        card.appendChild(meta);
+        card.appendChild(dispatchMeta);
+        listEl.appendChild(card);
+      });
+    }
+
+    STATE.crawlerReports.dailyNotificationText = payload?.text_report || '';
+    setButtonDisabled(copyBtn, !STATE.crawlerReports.dailyNotificationText);
+  };
+
   const loadDailyNotificationReport = async () => {
     const dateInput = document.getElementById('dailyNotificationDateInput');
     const includeDeleted = document.getElementById('dailyNotificationIncludeDeleted');
@@ -3402,7 +3524,7 @@
     const url = `/api/admin/reports/daily-notification?${params.toString()}`;
     try {
       const payload = await apiRequest('GET', url, { token: STATE.token });
-      renderDailyNotificationReport(payload);
+      renderEnhancedDailyNotificationReport(payload);
     } catch (err) {
       showToast(err.message || '일일 리포트를 불러오지 못했습니다.', { type: 'error' });
       STATE.crawlerReports.dailyNotificationText = '';
@@ -4047,6 +4169,9 @@
       const message = isForbidden
         ? '403: Admin 권한이 필요합니다.'
         : err?.message || '권한 확인 중 오류가 발생했습니다.';
+      if (!isForbidden) {
+        reportException(err, { tags: { area: 'admin-bootstrap' } });
+      }
       showToast(message, { type: 'error' });
       redirectToHome();
     }

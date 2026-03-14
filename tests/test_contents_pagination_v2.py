@@ -22,7 +22,21 @@ class RecordingCursor:
             return []
         rows = self.fetchall_batches[self._fetchall_idx]
         self._fetchall_idx += 1
-        return list(rows)
+        rows = list(rows)
+        if not self.executed:
+            return rows
+        query, params = self.executed[-1]
+        if "novel_genre_groups &&" not in str(query):
+            return rows
+        requested_groups = next((param for param in (params or ()) if isinstance(param, list)), [])
+        if not requested_groups:
+            return rows
+        requested_set = set(requested_groups)
+        return [
+            row
+            for row in rows
+            if requested_set & set(contents_view.extract_novel_genre_groups_from_meta(row.get("meta") or {}))
+        ]
 
     def close(self):
         self.closed = True
@@ -172,13 +186,13 @@ def test_novels_v2_genre_group_filtering_kept(monkeypatch, client):
                 "fantasy-1",
                 source="ridi",
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
             ),
             _row(
-                "romance-1",
+                "hyeonpan-1",
                 source="ridi",
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uB85C\uB9E8\uC2A4"]}},
+                meta={"attributes": {"genres": ["\uD604\uD310"]}},
             ),
         ]],
     )
@@ -190,6 +204,8 @@ def test_novels_v2_genre_group_filtering_kept(monkeypatch, client):
     ids = {item["content_id"] for item in payload["contents"]}
     assert ids == {"fantasy-1"}
     assert len(fake_cursor.executed) == 1
+    query, _ = fake_cursor.executed[0]
+    assert "novel_genre_groups && %s::text[]" in query
 
 
 def test_novels_v2_supports_hyeonpan_genre_group(monkeypatch, client):
@@ -260,7 +276,7 @@ def test_novels_v2_supports_comma_separated_multi_genres(monkeypatch, client):
                 "fantasy-1",
                 source="ridi",
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
             ),
             _row(
                 "romance-1",
@@ -286,6 +302,8 @@ def test_novels_v2_supports_comma_separated_multi_genres(monkeypatch, client):
     assert set(payload["filters"]["genre_groups"]) == {"FANTASY", "ROMANCE"}
     assert payload["filters"]["genre_group"] == "ALL"
     assert len(fake_cursor.executed) == 1
+    query, _ = fake_cursor.executed[0]
+    assert "novel_genre_groups && %s::text[]" in query
 
 
 def test_novels_v2_supports_repeated_multi_genre_params(monkeypatch, client):
@@ -296,7 +314,7 @@ def test_novels_v2_supports_repeated_multi_genre_params(monkeypatch, client):
                 "fantasy-1",
                 source="ridi",
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
             ),
             _row(
                 "romance-1",
@@ -331,7 +349,7 @@ def test_novels_v2_legacy_alias_supports_multi_genres(monkeypatch, client):
                 "fantasy-1",
                 source="ridi",
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
             ),
             _row(
                 "romance-1",
@@ -359,7 +377,7 @@ def test_novels_v2_ignores_unknown_tokens_when_valid_exists(monkeypatch, client)
                 "fantasy-1",
                 source="ridi",
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
             ),
             _row(
                 "romance-1",
@@ -389,7 +407,7 @@ def test_novels_v2_completed_filter_combines_with_multi_genres(monkeypatch, clie
                 source="ridi",
                 status=contents_view.STATUS_COMPLETED,
                 content_type="novel",
-                meta={"attributes": {"genres": ["\uD604\uD310"]}},
+                meta={"attributes": {"genres": ["\uD310\uD0C0\uC9C0"]}},
             ),
             _row(
                 "romance-completed",

@@ -8,8 +8,10 @@ class FakeCursor:
         self.fetchone_results = list(fetchone_results or [])
         self.fetchall_results = list(fetchall_results or [])
         self.closed = False
+        self.executed = []
 
-    def execute(self, query, params=None):  # noqa: ARG002
+    def execute(self, query, params=None):
+        self.executed.append((query, params))
         return None
 
     def fetchone(self):
@@ -100,6 +102,10 @@ def test_get_verified_sync_freshness_marks_missing_sources_stale(monkeypatch):
     assert freshness["missing_sources"] == ["kakao_page"]
     assert freshness["latest_by_source"]["naver_webtoon"]["apply_result"] == "applied"
     assert freshness["reason"] == "missing_sources"
+    query, params = fake_cursor.executed[0]
+    assert "DISTINCT ON" in query
+    assert "ANY(%s)" in query
+    assert params == (service.VERIFIED_LOCAL_PIPELINE, ["naver_webtoon", "kakao_page"])
 
 
 def test_get_verified_sync_freshness_marks_old_sources_stale(monkeypatch):

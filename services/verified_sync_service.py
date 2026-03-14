@@ -191,16 +191,28 @@ def get_verified_sync_freshness(
     freshness_cutoff = checked_at - timedelta(hours=stale_after)
     cursor = get_cursor(conn)
     try:
-        cursor.execute(
-            """
-            SELECT id, crawler_name, status, report_data, created_at
-            FROM daily_crawler_reports
-            WHERE COALESCE(report_data->>'pipeline', '') = %s
-            ORDER BY created_at DESC, id DESC
-            """,
-            (pipeline,),
-        )
-        rows = [dict(row) for row in cursor.fetchall()]
+        if enabled:
+            cursor.execute(
+                """
+                SELECT DISTINCT ON (COALESCE(report_data->>'source_name', ''))
+                    id,
+                    crawler_name,
+                    status,
+                    report_data,
+                    created_at
+                FROM daily_crawler_reports
+                WHERE COALESCE(report_data->>'pipeline', '') = %s
+                  AND COALESCE(report_data->>'source_name', '') = ANY(%s)
+                ORDER BY
+                    COALESCE(report_data->>'source_name', '') ASC,
+                    created_at DESC,
+                    id DESC
+                """,
+                (pipeline, enabled),
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        else:
+            rows = []
     finally:
         cursor.close()
 
