@@ -1,0 +1,4 @@
+interface:
+  display_name: "Green PRs"
+  short_description: "Triage CI, stale branches, and merge conflicts."
+  default_prompt: "Use $green-prs to check my open pull requests and keep them green."

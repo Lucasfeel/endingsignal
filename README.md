@@ -23,21 +23,30 @@
   python -c "import secrets; print(secrets.token_hex(32))"
   ```
 
-## Docker deployment
+## Docker development (recommended)
 
-- Build and run (no database required):
+- For day-to-day work, use Docker as the default development environment.
+  This keeps the runtime closer to deployment and makes backfill / web behavior more consistent.
+
+- Build and run the app with the bundled Postgres container:
+
+  ```bash
+  docker compose --profile with-db up --build
+  ```
+
+- Run only the web container when you want to point at an existing database:
 
   ```bash
   docker compose up --build web
   ```
 
-  - Default port is `5000`. To use a different port, set `PORT`:
+- Default port is `5000`. To use a different port, set `PORT`:
 
   ```bash
   PORT=8080 docker compose up --build web
   ```
 
-- Run with PostgreSQL (optional):
+- Run with an explicit in-network PostgreSQL connection string:
 
   ```bash
   DATABASE_URL=postgresql://endingsignal:endingsignal@db:5432/endingsignal \
@@ -64,6 +73,31 @@
     - `DB_INIT_STRICT_MAINTENANCE` (default: `false`): if `false`, lock/statement timeout during maintenance/backfill logs WARN and continues.
   - Web bind target is `0.0.0.0:${PORT}` (`PORT` default: `5000`).
   - Health check endpoint: `GET /healthz`.
+
+## Local development (optional)
+
+- Direct local execution is still supported for learning, debugging, or quick experiments.
+
+- Install dependencies:
+
+  ```bash
+  pip install -r requirements.txt
+  npm install
+  ```
+
+- Run the frontend build watcher in one terminal:
+
+  ```bash
+  npm run dev
+  ```
+
+- Run the app in another terminal:
+
+  ```bash
+  python scripts/start_web.py
+  ```
+
+- Open `http://localhost:5000`.
 
 ## Deploy lock troubleshooting
 

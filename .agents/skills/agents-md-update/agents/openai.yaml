@@ -1,0 +1,4 @@
+interface:
+  display_name: "AGENTS Update"
+  short_description: "Keep AGENTS.md aligned with recurring repo guidance."
+  default_prompt: "Use $agents-md-update to inspect recent misunderstandings and make a small durable AGENTS.md update."

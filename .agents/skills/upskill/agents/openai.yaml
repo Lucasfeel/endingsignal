@@ -1,0 +1,4 @@
+interface:
+  display_name: "Upskill"
+  short_description: "Improve recurring Codex skills and scripts."
+  default_prompt: "Use $upskill to review recent skill friction and make small durable improvements."

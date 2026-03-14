@@ -1,0 +1,4 @@
+interface:
+  display_name: "Commit Pulse"
+  short_description: "Summarize the last 24h of repo changes."
+  default_prompt: "Use $commit-pulse to brief me on the last day of changes in this repo."

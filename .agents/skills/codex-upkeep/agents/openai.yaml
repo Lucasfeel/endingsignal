@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Upkeep"
+  short_description: "Tighten AGENTS and shared repo skills."
+  default_prompt: "Use $codex-upkeep to improve repeated Codex workflows in this repo."

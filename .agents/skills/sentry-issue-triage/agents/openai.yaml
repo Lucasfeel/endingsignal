@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sentry Issue Triage"
+  short_description: "Investigate one production issue at a time."
+  default_prompt: "Use $sentry-issue-triage to investigate the highest-priority accessible Sentry issue for this repo, prefer the official sentry MCP server when it is connected, and fix only when confidence is high."
