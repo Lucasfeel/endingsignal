@@ -1,8 +1,14 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 load_dotenv()
@@ -38,9 +44,17 @@ def run_db_init():
     subprocess.run([sys.executable, "init_db.py"], check=True)
 
 
-def build_gunicorn_command():
+def resolve_bind():
     port = (os.getenv("PORT") or "5000").strip()
     bind = (os.getenv("GUNICORN_BIND") or f"0.0.0.0:{port}").strip()
+    if ":" in bind:
+        host, resolved_port = bind.rsplit(":", 1)
+        return (host or "0.0.0.0").strip(), (resolved_port or port).strip(), bind
+    return bind, port, bind
+
+
+def build_gunicorn_command():
+    _host, _port, bind = resolve_bind()
     workers = (os.getenv("WEB_CONCURRENCY") or "2").strip()
     timeout = (os.getenv("GUNICORN_TIMEOUT") or "120").strip()
 
@@ -56,13 +70,25 @@ def build_gunicorn_command():
     ]
 
 
+def run_windows_dev_server():
+    from app import app
+
+    host, port, _bind = resolve_bind()
+    app.run(host=host, port=int(port), debug=False, use_reloader=False)
+
+
 def main():
     if should_run_db_init():
         run_db_init()
     else:
         print("[startup] Skipping database init (no DB config or SKIP_DB_INIT=1).")
 
-    command = build_gunicorn_command()
+    if os.name == "nt":
+        print("[startup] Windows detected; using Flask development server instead of gunicorn.")
+        run_windows_dev_server()
+        return
+    else:
+        command = build_gunicorn_command()
     print("[startup] Starting web server:", " ".join(command))
     os.execvp(command[0], command)
 

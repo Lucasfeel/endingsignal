@@ -1,5 +1,6 @@
 webtoons.db
 .env
+.env.sentry.local
 __pycache__/
 *.log
 node_modules/

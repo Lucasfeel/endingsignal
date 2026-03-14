@@ -45,10 +45,19 @@ function debugLog(...args) {
   if (DEBUG_API) console.log(...args);
 }
 
+function reportException(error, context = {}) {
+  if (typeof window.esReportException === 'function') {
+    window.esReportException(error, context);
+  }
+}
+
 let fatalBannerVisible = false;
 function showFatalBanner(message) {
   if (fatalBannerVisible) return;
   fatalBannerVisible = true;
+  reportException(new Error(message || 'Fatal UI bootstrap failure'), {
+    tags: { area: 'bootstrap', severity: 'fatal-banner' },
+  });
   const banner = document.createElement('div');
   banner.textContent =
     message || 'UI 초기화 중 오류가 발생했습니다. 새로고침 후에도 계속되면 관리자에게 문의하세요.';
@@ -2531,7 +2540,15 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
     hasToken: Boolean(token),
   });
 
-  const response = await fetch(url, { method, headers, body: serializedBody, signal });
+  let response;
+  try {
+    response = await fetch(url, { method, headers, body: serializedBody, signal });
+  } catch (error) {
+    reportException(error, {
+      tags: { area: 'api', method, path, kind: 'network' },
+    });
+    throw error;
+  }
   debugLog('[apiResponse]', response.status, response.ok);
 
   const buildError = async () => {
@@ -2566,7 +2583,10 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
       }
     }
 
-    return { httpStatus: response.status, code, message };
+    const error = new Error(message);
+    error.httpStatus = response.status;
+    error.code = code;
+    return error;
   };
 
   if (!response.ok) {
@@ -2578,6 +2598,12 @@ async function apiRequest(method, path, { query, body, token, signal } = {}) {
     }
 
     errorObj.httpStatus = errorObj.httpStatus || response.status;
+    if (response.status >= 500) {
+      reportException(errorObj, {
+        tags: { area: 'api', method, path, kind: 'server' },
+        extra: { httpStatus: response.status },
+      });
+    }
     throw errorObj;
   }
 
@@ -3296,11 +3322,13 @@ const bootApp = () => {
     if (maybePromise && typeof maybePromise.catch === 'function') {
       maybePromise.catch((err) => {
         console.error('[BOOT ERROR]', err);
+        reportException(err, { tags: { area: 'bootstrap', phase: 'async-init' } });
         showFatalBanner();
       });
     }
   } catch (e) {
     console.error('[BOOT ERROR]', e);
+    reportException(e, { tags: { area: 'bootstrap', phase: 'sync-init' } });
     showFatalBanner();
   }
 };

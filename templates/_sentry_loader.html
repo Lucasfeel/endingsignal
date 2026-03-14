@@ -1,0 +1,63 @@
+{% if sentry_frontend_enabled %}
+<script>
+  window.esReportException = function (error, context) {
+    if (!window.Sentry || typeof window.Sentry.captureException !== "function") {
+      return;
+    }
+
+    var nextError = error instanceof Error
+      ? error
+      : new Error(typeof error === "string" ? error : "Unexpected frontend error");
+
+    window.Sentry.withScope(function (scope) {
+      scope.setTag("repo", {{ sentry_frontend_repo|tojson }});
+      scope.setTag("surface", {{ sentry_surface|tojson }});
+
+      if (context && context.tags) {
+        Object.entries(context.tags).forEach(function (entry) {
+          if (entry[1] !== undefined && entry[1] !== null && entry[1] !== "") {
+            scope.setTag(entry[0], String(entry[1]));
+          }
+        });
+      }
+
+      if (context && context.extra) {
+        Object.entries(context.extra).forEach(function (entry) {
+          if (entry[1] !== undefined) {
+            scope.setExtra(entry[0], entry[1]);
+          }
+        });
+      }
+
+      window.Sentry.captureException(nextError);
+    });
+  };
+
+  window.sentryOnLoad = function () {
+    window.Sentry.init({
+      environment: {{ sentry_frontend_environment|tojson }},
+      {% if sentry_frontend_release %}
+      release: {{ sentry_frontend_release|tojson }},
+      {% endif %}
+      integrations: [
+        window.Sentry.browserTracingIntegration(),
+        window.Sentry.replayIntegration({
+          maskAllText: true,
+          blockAllMedia: true,
+        }),
+      ],
+      tracesSampleRate: {{ sentry_frontend_traces_sample_rate|tojson }},
+      replaysSessionSampleRate: {{ sentry_frontend_replays_session_sample_rate|tojson }},
+      replaysOnErrorSampleRate: {{ sentry_frontend_replays_on_error_sample_rate|tojson }},
+      tracePropagationTargets: [window.location.origin],
+    });
+    window.Sentry.setTag("repo", {{ sentry_frontend_repo|tojson }});
+    window.Sentry.setTag("surface", {{ sentry_surface|tojson }});
+  };
+</script>
+<script
+  src="https://js.sentry-cdn.com/{{ sentry_frontend_public_key }}.min.js"
+  crossorigin="anonymous"
+  data-lazy="no"
+></script>
+{% endif %}

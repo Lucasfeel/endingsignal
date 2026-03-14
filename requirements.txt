@@ -9,6 +9,7 @@ flask-compress
 flask-cors
 gunicorn
 python-dotenv
+sentry-sdk[flask]
 psycopg2-binary
 bcrypt
 PyJWT

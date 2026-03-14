@@ -8,6 +8,8 @@
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    {% set sentry_surface = 'public-app' %}
+    {% include '_sentry_loader.html' %}
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
     <link rel="stylesheet" href="{{ url_for('static', filename='build/public-app.css') }}" />
     <script>
