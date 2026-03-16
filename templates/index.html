@@ -1,351 +1,52 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>콘텐츠 완결 알리미</title>
-    <meta name="color-scheme" content="light dark">
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.svg') }}">
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    {% set sentry_surface = 'public-app' %}
-    {% include '_sentry_loader.html' %}
-    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='build/public-app.css') }}" />
-    <script>
-      (function () {
-        var resolvedTheme = 'light';
-        try {
-          var savedTheme = localStorage.getItem('es_theme');
-          if (savedTheme === 'dark' || savedTheme === 'light') {
-            resolvedTheme = savedTheme;
-          } else if (typeof window.matchMedia === 'function') {
-            resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-        } catch (_err) {}
-        document.documentElement.dataset.theme = resolvedTheme;
-      })();
-    </script>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, initial-scale=1.0" name="viewport">
+  <title>콘텐츠 완결 알리미</title>
+  <meta content="light dark" name="color-scheme">
+  <link href="{{ url_for('static', filename='favicon.svg') }}" rel="icon" type="image/svg+xml">
+  <link href="{{ url_for('static', filename='favicon.svg') }}" rel="shortcut icon">
+  <link crossorigin href="https://cdn.jsdelivr.net" rel="preconnect">
+  <link
+    as="style"
+    crossorigin
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
+    rel="stylesheet"
+  >
+  {% set sentry_surface = 'public-app' %}
+  {% include '_sentry_loader.html' %}
+  <link href="{{ url_for('static', filename='build/app-shell.css') }}" rel="stylesheet">
+  <script>
+    (function () {
+      var resolvedTheme = 'light';
+      try {
+        var savedTheme = localStorage.getItem('es_theme');
+        if (savedTheme === 'dark' || savedTheme === 'light') {
+          resolvedTheme = savedTheme;
+        } else if (typeof window.matchMedia === 'function') {
+          resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+      } catch (_err) {}
+      document.documentElement.dataset.theme = resolvedTheme;
+      window.__ES_RUNTIME__ = {
+        apiBaseUrl: {{ request.url_root.rstrip('/')|tojson }},
+        app: 'public',
+        sentry: {
+          enabled: {{ sentry_frontend_enabled|tojson }},
+          environment: {{ sentry_frontend_environment|tojson }},
+          repo: {{ sentry_frontend_repo|tojson }},
+          surface: {{ sentry_surface|tojson }}
+        },
+        theme: {
+          initialTheme: resolvedTheme
+        }
+      };
+    })();
+  </script>
 </head>
-{% set in_toss_arg = request.args.get('in_toss', '')|string|lower %}
-{% set host_arg = request.args.get('host', '')|string|lower %}
-{% set is_ait = in_toss_arg in ['1', 'true'] or host_arg == 'toss' %}
-<body class="es-main-page antialiased{% if is_ait %} is-ait{% endif %}">
-    <div id="esPerfRoot"></div>
-
-    <div id="app-root">
-        <!-- 3.1 Sticky Header -->
-        {% if not is_ait %}
-        <header id="mainHeader" class="sticky top-0 z-50 h-[56px] px-4 flex items-center justify-between transition-all duration-200 relative">
-            <button
-                id="homeButton"
-                type="button"
-                aria-label="홈으로 이동"
-                class="flex items-center cursor-pointer spring-bounce bg-transparent border-0 p-0"
-            >
-                <img
-                    src="/static/brand_logo.svg"
-                    alt="콘텐츠 완결 알리미"
-                    class="block h-[44px] w-auto object-contain"
-                />
-            </button>
-            <div class="flex items-center gap-4">
-                <div id="headerSearchWrap" class="relative flex items-center">
-                    <button id="searchButton" data-ui="header-search-icon" aria-label="검색">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="11" cy="11" r="7"></circle>
-                            <line x1="16.65" y1="16.65" x2="21" y2="21"></line>
-                        </svg>
-                    </button>
-                </div>
-                <div class="relative">
-                    <button id="profileButton" data-ui="header-profile-icon" aria-haspopup="menu" aria-expanded="false">
-                        <span class="sr-only">프로필</span>
-                        <span id="profileButtonText"></span>
-                    </button>
-                    <div id="profileMenu" data-ui="menu-wrap" class="hidden absolute right-0 top-full mt-2 z-[1000] w-40" role="menu" aria-label="프로필 메뉴">
-                        <button id="profileMenuMy" data-ui="menu-item" role="menuitem">내 구독</button>
-                        <button id="profileMenuMyPage" data-ui="menu-item" role="menuitem">마이페이지</button>
-                        <button id="profileMenuThemeToggle" data-ui="menu-item" role="menuitemcheckbox" aria-checked="false">다크 모드</button>
-                        <button id="profileMenuAdmin" data-ui="menu-item" role="menuitem" class="hidden">Admin</button>
-                        <button id="profileMenuLogout" data-ui="menu-item-danger" role="menuitem">로그아웃</button>
-                    </div>
-                </div>
-            </div>
-        </header>
-        {% endif %}
-
-        <div id="toastContainer" role="status" aria-live="polite" aria-atomic="true" class="fixed top-4 left-1/2 -translate-x-1/2 z-[110] space-y-2 w-[calc(100%-32px)] max-w-[520px] pointer-events-none"></div>
-
-        <main class="min-h-screen pb-24 relative">
-             <!-- Top Filters Container -->
-            <div id="filtersWrapper" class="sticky {% if is_ait %}top-0{% else %}top-[56px]{% endif %} z-40">
-                {% if is_ait %}
-                <div class="px-4 pt-3 pb-2">
-                    <button id="aitSearchTrigger" type="button" data-ui="search-trigger" class="w-full h-11 flex items-center gap-2 rounded-xl px-3 text-left spring-bounce" aria-label="검색">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <circle cx="11" cy="11" r="7"></circle>
-                            <line x1="16.65" y1="16.65" x2="21" y2="21"></line>
-                        </svg>
-                        <span class="text-sm">작품을 검색해 보세요</span>
-                    </button>
-                </div>
-                {% endif %}
-                <!-- Tab 5 Specific: Segmented Toggle -->
-                <div id="mySubToggleContainer" class="hidden px-4 py-3{% if not is_ait %} h-[68px] items-center{% else %} space-y-2{% endif %}">
-                    {% if is_ait %}
-                    <div class="flex items-center justify-between px-1">
-                        <h2 class="text-base font-semibold">내 구독</h2>
-                        <button id="myPageEntryButton" type="button" class="es-icon-btn h-9 w-9 inline-flex items-center justify-center rounded-xl spring-bounce" aria-label="마이페이지">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <circle cx="12" cy="12" r="3"></circle>
-                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.04.37.24.72.56 1 .28.24.64.37 1.01.37H21a2 2 0 0 1 0 4h-.09c-.37 0-.73.13-1.01.37-.32.28-.52.63-.56 1z"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    {% endif %}
-                    <div class="es-toggle-shell w-full h-[44px] rounded-lg p-1 flex relative">
-                        <div id="toggleIndicator" class="absolute top-1 bottom-1 w-1/2 rounded-md transition-transform duration-300 translate-x-0"></div>
-                        <button id="mySubToggleCompletion" data-mode="completion" class="is-active flex-1 z-10 text-[13px] font-semibold text-center leading-[36px]" onclick="updateMySubTab('completion')">완결구독</button>
-                        <button id="mySubToggleCompleted" data-mode="completed" class="flex-1 z-10 text-[13px] font-semibold text-center leading-[36px]" onclick="updateMySubTab('completed')">완결됨</button>
-                    </div>
-                </div>
-
-                 <!-- Tab 4 Specific: Sort Options -->
-                <div id="seriesSortOptions" class="hidden flex justify-end px-4 py-2 text-[11px] gap-2">
-                    <span class="is-active cursor-pointer">최신순</span>
-                    <span>|</span>
-                    <span class="cursor-pointer">가나다순</span>
-                </div>
-
-                <!-- L1 Filter (Logos) -->
-                <div id="l1FilterContainer" class="h-[60px] flex items-center px-4 overflow-x-auto hide-scrollbar gap-3 hidden"></div>
-
-                <!-- L2 Filter (Detail Categories) -->
-                <div id="l2FilterContainer" class="h-[40px] flex items-center px-4 overflow-x-auto hide-scrollbar border-b hidden"></div>
-            </div>
-
-            <!-- Content Grid -->
-            <div id="contentGridContainer" class="p-4 grid grid-cols-3 gap-2 items-start content-start fade-in mt-2 min-h-[50vh]">
-                <!-- Skeleton/Content injected here -->
-            </div>
-
-            <div id="contentGridFooter" class="px-4 pb-4 space-y-2">
-                <div id="contentCountIndicator" class="text-center text-[11px]"></div>
-                <button id="contentLoadMoreBtn" data-ui="load-more" class="hidden">더 불러오기</button>
-                <div id="contentGridSentinel" class="h-6 w-full"></div>
-            </div>
-
-             <!-- Tab 4 Footer Button -->
-            <div id="seriesFooterButton" class="hidden px-4 pb-6 w-full">
-                <button class="w-full h-[52px] border border-dashed rounded-xl flex justify-center items-center cursor-pointer transition-all group">
-                     <span class="text-[13px]">(+) 당신의 시리즈를 추가해주세요</span>
-                </button>
-            </div>
-
-            <div id="statusIndicator" class="text-center py-20"></div>
-        </main>
-
-        <!-- 3.2 Bottom Navigation -->
-        <nav id="bottomNav" class="fixed bottom-0 max-w-[520px] w-full mx-auto z-50 pb-safe h-[64px] grid grid-cols-5">
-            <!-- Icons injected via JS -->
-        </nav>
-
-        <!-- Modals -->
-        <div id="subscribeModal" data-ui="modal-wrap" class="fixed inset-0 z-[100] hidden" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" tabindex="-1">
-            <div class="absolute inset-0 es-modal-overlay" data-modal-overlay="true"></div>
-            <div id="modalContent" data-ui="modal-card" class="relative">
-                <button
-                    id="subscribeModalCloseButton"
-                    type="button"
-                    class="absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full es-icon-btn spring-bounce"
-                    aria-label="닫기"
-                    onclick="closeSubscribeModal()"
-                >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M18 6 6 18"></path>
-                        <path d="m6 6 12 12"></path>
-                    </svg>
-                </button>
-                <h2 id="subscribeModalTitle" data-ui="modal-title" class="pr-10">완결 알림 받기</h2>
-                <p id="modalWebtoonTitle" data-ui="modal-body" class="mb-4"></p>
-                <div id="modalWebtoonLinkContainer" class="hidden mb-6 text-sm"></div>
-                <div id="subscribeStateLine" class="flex items-center gap-2 text-sm mb-2">
-                    <span id="subscribeStateDot" class="h-2 w-2 rounded-full"></span>
-                    <span id="subscribeStateText"></span>
-                </div>
-                <p id="subscribeInlineError" class="text-xs mt-2"></p>
-                <div class="mt-4 flex flex-col gap-2 w-full">
-                    <button id="subscribeVisitButton" data-ui="modal-secondary" class="hidden w-full" onclick="openContentFromModal()" type="button">작품 보러 가기</button>
-                    <button id="subscribeCompletionButton" data-ui="modal-primary" class="w-full" onclick="toggleSubscriptionFromModal()" type="button">완결 구독</button>
-                </div>
-            </div>
-        </div>
-        <div id="searchPage" data-ui="page-overlay-root" class="fixed inset-0 z-[90] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
-            <div class="relative z-10 h-full">
-                <div id="searchPageContainer" data-ui="page-overlay-container" class="h-full">
-                    <div class="flex h-full flex-col min-h-0">
-                        <div class="es-overlay-header flex items-center {% if is_ait %}gap-0{% else %}gap-2{% endif %} pb-3">
-                            {% if not is_ait %}
-                            <button id="searchBackButton" data-ui="search-back" aria-label="뒤로">
-                                ←
-                            </button>
-                            {% endif %}
-                            <div class="flex-1 relative">
-                                <input id="searchPageInput" data-ui="search-input" type="text" inputmode="search" autocomplete="off" placeholder="작품을 검색해 보세요" />
-                                <button id="searchClearButton" data-ui="search-clear" class="absolute right-2 top-1/2 -translate-y-1/2" aria-label="검색어 지우기">×</button>
-                            </div>
-                        </div>
-
-                        <div id="searchPageBody" class="flex-1 min-h-0 overflow-y-auto pb-[calc(96px+env(safe-area-inset-bottom))] pt-2 space-y-6">
-                            <div id="searchResultsView" class="hidden space-y-4">
-                                <div id="searchResultsMeta" class="flex items-center justify-between">
-                                    <div id="searchResultLabel" data-ui="search-result-label">현재 표시 중인 작품 <span id="searchResultCount">0</span>개</div>
-                                </div>
-
-                                <div id="searchPageLoading" data-ui="grid-2to3" class="hidden mt-2 items-start content-start"></div>
-                                <div id="searchPageResults" data-ui="grid-2to3" class="mt-2 pb-4 items-start content-start overflow-visible"></div>
-
-                                <div id="searchPageEmpty" class="hidden flex flex-col items-center gap-3 rounded-xl border px-4 py-10 text-center">
-                                    <div id="searchEmptyTitle" data-ui="search-empty-title">검색 결과가 없어요</div>
-                                    <div id="searchEmptySubtitle" data-ui="search-empty-msg" class="max-w-[320px] text-center text-sm">
-                                        다른 키워드로 검색해보세요.
-                                    </div>
-                                    <div id="searchEmptyActions" class="mt-4 flex flex-wrap items-center justify-center gap-3"></div>
-                                </div>
-                            </div>
-
-                            <div id="searchIdle" class="space-y-6">
-                                <div class="flex items-center justify-between">
-                                    <h2 class="text-base font-semibold">최근 검색어</h2>
-                                    <button id="searchRecentClearAll" data-ui="search-recent-clear">전체삭제</button>
-                                </div>
-                                <div id="searchRecentChips" class="flex flex-wrap gap-2"></div>
-
-                                <div class="flex items-center justify-between">
-                                    <div class="space-y-0.5">
-                                        <h2 id="searchPopularTitle" data-ui="search-popular-title">최근 본 작품</h2>
-                                        <p id="searchPopularSubtitle" data-ui="search-popular-subtitle">최근에 열어본 작품이 여기에 표시됩니다.</p>
-                                    </div>
-                                </div>
-                                <div id="searchPopularGrid" data-ui="grid-2to3"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div id="myPage" data-ui="page-overlay-root" class="fixed inset-0 z-[85] hidden h-[100dvh] overflow-hidden" style="height: calc(var(--vvh, 1vh) * 100)">
-            <div class="relative z-10 h-full">
-                <div id="myPageContainer" data-ui="page-overlay-container" class="h-full">
-                    <div class="flex h-full flex-col min-h-0">
-                        <div class="es-overlay-header flex items-center {% if is_ait %}gap-0{% else %}gap-2{% endif %} pb-3">
-                            {% if not is_ait %}
-                            <button id="myPageBackBtn" data-ui="search-back" aria-label="뒤로">
-                                ←
-                            </button>
-                            {% endif %}
-                            <h2 class="text-base font-semibold">마이페이지</h2>
-                        </div>
-
-                        <div class="flex-1 min-h-0 overflow-y-auto pb-[calc(96px+env(safe-area-inset-bottom))]">
-                            <div class="space-y-3">
-                                <div id="myPageSummaryCard" data-ui="page-card" class="space-y-3">
-                                    <div class="flex items-center justify-between">
-                                        <h3 data-ui="section-title">구독 요약</h3>
-                                        <span id="myPageSummaryStatus" class="text-xs es-muted">불러오는 중</span>
-                                    </div>
-                                    <div class="grid grid-cols-2 gap-3">
-                                        <div class="rounded-2xl border px-4 py-3 text-center">
-                                            <div class="text-xs es-muted">구독 중</div>
-                                            <div id="myPageSummaryActiveCount" class="mt-2 text-2xl font-semibold">-</div>
-                                        </div>
-                                        <div class="rounded-2xl border px-4 py-3 text-center">
-                                            <div class="text-xs es-muted">완결됨</div>
-                                            <div id="myPageSummaryCompletedCount" class="mt-2 text-2xl font-semibold">-</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div data-ui="page-card" class="space-y-3">
-                                    <h3 data-ui="section-title">내 정보</h3>
-                                    <div class="space-y-2 text-sm">
-                                        <div class="flex items-center justify-between">
-                                            <span data-ui="section-subtle">이메일</span>
-                                            <span id="myPageEmailValue" class="font-medium">-</span>
-                                        </div>
-                                        <div id="myPageCreatedAtRow" class="flex items-center justify-between hidden">
-                                            <span data-ui="section-subtle">가입일</span>
-                                            <span id="myPageCreatedAtValue" class="font-medium"></span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div data-ui="page-card" class="space-y-3">
-                                    <h3 data-ui="section-title">구독</h3>
-                                    <p class="text-xs es-muted">구독한 작품을 한 번에 확인하세요.</p>
-                                    <button id="myPageGoMySubBtn" data-ui="btn-solid" type="button" class="w-full h-11">내 구독으로 이동</button>
-                                </div>
-
-                                <div data-ui="page-card" class="space-y-3">
-                                    <h3 data-ui="section-title">보안</h3>
-                                    <div class="space-y-2">
-                                        <label data-ui="input-label" for="myPagePwCurrent">현재 비밀번호</label>
-                                        <input id="myPagePwCurrent" data-ui="input-sm" type="password" autocomplete="current-password" placeholder="현재 비밀번호" />
-                                    </div>
-                                    <div class="space-y-2">
-                                        <label data-ui="input-label" for="myPagePwNew">새 비밀번호</label>
-                                        <input id="myPagePwNew" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호" />
-                                        <p class="text-xs es-muted">비밀번호는 8자 이상 입력해주세요.</p>
-                                    </div>
-                                    <div class="space-y-2">
-                                        <label data-ui="input-label" for="myPagePwConfirm">새 비밀번호 확인</label>
-                                        <input id="myPagePwConfirm" data-ui="input-sm" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" />
-                                    </div>
-                                    <p id="myPagePwError" class="text-xs min-h-[16px]"></p>
-                                    <button id="myPagePwSubmit" data-ui="btn-solid" type="button" class="w-full h-11">변경하기</button>
-                                </div>
-
-                                <div data-ui="page-card" class="space-y-3">
-                                    <h3 data-ui="section-title">로그아웃</h3>
-                                    <p class="text-xs es-muted">계정에서 안전하게 로그아웃합니다.</p>
-                                    <button id="myPageLogoutBtn" data-ui="btn-solid" type="button" class="w-full h-11">로그아웃</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div id="authModal" data-ui="modal-wrap" class="fixed inset-0 z-[120] hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" tabindex="-1">
-            <div class="absolute inset-0 es-modal-overlay" data-modal-overlay="true"></div>
-            <div class="relative z-10" data-ui="modal-card">
-                <h2 id="authTitle" data-ui="modal-title">로그인</h2>
-                <p id="authDescription" data-ui="modal-body" class="mb-4">이메일과 비밀번호를 입력해주세요.</p>
-                <div class="space-y-3">
-                    <input id="authEmail" data-ui="input-sm" type="email" placeholder="email" />
-                    <input id="authPassword" data-ui="input-sm" type="password" placeholder="password" />
-                    <div id="authPasswordConfirmRow" class="space-y-2 hidden">
-                        <label data-ui="input-label">비밀번호 확인</label>
-                        <input id="authPasswordConfirm" data-ui="input-sm" type="password" class="px-4 py-3 rounded-xl" placeholder="비밀번호를 다시 입력" />
-                    </div>
-                    <p id="authError" class="text-xs min-h-[16px]"></p>
-                </div>
-                <div class="flex justify-end gap-2 mt-4">
-                    <button id="authCloseBtn" data-ui="modal-secondary">닫기</button>
-                    <button id="authSubmitBtn" data-ui="modal-primary">로그인</button>
-                </div>
-                <div class="mt-4 text-center text-xs es-muted">
-                    <span id="authModeHintText">계정이 없으신가요?</span>
-                    <button id="authToggleModeBtn" type="button" class="ml-1 font-bold hover:underline">회원가입</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    <script type="module" src="{{ url_for('static', filename='build/public-app.js') }}"></script>
-    <script src="/static/app.js" defer></script>
+<body class="es-main-page antialiased">
+  <div id="app-root"></div>
+  <script src="{{ url_for('static', filename='build/public-app.js') }}" type="module"></script>
 </body>
 </html>
-
-
-

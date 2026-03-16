@@ -4,19 +4,21 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "preact",
     "strict": false,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowJs": true,
     "types": [
-      "vite/client"
+      "vite/client",
+      "vitest/globals"
     ]
   },
   "include": [
-    "frontend/**/*.ts",
-    "frontend/**/*.tsx",
+    "frontend/apps/**/*.ts",
+    "frontend/apps/**/*.tsx",
+    "frontend/src/**/*.ts",
+    "frontend/src/**/*.tsx",
     "vite.config.ts"
   ]
 }

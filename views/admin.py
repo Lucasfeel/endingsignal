@@ -459,8 +459,8 @@ def _serialize_content_row(row):
 
 
 @admin_bp.route('/admin', methods=['GET'])
-@admin_bp.route('/admin/contents/new', methods=['GET'])
-def admin_page():
+@admin_bp.route('/admin/<path:path>', methods=['GET'])
+def admin_page(path=None):
     return render_template('admin.html')
 
 

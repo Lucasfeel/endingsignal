@@ -63,9 +63,19 @@ def teardown_db(exception):
     close_db(exception)
 
 
-@app.route("/")
-def index():
+def render_public_shell():
     return render_template("index.html")
+
+
+@app.route("/")
+@app.route("/search")
+@app.route("/subscriptions")
+@app.route("/mypage")
+@app.route("/browse")
+@app.route("/browse/<path:subpath>")
+@app.route("/content/<source>/<path:content_id>")
+def index(subpath=None, source=None, content_id=None):
+    return render_public_shell()
 
 
 @app.route("/healthz", methods=["GET"])
