@@ -2,7 +2,7 @@
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Fragment, useCallback, useRef } from "react";
+import { Fragment, useCallback, useEffect, useRef } from "react";
 import { extractContentUrl, extractDisplayMeta } from "../shared/content";
 import { AuthProvider, useAuth } from "../shared/hooks/use-auth";
 import { PerfBridge } from "../shared/perf-bridge";
@@ -123,6 +123,7 @@ function PublicShell() {
   const contentGridRef = useRef<HTMLDivElement | null>(null);
   const contentGridSentinelRef = useRef<HTMLDivElement | null>(null);
   const modalScrollYRef = useRef<number | null>(null);
+  const previousShowAuthModalRef = useRef(false);
   const {
     closeProfileMenu,
     isProfileMenuOpen,
@@ -213,6 +214,17 @@ function PublicShell() {
     subscriptionItems,
     theme,
   });
+
+  useEffect(() => {
+    if (showAuthModal && !previousShowAuthModalRef.current) {
+      trackPublicEvent("auth_modal_opened", {
+        authMode,
+        entrypoint: modalContent ? "subscription_gate" : "mypage_gate",
+        hasModalContent: Boolean(modalContent),
+      });
+    }
+    previousShowAuthModalRef.current = showAuthModal;
+  }, [authMode, modalContent, showAuthModal, trackPublicEvent]);
   const headerModel = usePublicHeaderModel({
     auth,
     navigate,
@@ -277,6 +289,7 @@ function PublicShell() {
     novelFilter,
     ottFilter,
     selectedSources,
+    trackPublicEvent,
     setMyViewMode,
     setNovelFilter,
     setOttFilter,
@@ -302,11 +315,23 @@ function PublicShell() {
     subscriptionsIsLoading: subscriptionsQuery.isLoading,
   });
   const searchViewModel = useSearchViewModel({
-    clearRecentSearches,
+    clearRecentSearches: () => {
+      trackPublicEvent("recent_searches_cleared", {
+        clearedCount: recentSearches.length,
+      });
+      clearRecentSearches();
+    },
     onClose: () => closeOverlay({ showAuthModal }),
     onOpenContent: openContentModal,
     onSearchInputChange: setSearchInput,
-    onSubmitSearch: publicActions.submitSearch,
+    onSubmitSearch: (query, trigger) => {
+      if (trigger === "recent_search") {
+        trackPublicEvent("recent_search_clicked", {
+          queryLength: query.trim().length,
+        });
+      }
+      publicActions.submitSearch(query, trigger);
+    },
     recentSearches,
     resolveTabId: (content) => resolveCardTabId(content, "webtoon"),
     searchInput,
@@ -390,7 +415,13 @@ function PublicShell() {
           activeTab={activeTab}
           categoryFilters={categoryFilters}
           myViewMode={myViewMode}
-          onSetMyViewMode={setMyViewMode}
+          onSetMyViewMode={(mode) => {
+            trackPublicEvent("my_view_mode_changed", {
+              nextValue: mode,
+              previousValue: myViewMode,
+            });
+            setMyViewMode(mode);
+          }}
           sourceChips={sourceChips}
         />
 

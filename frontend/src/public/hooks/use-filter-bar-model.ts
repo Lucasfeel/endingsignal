@@ -19,6 +19,7 @@ export function useFilterBarModel({
   novelFilter,
   ottFilter,
   selectedSources,
+  trackPublicEvent,
   setMyViewMode,
   setNovelFilter,
   setOttFilter,
@@ -31,6 +32,7 @@ export function useFilterBarModel({
   novelFilter: string;
   ottFilter: string;
   selectedSources: Record<NavTab, string[]>;
+  trackPublicEvent: (name: string, payload?: Record<string, unknown>) => void;
   setMyViewMode: (mode: "completion" | "completed") => void;
   setNovelFilter: SetStringState;
   setOttFilter: SetStringState;
@@ -75,17 +77,24 @@ export function useFilterBarModel({
         hasSelection: current.length > 0,
         label: item.label,
         normalizedId,
-        onClick: () =>
+        onClick: () => {
+          const nextSelected = !active;
+          trackPublicEvent("source_chip_toggled", {
+            action: nextSelected ? "selected" : "deselected",
+            sourceId: normalizedId,
+            sourceLabel: item.label,
+          });
           setSelectedSources((prev) => {
             const currentSet = new Set(prev[activeTab]);
             if (currentSet.has(normalizedId)) currentSet.delete(normalizedId);
             else currentSet.add(normalizedId);
             return { ...prev, [activeTab]: Array.from(currentSet) };
-          }),
+          });
+        },
         style: logoStyle,
       };
     });
-  }, [activeTab, selectedSources, setSelectedSources, showBrowseFilters]);
+  }, [activeTab, selectedSources, setSelectedSources, showBrowseFilters, trackPublicEvent]);
 
   const categoryFilters = useMemo(() => {
     if (!showBrowseFilters) return [];
@@ -107,12 +116,23 @@ export function useFilterBarModel({
       id: item.id,
       label: item.label,
       onClick: () => {
+        const previousValue =
+          activeTab === "webtoon"
+            ? webtoonFilter
+            : activeTab === "novel"
+              ? novelFilter
+              : ottFilter;
+        trackPublicEvent("category_filter_changed", {
+          filterGroup: activeTab === "webtoon" ? "weekday" : activeTab === "novel" ? "novel_genre_group" : "ott_genre_group",
+          nextValue: item.id,
+          previousValue,
+        });
         if (activeTab === "webtoon") setWebtoonFilter(item.id);
         if (activeTab === "novel") setNovelFilter(item.id);
         if (activeTab === "ott") setOttFilter(item.id);
       },
     }));
-  }, [activeTab, novelFilter, ottFilter, setNovelFilter, setOttFilter, setWebtoonFilter, showBrowseFilters, webtoonFilter]);
+  }, [activeTab, novelFilter, ottFilter, setNovelFilter, setOttFilter, setWebtoonFilter, showBrowseFilters, trackPublicEvent, webtoonFilter]);
 
   return {
     categoryFilters,

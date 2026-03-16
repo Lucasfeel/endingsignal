@@ -3,11 +3,22 @@ import posthog from "posthog-js";
 import { getRuntime, type UiTelemetryEvent } from "../shared/runtime";
 
 const EVENT_NAME_MAP = {
+  auth_modal_opened: "public_auth_modal_opened",
+  category_filter_changed: "public_category_filter_changed",
   content_opened: "public_content_opened",
+  load_more_requested: "public_load_more_requested",
+  my_view_mode_changed: "public_my_view_mode_changed",
+  nav_home_clicked: "public_home_clicked",
   nav_tab_selected: "public_tab_selected",
   overlay_closed: "public_overlay_closed",
   overlay_opened: "public_overlay_opened",
+  profile_menu_closed: "public_profile_menu_closed",
+  profile_menu_item_clicked: "public_profile_menu_item_clicked",
+  profile_menu_opened: "public_profile_menu_opened",
+  recent_search_clicked: "public_recent_search_clicked",
+  recent_searches_cleared: "public_recent_searches_cleared",
   search_submitted: "public_search_submitted",
+  source_chip_toggled: "public_source_chip_toggled",
   subscription_cta_clicked: "public_subscription_clicked",
 } as const;
 
@@ -40,10 +51,23 @@ function asStringArray(value: unknown) {
 
 function deriveEventFamily(event: UiTelemetryEvent) {
   switch (event.name) {
+    case "category_filter_changed":
+    case "load_more_requested":
+    case "my_view_mode_changed":
+    case "source_chip_toggled":
+      return "discovery";
+    case "nav_home_clicked":
     case "nav_tab_selected":
       return "navigation";
+    case "auth_modal_opened":
+    case "profile_menu_closed":
+    case "profile_menu_item_clicked":
+    case "profile_menu_opened":
+      return "account";
     case "content_opened":
       return "content";
+    case "recent_search_clicked":
+    case "recent_searches_cleared":
     case "search_submitted":
       return "search";
     case "subscription_cta_clicked":
@@ -58,8 +82,20 @@ function deriveEventFamily(event: UiTelemetryEvent) {
 
 function deriveJourneyStage(event: UiTelemetryEvent) {
   switch (event.name) {
+    case "category_filter_changed":
+    case "load_more_requested":
+    case "my_view_mode_changed":
+    case "nav_home_clicked":
     case "nav_tab_selected":
+    case "source_chip_toggled":
       return "browse";
+    case "auth_modal_opened":
+    case "profile_menu_closed":
+    case "profile_menu_item_clicked":
+    case "profile_menu_opened":
+      return "account";
+    case "recent_search_clicked":
+    case "recent_searches_cleared":
     case "search_submitted":
       return "search";
     case "content_opened":
@@ -83,10 +119,25 @@ function deriveAuthState(event: UiTelemetryEvent) {
   return asBoolean(event.payload?.isAuthenticated) ? "authenticated" : "anonymous";
 }
 
+function deriveContentDomain(event: UiTelemetryEvent) {
+  const explicit = asString(event.payload?.contentType).toLowerCase();
+  if (explicit === "webtoon" || explicit === "novel" || explicit === "ott") {
+    return explicit;
+  }
+
+  const entryTab = asString(event.payload?.activeTab).toLowerCase();
+  if (entryTab === "webtoon" || entryTab === "novel" || entryTab === "ott") {
+    return entryTab;
+  }
+
+  return "none";
+}
+
 function buildCommonPublicProperties(event: UiTelemetryEvent) {
   return {
     auth_provider: asString(event.payload?.authProvider),
     auth_state: deriveAuthState(event),
+    content_domain: deriveContentDomain(event),
     entry_filter: asString(event.payload?.activeFilter),
     entry_source_count: asNumber(event.payload?.selectedSourceCount),
     entry_sources: asStringArray(event.payload?.selectedSources),
@@ -117,11 +168,41 @@ export function buildPublicPosthogProperties(event: UiTelemetryEvent) {
   }
 
   switch (event.name) {
+    case "auth_modal_opened":
+      return {
+        ...buildCommonPublicProperties(event),
+        auth_mode: asString(event.payload?.authMode),
+        entrypoint: asString(event.payload?.entrypoint),
+        has_modal_content: asBoolean(event.payload?.hasModalContent),
+      };
+    case "category_filter_changed":
+      return {
+        ...buildCommonPublicProperties(event),
+        filter_group: asString(event.payload?.filterGroup),
+        next_value: asString(event.payload?.nextValue),
+        previous_value: asString(event.payload?.previousValue),
+      };
     case "nav_tab_selected":
       return {
         ...buildCommonPublicProperties(event),
         tab_from: String(event.payload?.from || ""),
         tab_to: String(event.payload?.to || ""),
+      };
+    case "load_more_requested":
+      return {
+        ...buildCommonPublicProperties(event),
+        load_trigger: asString(event.payload?.trigger),
+        tab: asString(event.payload?.tab),
+      };
+    case "my_view_mode_changed":
+      return {
+        ...buildCommonPublicProperties(event),
+        next_value: asString(event.payload?.nextValue),
+        previous_value: asString(event.payload?.previousValue),
+      };
+    case "nav_home_clicked":
+      return {
+        ...buildCommonPublicProperties(event),
       };
     case "content_opened":
       return {
@@ -140,6 +221,31 @@ export function buildPublicPosthogProperties(event: UiTelemetryEvent) {
         trigger: asString(event.payload?.trigger),
         weekday_count: asNumber(event.payload?.weekdayCount),
       };
+    case "profile_menu_closed":
+      return {
+        ...buildCommonPublicProperties(event),
+        close_reason: asString(event.payload?.reason),
+      };
+    case "profile_menu_item_clicked":
+      return {
+        ...buildCommonPublicProperties(event),
+        menu_item: asString(event.payload?.item),
+      };
+    case "profile_menu_opened":
+      return {
+        ...buildCommonPublicProperties(event),
+        open_reason: asString(event.payload?.reason),
+      };
+    case "recent_search_clicked":
+      return {
+        ...buildCommonPublicProperties(event),
+        query_length: asNumber(event.payload?.queryLength),
+      };
+    case "recent_searches_cleared":
+      return {
+        ...buildCommonPublicProperties(event),
+        cleared_count: asNumber(event.payload?.clearedCount),
+      };
     case "search_submitted":
       return {
         ...buildCommonPublicProperties(event),
@@ -148,6 +254,13 @@ export function buildPublicPosthogProperties(event: UiTelemetryEvent) {
         query_word_count: asNumber(event.payload?.queryWordCount),
         search_trigger: asString(event.payload?.trigger),
         used_recent_search: asBoolean(event.payload?.usedRecentSearch),
+      };
+    case "source_chip_toggled":
+      return {
+        action: asString(event.payload?.action),
+        ...buildCommonPublicProperties(event),
+        source_id: asString(event.payload?.sourceId),
+        source_label: asString(event.payload?.sourceLabel),
       };
     case "subscription_cta_clicked":
       return {

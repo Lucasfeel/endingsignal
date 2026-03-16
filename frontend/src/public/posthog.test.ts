@@ -32,6 +32,16 @@ describe("public posthog telemetry", () => {
     const { mapPublicUiEventToPosthog } = await import("./posthog");
 
     expect(mapPublicUiEventToPosthog("nav_tab_selected")).toBe("public_tab_selected");
+    expect(mapPublicUiEventToPosthog("source_chip_toggled")).toBe("public_source_chip_toggled");
+    expect(mapPublicUiEventToPosthog("category_filter_changed")).toBe("public_category_filter_changed");
+    expect(mapPublicUiEventToPosthog("my_view_mode_changed")).toBe("public_my_view_mode_changed");
+    expect(mapPublicUiEventToPosthog("auth_modal_opened")).toBe("public_auth_modal_opened");
+    expect(mapPublicUiEventToPosthog("profile_menu_opened")).toBe("public_profile_menu_opened");
+    expect(mapPublicUiEventToPosthog("profile_menu_closed")).toBe("public_profile_menu_closed");
+    expect(mapPublicUiEventToPosthog("profile_menu_item_clicked")).toBe("public_profile_menu_item_clicked");
+    expect(mapPublicUiEventToPosthog("recent_search_clicked")).toBe("public_recent_search_clicked");
+    expect(mapPublicUiEventToPosthog("recent_searches_cleared")).toBe("public_recent_searches_cleared");
+    expect(mapPublicUiEventToPosthog("load_more_requested")).toBe("public_load_more_requested");
     expect(mapPublicUiEventToPosthog("content_opened")).toBe("public_content_opened");
     expect(mapPublicUiEventToPosthog("search_submitted")).toBe("public_search_submitted");
     expect(mapPublicUiEventToPosthog("subscription_cta_clicked")).toBe("public_subscription_clicked");
@@ -73,6 +83,7 @@ describe("public posthog telemetry", () => {
     expect(properties).toEqual({
       auth_provider: "",
       auth_state: "anonymous",
+      content_domain: "ott",
       entry_filter: "anime",
       entry_source_count: 2,
       entry_sources: ["netflix", "laftel"],
@@ -178,6 +189,7 @@ describe("public posthog telemetry", () => {
       "public_search_submitted",
       expect.objectContaining({
         auth_state: "anonymous",
+        content_domain: "webtoon",
         entry_filter: "all",
         entry_source_count: 0,
         entry_sources: [],
