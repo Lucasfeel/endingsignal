@@ -63,6 +63,10 @@ slice instead of always running the full suite first.
 - If you touch public web assets or root Vite code, run `npm run build`.
 - Be careful with backfill flows; avoid turning a web-shell task into a
   Playwright-heavy or memory-heavy run unless the user asked for that path.
+- For direct questions or narrow follow-ups, answer or act on the current-turn
+  request first. Do not prepend prior progress recaps or stop work to restate
+  old context unless the user explicitly asked for a progress summary or the
+  immediate answer would be unclear without one.
 
 ## Preferred Codex workflows
 
@@ -74,6 +78,24 @@ For recurring maintenance in this repo, prefer the shared repo skills in
 - `$green-prs`: inspect open PRs, CI failures, stale branches, and conflicts
 - `$sentry-issue-triage`: investigate one production issue at a time when
   issue data is available
+
+## OTT guidance
+
+For OTT collection, verification, season promotion, and DB cleanup work, read
+and follow [ott-codex-guide.md](/C:/Users/lucas/endingsignal/docs/ott-codex-guide.md)
+before changing code or running a full verification sync.
+
+Short version:
+
+- Favor durable rules over one-off fixes.
+- Treat official platform pages as the top source of truth.
+- Use TMDb aggressively for genre/cast and carefully for dates.
+- Use IMDb as a search fallback when TMDb misses a global title.
+- Do not force cast lists to exactly four names; four is a cap, not a target.
+- If a season is inferred rather than directly proven, do not confidently
+  invent an end date.
+- When the user asks for a result summary, write it directly in chat unless
+  they explicitly ask for a file.
 
 ## Review guidelines
 
