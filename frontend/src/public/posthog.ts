@@ -38,14 +38,62 @@ function asStringArray(value: unknown) {
   return value.map((entry) => String(entry)).filter(Boolean);
 }
 
+function deriveEventFamily(event: UiTelemetryEvent) {
+  switch (event.name) {
+    case "nav_tab_selected":
+      return "navigation";
+    case "content_opened":
+      return "content";
+    case "search_submitted":
+      return "search";
+    case "subscription_cta_clicked":
+      return "subscription";
+    case "overlay_opened":
+    case "overlay_closed":
+      return "overlay";
+    default:
+      return "other";
+  }
+}
+
+function deriveJourneyStage(event: UiTelemetryEvent) {
+  switch (event.name) {
+    case "nav_tab_selected":
+      return "browse";
+    case "search_submitted":
+      return "search";
+    case "content_opened":
+      return "evaluate";
+    case "subscription_cta_clicked":
+      return "convert";
+    case "overlay_opened":
+    case "overlay_closed": {
+      const overlay = asString(event.payload?.overlay);
+      if (overlay === "search") return "search";
+      if (overlay === "content") return "evaluate";
+      if (overlay === "mypage" || overlay === "auth") return "account";
+      return "browse";
+    }
+    default:
+      return "other";
+  }
+}
+
+function deriveAuthState(event: UiTelemetryEvent) {
+  return asBoolean(event.payload?.isAuthenticated) ? "authenticated" : "anonymous";
+}
+
 function buildCommonPublicProperties(event: UiTelemetryEvent) {
   return {
     auth_provider: asString(event.payload?.authProvider),
+    auth_state: deriveAuthState(event),
     entry_filter: asString(event.payload?.activeFilter),
     entry_source_count: asNumber(event.payload?.selectedSourceCount),
     entry_sources: asStringArray(event.payload?.selectedSources),
     entry_tab: asString(event.payload?.activeTab),
+    event_family: deriveEventFamily(event),
     is_authenticated: asBoolean(event.payload?.isAuthenticated),
+    journey_stage: deriveJourneyStage(event),
     my_view_mode: asString(event.payload?.myViewMode),
     novel_filter: asString(event.payload?.novelFilter),
     ott_filter: asString(event.payload?.ottFilter),

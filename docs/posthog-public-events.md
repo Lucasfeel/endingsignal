@@ -20,6 +20,9 @@ Common context added to every tracked public event:
 
 - `entry_tab`
 - `entry_filter`
+- `event_family`
+- `journey_stage`
+- `auth_state`
 - `route_kind`
 - `is_authenticated`
 - `auth_provider`
@@ -36,6 +39,9 @@ Naming note:
 
 - `route_kind` describes the current UI surface, such as `search`, `browse`, or `content`.
 - `entry_*` describes the browse context the user came from, which is often more useful than calling that state `active_*` when the current route is an overlay or detail page.
+- `event_family` is a low-cardinality grouping like `search`, `content`, `subscription`, `overlay`, or `navigation`.
+- `journey_stage` is an AI-friendly funnel phase like `browse`, `search`, `evaluate`, `convert`, or `account`.
+- `auth_state` is a stable label (`anonymous` or `authenticated`) that is easier for models to reason over than raw booleans alone.
 
 | PostHog event | Source UI event | Properties |
 | --- | --- | --- |
