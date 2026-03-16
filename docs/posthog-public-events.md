@@ -16,14 +16,30 @@ This keeps the initial rollout focused on a small custom event set.
 
 ## Event set
 
+Common context added to every tracked public event:
+
+- `active_tab`
+- `active_filter`
+- `route_kind`
+- `is_authenticated`
+- `auth_provider`
+- `user_role`
+- `selected_sources`
+- `selected_source_count`
+- `search_input_length`
+- `webtoon_filter`
+- `novel_filter`
+- `ott_filter`
+- `my_view_mode`
+
 | PostHog event | Source UI event | Properties |
 | --- | --- | --- |
-| `public_tab_selected` | `nav_tab_selected` | `tab_from`, `tab_to`, `path` |
-| `public_content_opened` | `content_opened` | `content_source`, `content_type`, `from_tab`, `path` |
-| `public_search_submitted` | `search_submitted` | `from_tab`, `query_length`, `path` |
-| `public_subscription_clicked` | `subscription_cta_clicked` | `action`, `content_source`, `content_type`, `from_tab`, `requires_auth`, `path` |
-| `public_overlay_opened` | `overlay_opened` | `overlay`, `from_tab`, `path` |
-| `public_overlay_closed` | `overlay_closed` | `overlay`, `return_to`, `path` |
+| `public_tab_selected` | `nav_tab_selected` | `tab_from`, `tab_to` |
+| `public_content_opened` | `content_opened` | `content_source`, `content_type`, `content_status`, `from_tab`, `authors_count`, `genre_count`, `platform_count`, `has_content_url`, `has_thumbnail`, `is_upcoming`, `release_end_status`, `trigger`, `weekday_count` |
+| `public_search_submitted` | `search_submitted` | `from_tab`, `query_length`, `query_word_count`, `search_trigger`, `used_recent_search` |
+| `public_subscription_clicked` | `subscription_cta_clicked` | `action`, `content_source`, `content_type`, `content_status`, `from_tab`, `authors_count`, `genre_count`, `has_content_url`, `is_subscribed_before_click`, `requires_auth`, `is_upcoming`, `release_end_status`, `trigger` |
+| `public_overlay_opened` | `overlay_opened` | `overlay`, `from_tab`, `entrypoint` |
+| `public_overlay_closed` | `overlay_closed` | `overlay`, `return_to`, `close_reason` |
 
 ## Data minimization
 

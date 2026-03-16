@@ -23,7 +23,7 @@ export function useSearchViewModel({
   onClose: () => void;
   onOpenContent: (content: ContentCard | SubscriptionItem) => void;
   onSearchInputChange: (value: string) => void;
-  onSubmitSearch: (query: string) => void;
+  onSubmitSearch: (query: string, trigger?: string) => void;
   recentSearches: string[];
   resolveTabId: (content: ContentCard | SubscriptionItem) => NavTab;
   searchInput: string;

@@ -345,7 +345,7 @@ export function SearchOverlay({
   onClose: () => void;
   onOpenContent: (content: ContentCard | SubscriptionItem) => void;
   onSearchInputChange: (value: string) => void;
-  onSubmitSearch: (query: string) => void;
+  onSubmitSearch: (query: string, trigger?: string) => void;
   recentSearches: string[];
   resolveTabId: (content: ContentCard | SubscriptionItem) => PublicTab;
   searchInput: string;
@@ -381,7 +381,7 @@ export function SearchOverlay({
                   inputMode="search"
                   onChange={(event) => onSearchInputChange(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") onSubmitSearch(searchInput);
+                    if (event.key === "Enter") onSubmitSearch(searchInput, "keyboard_enter");
                   }}
                   placeholder="작품을 검색해 보세요"
                   type="text"
@@ -446,7 +446,7 @@ export function SearchOverlay({
                   <div className="flex flex-wrap gap-2" id="searchRecentChips">
                     {recentSearches.length
                       ? recentSearches.map((query) => (
-                          <button className="es-chip h-9 px-3 inline-flex items-center rounded-full text-sm" key={query} onClick={() => onSubmitSearch(query)} type="button">
+                          <button className="es-chip h-9 px-3 inline-flex items-center rounded-full text-sm" key={query} onClick={() => onSubmitSearch(query, "recent_search")} type="button">
                             {query}
                           </button>
                         ))

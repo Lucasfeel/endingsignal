@@ -118,6 +118,16 @@ export function parseContentPath(pathname: string) {
   };
 }
 
+export function resolvePublicRouteKind(pathname: string) {
+  if (pathname === "/") return "home";
+  if (pathname === "/search") return "search";
+  if (pathname === "/mypage") return "mypage";
+  if (pathname === "/subscriptions") return "subscriptions";
+  if (pathname.startsWith("/browse/")) return "browse";
+  if (pathname.startsWith("/content/")) return "content";
+  return "other";
+}
+
 export function getGridCountLabel(activeTab: NavTab, count: number) {
   if (activeTab === "home") return `현재 표시 중인 작품 ${count}개`;
   if (activeTab === "my" && count === 0) return "";

@@ -111,11 +111,17 @@ export function usePublicActions({
     }
   }
 
-  function submitSearch(query: string) {
+  function submitSearch(query: string, trigger = "keyboard_enter") {
     const normalized = query.trim();
     onSearchInputChange(normalized);
     if (!normalized) return;
-    trackPublicEvent("search_submitted", { queryLength: normalized.length, fromTab: activeTab });
+    trackPublicEvent("search_submitted", {
+      fromTab: activeTab,
+      queryLength: normalized.length,
+      queryWordCount: normalized.split(/\s+/).filter(Boolean).length,
+      trigger,
+      usedRecentSearch: trigger === "recent_search",
+    });
     onRememberSearch(normalized);
   }
 

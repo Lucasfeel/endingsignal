@@ -1,6 +1,7 @@
 import { useEffect, type MutableRefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { extractContentUrl, extractDisplayMeta } from "../../shared/content";
 import type { ContentCard, SubscriptionItem } from "../../shared/types";
 import {
   getBasePathForTab,
@@ -70,19 +71,31 @@ export function usePublicNavigation({
   }
 
   function openSearchOverlay() {
-    trackPublicEvent("overlay_opened", { overlay: "search", fromTab: activeTab });
+    trackPublicEvent("overlay_opened", {
+      entrypoint: "header_search_button",
+      fromTab: activeTab,
+      overlay: "search",
+    });
     navigate("/search");
   }
 
   function closeOverlay({ showAuthModal }: { showAuthModal: boolean }) {
     const overlay = routeContent ? "content" : searchOpen ? "search" : myPageOpen ? "mypage" : showAuthModal ? "auth" : "unknown";
-    trackPublicEvent("overlay_closed", { overlay, returnTo: activeTab });
+    trackPublicEvent("overlay_closed", {
+      closeReason: showAuthModal ? "modal_close" : "overlay_back",
+      overlay,
+      returnTo: activeTab,
+    });
     navigate(getBasePathForTab(activeTab), { preventScrollReset: true });
   }
 
   function openMyPageOverlay() {
     closeProfileMenu("open_mypage");
-    trackPublicEvent("overlay_opened", { overlay: "mypage", fromTab: activeTab });
+    trackPublicEvent("overlay_opened", {
+      entrypoint: "profile_menu",
+      fromTab: activeTab,
+      overlay: "mypage",
+    });
     navigate("/mypage");
   }
 
@@ -91,11 +104,22 @@ export function usePublicNavigation({
     scrollYRef.current = currentScrollY;
     rememberModalScrollPosition(currentScrollY);
     recordRecentContent(content);
+    const displayMeta = extractDisplayMeta(content);
     trackPublicEvent("content_opened", {
+      authorsCount: displayMeta.authors?.length || 0,
+      contentStatus: String(content.status || ""),
       contentId: content.content_id,
       contentType: content.content_type || activeTab,
       source: content.source,
       fromTab: activeTab,
+      genreCount: displayMeta.genres?.length || 0,
+      hasContentUrl: Boolean(extractContentUrl(content)),
+      hasThumbnail: Boolean("thumbnail_url" in content ? content.thumbnail_url : displayMeta.thumbnail_url),
+      isUpcoming: Boolean(displayMeta.upcoming),
+      platformCount: displayMeta.platforms?.length || 0,
+      releaseEndStatus: String(displayMeta.release_end_status || ""),
+      trigger: "content_card",
+      weekdayCount: displayMeta.weekdays?.length || 0,
     });
     navigate(`/content/${encodeURIComponent(content.source)}/${encodeURIComponent(content.content_id)}`, {
       preventScrollReset: true,

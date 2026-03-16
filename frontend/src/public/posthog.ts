@@ -19,6 +19,46 @@ function isSupportedUiEventName(name: string): name is SupportedUiEventName {
   return Object.prototype.hasOwnProperty.call(EVENT_NAME_MAP, name);
 }
 
+function asString(value: unknown) {
+  return typeof value === "string" ? value : String(value || "");
+}
+
+function asNumber(value: unknown) {
+  return typeof value === "number" ? value : Number(value || 0);
+}
+
+function asBoolean(value: unknown) {
+  return Boolean(value);
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => String(entry)).filter(Boolean);
+}
+
+function buildCommonPublicProperties(event: UiTelemetryEvent) {
+  return {
+    active_filter: asString(event.payload?.activeFilter),
+    active_tab: asString(event.payload?.activeTab),
+    auth_provider: asString(event.payload?.authProvider),
+    is_authenticated: asBoolean(event.payload?.isAuthenticated),
+    my_view_mode: asString(event.payload?.myViewMode),
+    novel_filter: asString(event.payload?.novelFilter),
+    ott_filter: asString(event.payload?.ottFilter),
+    path: event.path,
+    route_kind: asString(event.payload?.routeKind),
+    search_input_length: asNumber(event.payload?.searchInputLength),
+    selected_source_count: asNumber(event.payload?.selectedSourceCount),
+    selected_sources: asStringArray(event.payload?.selectedSources),
+    surface: "public_web",
+    ui_event_name: event.name,
+    user_role: asString(event.payload?.userRole),
+    webtoon_filter: asString(event.payload?.webtoonFilter),
+  };
+}
+
 export function mapPublicUiEventToPosthog(name: string) {
   return isSupportedUiEventName(name) ? EVENT_NAME_MAP[name] : null;
 }
@@ -31,55 +71,66 @@ export function buildPublicPosthogProperties(event: UiTelemetryEvent) {
   switch (event.name) {
     case "nav_tab_selected":
       return {
-        path: event.path,
-        surface: "public_web",
+        ...buildCommonPublicProperties(event),
         tab_from: String(event.payload?.from || ""),
         tab_to: String(event.payload?.to || ""),
-        ui_event_name: event.name,
       };
     case "content_opened":
       return {
+        ...buildCommonPublicProperties(event),
+        authors_count: asNumber(event.payload?.authorsCount),
+        content_status: asString(event.payload?.contentStatus),
         content_source: String(event.payload?.source || ""),
         content_type: String(event.payload?.contentType || ""),
         from_tab: String(event.payload?.fromTab || ""),
-        path: event.path,
-        surface: "public_web",
-        ui_event_name: event.name,
+        genre_count: asNumber(event.payload?.genreCount),
+        has_content_url: asBoolean(event.payload?.hasContentUrl),
+        has_thumbnail: asBoolean(event.payload?.hasThumbnail),
+        is_upcoming: asBoolean(event.payload?.isUpcoming),
+        platform_count: asNumber(event.payload?.platformCount),
+        release_end_status: asString(event.payload?.releaseEndStatus),
+        trigger: asString(event.payload?.trigger),
+        weekday_count: asNumber(event.payload?.weekdayCount),
       };
     case "search_submitted":
       return {
+        ...buildCommonPublicProperties(event),
         from_tab: String(event.payload?.fromTab || ""),
-        path: event.path,
         query_length: Number(event.payload?.queryLength || 0),
-        surface: "public_web",
-        ui_event_name: event.name,
+        query_word_count: asNumber(event.payload?.queryWordCount),
+        search_trigger: asString(event.payload?.trigger),
+        used_recent_search: asBoolean(event.payload?.usedRecentSearch),
       };
     case "subscription_cta_clicked":
       return {
         action: String(event.payload?.action || ""),
+        ...buildCommonPublicProperties(event),
+        authors_count: asNumber(event.payload?.authorsCount),
+        content_status: asString(event.payload?.contentStatus),
         content_source: String(event.payload?.source || ""),
         content_type: String(event.payload?.contentType || ""),
         from_tab: String(event.payload?.fromTab || ""),
-        path: event.path,
+        genre_count: asNumber(event.payload?.genreCount),
+        has_content_url: asBoolean(event.payload?.hasContentUrl),
+        is_subscribed_before_click: asBoolean(event.payload?.isSubscribedBeforeClick),
+        is_upcoming: asBoolean(event.payload?.isUpcoming),
+        release_end_status: asString(event.payload?.releaseEndStatus),
         requires_auth: Boolean(event.payload?.requiresAuth),
-        surface: "public_web",
-        ui_event_name: event.name,
+        trigger: asString(event.payload?.trigger),
       };
     case "overlay_opened":
       return {
+        ...buildCommonPublicProperties(event),
+        entrypoint: asString(event.payload?.entrypoint),
         from_tab: String(event.payload?.fromTab || ""),
         overlay: String(event.payload?.overlay || ""),
-        path: event.path,
-        surface: "public_web",
-        ui_event_name: event.name,
       };
     case "overlay_closed":
       return {
+        ...buildCommonPublicProperties(event),
+        close_reason: asString(event.payload?.closeReason),
         overlay: String(event.payload?.overlay || ""),
-        path: event.path,
         return_to: String(event.payload?.returnTo || ""),
-        surface: "public_web",
-        ui_event_name: event.name,
       };
     default:
       return null;

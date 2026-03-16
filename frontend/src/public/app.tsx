@@ -2,7 +2,8 @@
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Fragment, useRef } from "react";
+import { Fragment, useCallback, useRef } from "react";
+import { extractContentUrl, extractDisplayMeta } from "../shared/content";
 import { AuthProvider, useAuth } from "../shared/hooks/use-auth";
 import { PerfBridge } from "../shared/perf-bridge";
 import { queryClient } from "../shared/query";
@@ -11,6 +12,7 @@ import type { ContentCard, SubscriptionItem } from "../shared/types";
 import {
   getBasePathForTab,
   type NavTab,
+  resolvePublicRouteKind,
   resolveCardTabId,
 } from "./config";
 import {
@@ -47,7 +49,7 @@ function PublicShell() {
   const { theme, toggleTheme } = useTheme();
   const queryClient = useQueryClient();
   const auth = useAuth();
-  const trackPublicEvent = usePublicTelemetry();
+  const baseTrackPublicEvent = usePublicTelemetry();
   const {
     activeTab,
     authEmail,
@@ -75,6 +77,49 @@ function PublicShell() {
     setWebtoonFilter,
     webtoonFilter,
   } = usePublicUiState();
+  const trackPublicEvent = useCallback((name: string, payload?: Record<string, unknown>) => {
+    const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+    const activeSourceIds = selectedSources[activeTab] || [];
+    const activeFilter =
+      activeTab === "webtoon"
+        ? webtoonFilter
+        : activeTab === "novel"
+          ? novelFilter
+          : activeTab === "ott"
+            ? ottFilter
+            : activeTab === "my"
+              ? myViewMode
+              : "all";
+
+    baseTrackPublicEvent(name, {
+      activeFilter,
+      activeTab,
+      authProvider: auth.user?.auth_provider || "anonymous",
+      isAuthenticated: auth.isAuthenticated,
+      myViewMode,
+      novelFilter,
+      ottFilter,
+      routeKind: resolvePublicRouteKind(currentPath),
+      searchInputLength: searchInput.trim().length,
+      selectedSourceCount: activeSourceIds.length,
+      selectedSources: activeSourceIds,
+      userRole: auth.user?.role || "anonymous",
+      webtoonFilter,
+      ...payload,
+    });
+  }, [
+    activeTab,
+    auth.isAuthenticated,
+    auth.user?.auth_provider,
+    auth.user?.role,
+    baseTrackPublicEvent,
+    myViewMode,
+    novelFilter,
+    ottFilter,
+    searchInput,
+    selectedSources,
+    webtoonFilter,
+  ]);
   const contentGridRef = useRef<HTMLDivElement | null>(null);
   const contentGridSentinelRef = useRef<HTMLDivElement | null>(null);
   const modalScrollYRef = useRef<number | null>(null);
@@ -207,13 +252,22 @@ function PublicShell() {
     if (!modalContent) {
       return;
     }
+    const displayMeta = extractDisplayMeta(modalContent);
 
     trackPublicEvent("subscription_cta_clicked", {
       action: modalSubscribed ? "unsubscribe" : "subscribe",
+      authorsCount: displayMeta.authors?.length || 0,
+      contentStatus: String(modalContent.status || ""),
       contentType: modalContent.content_type || activeTab,
       fromTab: activeTab,
+      genreCount: displayMeta.genres?.length || 0,
+      hasContentUrl: Boolean(extractContentUrl(modalContent)),
+      isSubscribedBeforeClick: modalSubscribed,
+      isUpcoming: Boolean(displayMeta.upcoming),
+      releaseEndStatus: String(displayMeta.release_end_status || ""),
       requiresAuth: !auth.isAuthenticated,
       source: modalContent.source,
+      trigger: "subscription_modal_cta",
     });
   }
 
