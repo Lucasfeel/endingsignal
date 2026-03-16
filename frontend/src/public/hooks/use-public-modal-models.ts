@@ -28,6 +28,7 @@ export function usePublicModalModels({
   onSetAuthMode,
   onSetAuthPassword,
   onSetAuthPasswordConfirm,
+  onTrackSubscriptionClick,
   onToggleSubscription,
   showAuthModal,
   subscriptionItems,
@@ -55,6 +56,7 @@ export function usePublicModalModels({
   onSetAuthMode: (mode: "login" | "register") => void;
   onSetAuthPassword: (value: string) => void;
   onSetAuthPasswordConfirm: (value: string) => void;
+  onTrackSubscriptionClick: () => void;
   onToggleSubscription: () => void;
   showAuthModal: boolean;
   subscriptionItems: SubscriptionItem[];
@@ -93,6 +95,7 @@ export function usePublicModalModels({
         isSubscribed: modalSubscribed,
         onClose: onAuthClose,
         onRequireAuth,
+        onTrackSubscriptionClick,
         onToggleSubscription,
       },
     }),
@@ -120,6 +123,7 @@ export function usePublicModalModels({
       onSetAuthMode,
       onSetAuthPassword,
       onSetAuthPasswordConfirm,
+      onTrackSubscriptionClick,
       onToggleSubscription,
       showAuthModal,
       subscriptionItems,

@@ -203,6 +203,20 @@ function PublicShell() {
     trackPublicEvent,
   });
 
+  function trackSubscriptionClick() {
+    if (!modalContent) {
+      return;
+    }
+
+    trackPublicEvent("subscription_cta_clicked", {
+      action: modalSubscribed ? "unsubscribe" : "subscribe",
+      contentType: modalContent.content_type || activeTab,
+      fromTab: activeTab,
+      requiresAuth: !auth.isAuthenticated,
+      source: modalContent.source,
+    });
+  }
+
   const { categoryFilters, sourceChips } = useFilterBarModel({
     activeTab,
     myViewMode,
@@ -273,6 +287,7 @@ function PublicShell() {
     onSetAuthMode: setAuthMode,
     onSetAuthPassword: setAuthPassword,
     onSetAuthPasswordConfirm: setAuthPasswordConfirm,
+    onTrackSubscriptionClick: trackSubscriptionClick,
     onToggleSubscription: () => publicActions.subscriptionMutation.mutate(),
     showAuthModal,
     subscriptionItems,

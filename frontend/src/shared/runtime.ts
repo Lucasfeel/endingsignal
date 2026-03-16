@@ -1,5 +1,10 @@
 export type RuntimePayload = {
   apiBaseUrl?: string;
+  posthog?: {
+    enabled?: boolean;
+    apiHost?: string;
+    projectApiKey?: string;
+  };
   sentry?: {
     enabled?: boolean;
     environment?: string;

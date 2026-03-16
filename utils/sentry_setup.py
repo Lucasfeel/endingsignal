@@ -103,8 +103,14 @@ def frontend_template_context(repo_name: str) -> dict[str, Any]:
     public_key = _public_key_from_dsn(dsn)
     environment = _env_value("SENTRY_FRONTEND_ENVIRONMENT", "SENTRY_ENVIRONMENT", "FLASK_ENV") or "development"
     environment_key = environment.lower()
+    posthog_public_key = _env_value("POSTHOG_PUBLIC_KEY", "POSTHOG_PROJECT_API_KEY")
+    posthog_api_host = _env_value("POSTHOG_API_HOST") or "https://us.i.posthog.com"
+    posthog_enabled = _env_flag("POSTHOG_ENABLED", default=bool(posthog_public_key))
 
     return {
+        "posthog_public_enabled": posthog_enabled and bool(posthog_public_key),
+        "posthog_public_key": posthog_public_key,
+        "posthog_public_api_host": posthog_api_host,
         "sentry_frontend_enabled": bool(public_key),
         "sentry_frontend_public_key": public_key,
         "sentry_frontend_environment": environment,

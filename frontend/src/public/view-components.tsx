@@ -769,6 +769,7 @@ export function SubscribeModal({
   isSubscribed,
   onClose,
   onRequireAuth,
+  onTrackSubscriptionClick,
   onToggleSubscription,
 }: {
   content: (ContentCard & { meta?: Record<string, unknown> | null }) | null;
@@ -777,6 +778,7 @@ export function SubscribeModal({
   isSubscribed: boolean;
   onClose: () => void;
   onRequireAuth: () => void;
+  onTrackSubscriptionClick: () => void;
   onToggleSubscription: () => void;
 }) {
   return (
@@ -831,6 +833,7 @@ export function SubscribeModal({
             data-ui="modal-primary"
             id="subscribeCompletionButton"
             onClick={() => {
+              onTrackSubscriptionClick();
               if (!isAuthenticated) {
                 onRequireAuth();
                 return;

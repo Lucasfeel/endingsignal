@@ -32,6 +32,11 @@
       window.__ES_RUNTIME__ = {
         apiBaseUrl: {{ request.url_root.rstrip('/')|tojson }},
         app: 'public',
+        posthog: {
+          enabled: {{ posthog_public_enabled|tojson }},
+          apiHost: {{ posthog_public_api_host|tojson }},
+          projectApiKey: {{ posthog_public_key|tojson }}
+        },
         sentry: {
           enabled: {{ sentry_frontend_enabled|tojson }},
           environment: {{ sentry_frontend_environment|tojson }},
