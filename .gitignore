@@ -5,3 +5,8 @@ __pycache__/
 *.log
 node_modules/
 dist/
+.venv/
+.cursor/
+output/
+playwright-captures/
+.backfill_state_*/
