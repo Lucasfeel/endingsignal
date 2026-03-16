@@ -1,6 +1,7 @@
 import datetime
 import os
 import re
+import secrets
 
 import bcrypt
 import jwt
@@ -169,3 +170,64 @@ def bootstrap_admin_from_env():
             cursor.close()
         if conn:
             conn.close()
+
+
+def upsert_mock_user(
+    *,
+    email: str,
+    role: str = "user",
+    display_name: str | None = None,
+    user_key: str | None = None,
+):
+    conn = get_db()
+    cursor = get_cursor(conn)
+    try:
+        safe_role = "admin" if role == "admin" else "user"
+        password_hash = hash_password(secrets.token_urlsafe(24))
+        cursor.execute(
+            """
+            INSERT INTO users (
+                email,
+                password_hash,
+                role,
+                is_active,
+                auth_provider,
+                display_name,
+                user_key,
+                created_at,
+                updated_at
+            )
+            VALUES (%s, %s, %s, TRUE, 'mock', %s, %s, NOW(), NOW())
+            ON CONFLICT (email)
+            DO UPDATE SET
+                role = EXCLUDED.role,
+                is_active = TRUE,
+                auth_provider = 'mock',
+                display_name = EXCLUDED.display_name,
+                user_key = EXCLUDED.user_key,
+                updated_at = NOW()
+            RETURNING id, email, role, user_key, auth_provider, display_name
+            """,
+            (
+                email,
+                password_hash,
+                safe_role,
+                display_name,
+                user_key,
+            ),
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        return {
+            "id": row["id"],
+            "email": row["email"],
+            "role": row["role"],
+            "user_key": row["user_key"],
+            "auth_provider": row["auth_provider"],
+            "display_name": row["display_name"],
+        }
+    except psycopg2.Error:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -22,8 +23,154 @@ OTT_PLATFORM_SOURCES = (
 )
 OTT_PLATFORM_SOURCE_SET = set(OTT_PLATFORM_SOURCES)
 
+OTT_GENRE_DRAMA = "drama"
+OTT_GENRE_ANIME = "anime"
+OTT_GENRE_VARIETY = "variety"
+OTT_GENRE_DOCU = "docu"
+OTT_GENRE_ETC = "etc"
+OTT_MAX_CAST_MEMBERS = 4
+OTT_ALLOWED_GENRES = {
+    OTT_GENRE_DRAMA,
+    OTT_GENRE_ANIME,
+    OTT_GENRE_VARIETY,
+    OTT_GENRE_DOCU,
+    OTT_GENRE_ETC,
+}
+OTT_GENRE_PRIORITY = (
+    OTT_GENRE_ANIME,
+    OTT_GENRE_DOCU,
+    OTT_GENRE_VARIETY,
+    OTT_GENRE_DRAMA,
+    OTT_GENRE_ETC,
+)
+
+_OTT_GENRE_TOKEN_RE = re.compile(r"[\s_\-/]+")
+_OTT_GENRE_PATTERNS = {
+    OTT_GENRE_ANIME: re.compile(
+        "|".join(
+            [
+                r"\b(?:anime|animation|animated)\b",
+                r"애니(?:메이션)?",
+                r"만화",
+            ]
+        ),
+        re.I,
+    ),
+    OTT_GENRE_DOCU: re.compile(
+        "|".join(
+            [
+                r"\b(?:documentary|docuseries|docu-series|docu)\b",
+                r"다큐(?:멘터리)?",
+                r"휴먼다큐",
+                r"실화다큐",
+            ]
+        ),
+        re.I,
+    ),
+    OTT_GENRE_VARIETY: re.compile(
+        "|".join(
+            [
+                r"\b(?:variety|reality|competition|survival|dating|talk\s*show|game\s*show|observational)\b",
+                r"예능",
+                r"버라이어티",
+                r"리얼리티",
+                r"토크쇼",
+                r"게임쇼",
+                r"서바이벌",
+                r"연애\s*리얼리티",
+                r"관찰",
+                r"여행\s*예능",
+            ]
+        ),
+        re.I,
+    ),
+    OTT_GENRE_DRAMA: re.compile(
+        "|".join(
+            [
+                r"\b(?:drama|scripted|series|thriller|crime|mystery|romance|legal|medical|fantasy|comedy|family|action|suspense|sitcom)\b",
+                r"드라마",
+                r"시리즈",
+                r"스릴러",
+                r"범죄",
+                r"미스터리",
+                r"로맨스",
+                r"법정",
+                r"의학",
+                r"판타지",
+                r"코미디",
+                r"블랙\s*코미디",
+                r"가족",
+                r"액션",
+                r"서스펜스",
+            ]
+        ),
+        re.I,
+    ),
+}
+
 STATUS_ONGOING = "연재중"
 STATUS_COMPLETED = "완결"
+
+_OTT_GENRE_PATTERNS[OTT_GENRE_ANIME] = re.compile(
+    "|".join(
+        [
+            r"\b(?:anime|animation|animated)\b",
+            r"\uC560\uB2C8\uBA54\uC774\uC158",
+            r"\uB9CC\uD654",
+        ]
+    ),
+    re.I,
+)
+_OTT_GENRE_PATTERNS[OTT_GENRE_DOCU] = re.compile(
+    "|".join(
+        [
+            r"\b(?:documentary|docuseries|docu-series|docu)\b",
+            r"\uB2E4\uD050(?:\uBA58\uD130\uB9AC)?",
+            r"\uD734\uBA3C\uB2E4\uD050",
+            r"\uC2E4\uD654\uB2E4\uD050",
+        ]
+    ),
+    re.I,
+)
+_OTT_GENRE_PATTERNS[OTT_GENRE_VARIETY] = re.compile(
+    "|".join(
+        [
+            r"\b(?:variety|reality|competition|survival|dating|talk\s*show|game\s*show|observational)\b",
+            r"\uC608\uB2A5",
+            r"\uBC84\uB77C\uC774\uC5B4\uD2F0",
+            r"\uB9AC\uC5BC\uB9AC\uD2F0",
+            r"\uD1A0\uD06C\uC1FC",
+            r"\uAC8C\uC784\uC1FC",
+            r"\uC11C\uBC14\uC774\uBC8C",
+            r"\uC5F0\uC560\s*\uB9AC\uC5BC\uB9AC\uD2F0",
+            r"\uAD00\uCC30",
+            r"\uC5EC\uD589\s*\uC608\uB2A5",
+        ]
+    ),
+    re.I,
+)
+_OTT_GENRE_PATTERNS[OTT_GENRE_DRAMA] = re.compile(
+    "|".join(
+        [
+            r"\b(?:drama|scripted|series|thriller|crime|mystery|romance|legal|medical|fantasy|comedy|family|action|suspense|sitcom)\b",
+            r"\uB4DC\uB77C\uB9C8",
+            r"\uC2DC\uB9AC\uC988",
+            r"\uC2A4\uB9B4\uB7EC",
+            r"\uBC94\uC8C4",
+            r"\uBBF8\uC2A4\uD130\uB9AC",
+            r"\uB85C\uB9E8\uC2A4",
+            r"\uBC95\uC815",
+            r"\uC758\uD559",
+            r"\uD310\uD0C0\uC9C0",
+            r"\uCF54\uBBF8\uB514",
+            r"\uBE14\uB799\s*\uCF54\uBBF8\uB514",
+            r"\uAC00\uC871",
+            r"\uC561\uC158",
+            r"\uC11C\uC2A4\uD39C\uC2A4",
+        ]
+    ),
+    re.I,
+)
 
 RELEASE_END_STATUS_UNKNOWN = "unknown"
 RELEASE_END_STATUS_SCHEDULED = "scheduled"
@@ -148,6 +295,75 @@ def _dedupe_texts(values: Iterable[str]) -> List[str]:
         seen.add(lowered)
         deduped.append(text)
     return deduped
+
+
+def _limit_ott_people(values: Iterable[str], max_items: int = OTT_MAX_CAST_MEMBERS) -> List[str]:
+    if max_items <= 0:
+        return []
+    return _dedupe_texts(values)[:max_items]
+
+
+def _normalize_ott_genre_token(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return _OTT_GENRE_TOKEN_RE.sub("", value.strip().lower())
+
+
+def infer_ott_genre_bucket(
+    *values: Any,
+    platform_source: Optional[str] = None,
+    default: str = OTT_GENRE_ETC,
+) -> str:
+    safe_source = str(platform_source or "").strip().lower()
+    if safe_source == "laftel":
+        return OTT_GENRE_ANIME
+
+    merged = " ".join(_dedupe_texts(_coerce_text_list(values)))
+    if not merged:
+        return default
+
+    for genre_name in OTT_GENRE_PRIORITY:
+        if genre_name == OTT_GENRE_ETC:
+            continue
+        pattern = _OTT_GENRE_PATTERNS.get(genre_name)
+        if pattern is not None and pattern.search(merged):
+            return genre_name
+    return default
+
+
+def normalize_ott_genres(
+    *values: Any,
+    platform_source: Optional[str] = None,
+    default: str = OTT_GENRE_ETC,
+) -> List[str]:
+    safe_source = str(platform_source or "").strip().lower()
+    if safe_source == "laftel":
+        return [OTT_GENRE_ANIME]
+
+    buckets: List[str] = []
+    seen = set()
+    flattened = _dedupe_texts(_coerce_text_list(values))
+    for token in flattened:
+        normalized = _normalize_ott_genre_token(token)
+        if not normalized:
+            continue
+        direct_bucket = normalized if normalized in OTT_ALLOWED_GENRES else ""
+        if not direct_bucket:
+            direct_bucket = infer_ott_genre_bucket(token, platform_source=safe_source, default="")
+        if not direct_bucket or direct_bucket in seen:
+            continue
+        seen.add(direct_bucket)
+        buckets.append(direct_bucket)
+
+    if not buckets:
+        inferred = infer_ott_genre_bucket(flattened, platform_source=safe_source, default=default)
+        if inferred:
+            buckets = [inferred]
+
+    for genre_name in OTT_GENRE_PRIORITY:
+        if genre_name in buckets:
+            return [genre_name]
+    return [default] if default else []
 
 
 def _coerce_datetime(value: Any) -> Optional[datetime]:
@@ -319,6 +535,9 @@ def resolve_display_meta(
     ott_meta = dict(ott_meta) if isinstance(ott_meta, Mapping) else {}
     safe_meta["ott"] = ott_meta
 
+    ott_meta["cast"] = _limit_ott_people(_coerce_text_list(ott_meta.get("cast")))
+    common["authors"] = _limit_ott_people(ott_meta["cast"] or _coerce_text_list(common.get("authors")))
+
     chosen_source = choose_display_source(safe_meta, requested_sources=requested_sources)
     platforms = _normalize_platforms_meta(safe_meta)
     chosen_platform = dict(platforms.get(chosen_source) or {})
@@ -330,6 +549,42 @@ def resolve_display_meta(
         common["thumbnail_url"] = chosen_platform["thumbnail_url"]
     if chosen_platform.get("source"):
         common["primary_source"] = chosen_platform["source"]
+
+    genre_platform_source = chosen_source
+    if genre_platform_source == OTT_CANONICAL_SOURCE:
+        for requested_source in requested_sources or []:
+            cleaned_requested_source = str(requested_source or "").strip()
+            if cleaned_requested_source:
+                genre_platform_source = cleaned_requested_source
+                break
+    if genre_platform_source == OTT_CANONICAL_SOURCE:
+        genre_platform_source = str(common.get("primary_source") or "").strip() or OTT_CANONICAL_SOURCE
+
+    normalized_genres = normalize_ott_genres(
+        safe_meta.get("genres"),
+        safe_meta.get("genre"),
+        common.get("genres"),
+        common.get("genre"),
+        ott_meta.get("genres"),
+        ott_meta.get("genre"),
+        ott_meta.get("description"),
+        ott_meta.get("raw_schedule_note"),
+        ott_meta.get("episode_hint"),
+        platform_source=genre_platform_source,
+    )
+    resolved_genre = normalized_genres[0] if normalized_genres else OTT_GENRE_ETC
+    common["genres"] = normalized_genres
+    common["genre"] = resolved_genre
+    safe_meta["genres"] = normalized_genres
+    safe_meta["genre"] = resolved_genre
+    ott_meta["genres"] = normalized_genres
+    ott_meta["genre"] = resolved_genre
+
+    attributes = safe_meta.get("attributes")
+    attributes = dict(attributes) if isinstance(attributes, Mapping) else {}
+    attributes["genres"] = normalized_genres
+    attributes["genre"] = resolved_genre
+    safe_meta["attributes"] = attributes
 
     ott_meta["display_source"] = chosen_source
     ott_meta["platforms"] = sorted(platforms.values(), key=lambda item: str(item.get("source") or ""))
@@ -373,14 +628,19 @@ def _compute_schedule_state(
     existing_ott = existing_ott if isinstance(existing_ott, dict) else {}
 
     entry_end_at = entry.get("release_end_at")
-    if (
-        str(entry.get("release_end_status") or "").strip().lower() == RELEASE_END_STATUS_UNKNOWN
-        and _coerce_datetime(entry_end_at) is None
+    entry_status = str(entry.get("release_end_status") or "").strip().lower()
+    entry_end_dt = _coerce_datetime(entry_end_at)
+    if entry_status in {RELEASE_END_STATUS_SCHEDULED, RELEASE_END_STATUS_CONFIRMED} and entry_end_dt is not None:
+        candidate_dates = _distinct_datetimes(entry_end_dt)
+    elif (
+        entry_status == RELEASE_END_STATUS_UNKNOWN
+        and entry_end_dt is None
     ):
         candidate_dates = _distinct_datetimes(entry_end_at)
     else:
         candidate_dates = _distinct_datetimes(
             existing_ott.get("release_end_at"),
+            existing_ott.get("completed_at"),
             entry_end_at,
         )
     resolution_state = str(
@@ -391,7 +651,6 @@ def _compute_schedule_state(
     if len(candidate_dates) > 1:
         resolution_state = RESOLUTION_CONFLICT
 
-    entry_status = str(entry.get("release_end_status") or "").strip().lower()
     existing_status = str(existing_ott.get("release_end_status") or "").strip().lower()
 
     if resolution_state == RESOLUTION_CONFLICT:
@@ -413,7 +672,7 @@ def _compute_schedule_state(
 
     release_end_at = candidate_dates[0] if candidate_dates else None
     if release_end_status == RELEASE_END_STATUS_CONFIRMED and release_end_at is None:
-        release_end_at = now_value
+        release_end_at = _coerce_datetime(existing_ott.get("completed_at")) or now_value
 
     return release_end_at, release_end_status, resolution_state
 
@@ -421,6 +680,7 @@ def _compute_schedule_state(
 def _compute_watchlist_state(
     *,
     existing_row: Optional[Mapping[str, Any]],
+    release_start_at: Optional[datetime],
     release_end_at: Optional[datetime],
     release_end_status: str,
     resolution_state: str,
@@ -440,6 +700,16 @@ def _compute_watchlist_state(
 
     if status == STATUS_COMPLETED and release_end_status == RELEASE_END_STATUS_CONFIRMED:
         return None, 0, RESOLUTION_RESOLVED
+
+    start_dt = _coerce_datetime(release_start_at)
+    if (
+        release_end_status != RELEASE_END_STATUS_CONFIRMED
+        and start_dt is not None
+        and now_value < start_dt + timedelta(days=1)
+    ):
+        next_check_at = start_dt + timedelta(days=1)
+        fail_count = previous_fail_count if previous_end_status == release_end_status and previous_end_at == release_end_at else 0
+        return next_check_at, fail_count, RESOLUTION_TRACKING
 
     if release_end_status == RELEASE_END_STATUS_SCHEDULED and release_end_at is not None:
         if release_end_at - now_value > timedelta(days=7):
@@ -472,16 +742,36 @@ def _build_canonical_meta(
     existing_attrs = safe_existing_meta.get("attributes")
     existing_attrs = dict(existing_attrs) if isinstance(existing_attrs, Mapping) else {}
 
-    cast = _dedupe_texts(
+    incoming_cast = _limit_ott_people(_coerce_text_list(entry.get("cast")))
+    clear_cast = bool(entry.get("_clear_cast"))
+    existing_cast = _limit_ott_people(
         _coerce_text_list(existing_common.get("authors"))
         + _coerce_text_list(existing_ott.get("cast"))
-        + _coerce_text_list(entry.get("cast"))
     )
-    genres = _dedupe_texts(
-        _coerce_text_list(existing_attrs.get("genres"))
-        + _coerce_text_list(existing_common.get("genres"))
-        + _coerce_text_list(entry.get("genres"))
+    cast = incoming_cast if incoming_cast or clear_cast else existing_cast
+
+    incoming_genre_inputs = _dedupe_texts(
+        _coerce_text_list(entry.get("genres"))
+        + _coerce_text_list(entry.get("genre"))
     )
+    incoming_genres = normalize_ott_genres(incoming_genre_inputs, platform_source=platform_source)
+    if incoming_genres and incoming_genres[0] != OTT_GENRE_ETC:
+        genres = incoming_genres
+    else:
+        raw_genres = _dedupe_texts(
+            incoming_genre_inputs
+            + _coerce_text_list(entry.get("description"))
+            + _coerce_text_list(entry.get("raw_schedule_note"))
+            + _coerce_text_list(entry.get("episode_hint"))
+            + _coerce_text_list(existing_attrs.get("genres"))
+            + _coerce_text_list(existing_attrs.get("genre"))
+            + _coerce_text_list(existing_common.get("genres"))
+            + _coerce_text_list(existing_common.get("genre"))
+            + _coerce_text_list(existing_ott.get("genres"))
+            + _coerce_text_list(existing_ott.get("genre"))
+        )
+        genres = normalize_ott_genres(raw_genres, platform_source=platform_source)
+    resolved_genre = genres[0] if genres else OTT_GENRE_ETC
     aliases = _dedupe_texts(
         _coerce_text_list(existing_common.get("title_alias"))
         + _coerce_text_list(existing_common.get("alt_title"))
@@ -506,10 +796,19 @@ def _build_canonical_meta(
         **{key: value for key, value in current_platform.items() if value not in (None, "", [])},
     }
 
-    release_start_at = _merge_datetime_field(
-        existing_ott.get("release_start_at"),
-        entry.get("release_start_at"),
-        choose_min=True,
+    platform_release_starts = [
+        _coerce_datetime(platform.get("release_start_at"))
+        for platform in existing_platforms.values()
+    ]
+    platform_release_starts = [value for value in platform_release_starts if value is not None]
+    release_start_at = (
+        min(platform_release_starts)
+        if platform_release_starts
+        else _merge_datetime_field(
+            existing_ott.get("release_start_at"),
+            entry.get("release_start_at"),
+            choose_min=True,
+        )
     )
     release_end_at, release_end_status, resolution_state = _compute_schedule_state(
         existing_meta=safe_existing_meta,
@@ -546,20 +845,22 @@ def _build_canonical_meta(
         "alt_title": aliases[0] if aliases else "",
         "title_alias": aliases,
         "genres": genres,
-        "genre": "series",
+        "genre": resolved_genre,
         "primary_source": primary_source,
     }
 
     attributes = {
         "source": "ott",
         "genres": genres,
-        "genre": "series",
+        "genre": resolved_genre,
         "platforms": sorted(existing_platforms.keys()),
     }
 
     ott_meta = {
         "platforms": sorted(existing_platforms.values(), key=lambda item: str(item.get("source") or "")),
         "cast": cast,
+        "genres": genres,
+        "genre": resolved_genre,
         "release_start_at": _isoformat(release_start_at),
         "release_end_at": _isoformat(release_end_at),
         "release_end_status": release_end_status,
@@ -575,6 +876,8 @@ def _build_canonical_meta(
     return {
         "common": common,
         "attributes": attributes,
+        "genres": genres,
+        "genre": resolved_genre,
         "ott": ott_meta,
     }, status
 
@@ -655,6 +958,32 @@ def load_ott_source_snapshot(conn, platform_source: str) -> Dict[str, Any]:
     }
 
 
+def _resolve_entry_platform_content_id(fallback_key: str, entry: Mapping[str, Any]) -> str:
+    return str(entry.get("platform_content_id") or fallback_key or "").strip()
+
+
+def _resolve_entry_canonical_identity(entry: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    normalized_entry = dict(entry or {})
+    resolved_title = _clean_text(normalized_entry.get("title"))
+    if not resolved_title:
+        raise ValueError("OTT entry title is required")
+    release_start_at = _coerce_datetime(normalized_entry.get("release_start_at"))
+    representative_year = normalized_entry.get("representative_year") or release_start_at
+    season_label = _clean_text(resolved_title)
+    if re.search(r"(?i)(?:시즌|season)\s*\d+", season_label) and release_start_at is not None:
+        representative_year = release_start_at
+    canonical_content_id = build_canonical_content_id(
+        title=resolved_title,
+        release_start_at=release_start_at,
+        representative_year=representative_year,
+    )
+    normalized_entry["title"] = resolved_title
+    normalized_entry["canonical_content_id"] = canonical_content_id
+    normalized_entry["release_start_at"] = release_start_at
+    normalized_entry["release_end_at"] = _coerce_datetime(normalized_entry.get("release_end_at"))
+    return canonical_content_id, normalized_entry
+
+
 def upsert_ott_source_entries(
     conn,
     *,
@@ -666,61 +995,126 @@ def upsert_ott_source_entries(
         raise ValueError(f"unsupported OTT platform source: {platform_source}")
 
     now_value = now_kst_naive()
-    entries = {
+    raw_entries = {
         str(content_id): dict(item)
         for content_id, item in (all_content_today or {}).items()
         if str(content_id).strip() and isinstance(item, Mapping)
     }
-    if not entries:
-        return {
-            "inserted_count": 0,
-            "updated_count": 0,
-            "unchanged_count": 0,
-            "write_skipped_count": 0,
-        }
+    normalized_entries: Dict[str, Dict[str, Any]] = {}
+    expected_platform_ids: Dict[str, str] = {}
+    write_skipped_count = 0
+    excluded_platform_ids = {
+        _resolve_entry_platform_content_id(raw_content_id, raw_entry)
+        for raw_content_id, raw_entry in raw_entries.items()
+        if raw_entry.get("exclude_from_sync")
+        and _resolve_entry_platform_content_id(raw_content_id, raw_entry)
+    }
+    for raw_content_id, raw_entry in raw_entries.items():
+        platform_content_id = _resolve_entry_platform_content_id(raw_content_id, raw_entry)
+        if not platform_content_id:
+            continue
+        if platform_content_id in excluded_platform_ids:
+            continue
+        canonical_content_id, normalized_entry = _resolve_entry_canonical_identity(raw_entry)
+        normalized_entry["platform_content_id"] = platform_content_id
+        normalized_entries[canonical_content_id] = normalized_entry
+        expected_platform_ids[platform_content_id] = canonical_content_id
 
+    entries = normalized_entries
     canonical_ids = sorted(entries.keys())
     read_cursor = get_cursor(conn)
     try:
-        read_cursor.execute(
-            """
-            SELECT
-                content_id,
-                content_type,
-                title,
-                normalized_title,
-                normalized_authors,
-                status,
-                meta,
-                search_document
-            FROM contents
-            WHERE source = %s
-              AND content_id = ANY(%s)
-            """,
-            (OTT_CANONICAL_SOURCE, canonical_ids),
-        )
-        existing_rows = {str(row["content_id"]): dict(row) for row in read_cursor.fetchall()}
+        if canonical_ids:
+            read_cursor.execute(
+                """
+                SELECT
+                    content_id,
+                    content_type,
+                    title,
+                    normalized_title,
+                    normalized_authors,
+                    status,
+                    meta,
+                    search_document
+                FROM contents
+                WHERE source = %s
+                  AND content_id = ANY(%s)
+                """,
+                (OTT_CANONICAL_SOURCE, canonical_ids),
+            )
+            existing_rows = {str(row["content_id"]): dict(row) for row in read_cursor.fetchall()}
+        else:
+            existing_rows = {}
+
+        if canonical_ids:
+            read_cursor.execute(
+                """
+                SELECT
+                    canonical_content_id,
+                    platform_source,
+                    release_end_at,
+                    release_end_status,
+                    check_fail_count
+                FROM ott_schedule_watchlist
+                WHERE canonical_content_id = ANY(%s)
+                  AND platform_source = %s
+                """,
+                (canonical_ids, safe_source),
+            )
+            existing_watchlist = {
+                (str(row["canonical_content_id"]), str(row["platform_source"])): dict(row)
+                for row in read_cursor.fetchall()
+            }
+        else:
+            existing_watchlist = {}
 
         read_cursor.execute(
             """
             SELECT
                 canonical_content_id,
                 platform_source,
-                release_end_at,
-                release_end_status,
-                check_fail_count
-            FROM ott_schedule_watchlist
-            WHERE canonical_content_id = ANY(%s)
-              AND platform_source = %s
+                platform_content_id
+            FROM content_platform_links
+            WHERE platform_source = %s
             """,
-            (canonical_ids, safe_source),
+            (safe_source,),
         )
-        existing_watchlist = {
-            (str(row["canonical_content_id"]), str(row["platform_source"])): dict(row)
-            for row in read_cursor.fetchall()
-        }
+        existing_platform_rows = [dict(row) for row in read_cursor.fetchall()]
     finally:
         read_cursor.close()
+
+    seen_platform_ids = {
+        str(row.get("platform_content_id") or "").strip()
+        for row in existing_platform_rows
+        if str(row.get("platform_content_id") or "").strip()
+    }
+    filtered_entries: Dict[str, Dict[str, Any]] = {}
+    filtered_expected_platform_ids: Dict[str, str] = {}
+    preserved_platform_ids = set()
+    for canonical_content_id, entry in entries.items():
+        platform_content_id = str(entry.get("platform_content_id") or "").strip()
+        platform_url = _clean_text(entry.get("platform_url") or entry.get("content_url"))
+        if not platform_url:
+            write_skipped_count += 1
+            continue
+        if platform_content_id and platform_content_id in seen_platform_ids:
+            write_skipped_count += 1
+            preserved_platform_ids.add(platform_content_id)
+            continue
+        filtered_entries[canonical_content_id] = entry
+        if platform_content_id:
+            filtered_expected_platform_ids[platform_content_id] = canonical_content_id
+
+    entries = filtered_entries
+    expected_platform_ids = filtered_expected_platform_ids
+
+    if not entries and not excluded_platform_ids:
+        return {
+            "inserted_count": 0,
+            "updated_count": 0,
+            "unchanged_count": 0,
+            "write_skipped_count": write_skipped_count,
+        }
 
     canonical_rows = []
     link_rows = []
@@ -813,6 +1207,7 @@ def upsert_ott_source_entries(
         ).strip() or RESOLUTION_TRACKING
         next_check_at, check_fail_count, final_resolution_state = _compute_watchlist_state(
             existing_row=existing_watchlist.get((canonical_content_id, safe_source)),
+            release_start_at=_coerce_datetime(canonical_meta.get("ott", {}).get("release_start_at")),
             release_end_at=release_end_at,
             release_end_status=release_end_status,
             resolution_state=resolution_state,
@@ -833,8 +1228,64 @@ def upsert_ott_source_entries(
             )
         )
 
+    stale_pairs = sorted(
+        {
+            (str(row.get("canonical_content_id") or "").strip(), safe_source)
+            for row in existing_platform_rows
+            if str(row.get("canonical_content_id") or "").strip()
+            and (
+                str(row.get("platform_content_id") or "").strip() in excluded_platform_ids
+                or expected_platform_ids.get(str(row.get("platform_content_id") or "").strip())
+                != str(row.get("canonical_content_id") or "").strip()
+            )
+            and str(row.get("platform_content_id") or "").strip() not in preserved_platform_ids
+        }
+    )
+
     write_cursor = get_cursor(conn)
     try:
+        if stale_pairs:
+            write_cursor.executemany(
+                """
+                DELETE FROM ott_schedule_watchlist
+                WHERE canonical_content_id = %s
+                  AND platform_source = %s
+                """,
+                stale_pairs,
+            )
+            write_cursor.executemany(
+                """
+                DELETE FROM content_platform_links
+                WHERE canonical_content_id = %s
+                  AND platform_source = %s
+                """,
+                stale_pairs,
+            )
+            stale_canonical_ids = sorted({canonical_id for canonical_id, _ in stale_pairs if canonical_id})
+            if stale_canonical_ids:
+                write_cursor.execute(
+                    """
+                    DELETE FROM contents c
+                    WHERE c.source = %s
+                      AND c.content_type = 'ott'
+                      AND c.content_id = ANY(%s)
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM content_platform_links l
+                          WHERE l.canonical_content_id = c.content_id
+                      )
+                    """,
+                    (OTT_CANONICAL_SOURCE, stale_canonical_ids),
+                )
+
+        if not canonical_rows:
+            return {
+                "inserted_count": 0,
+                "updated_count": 0,
+                "unchanged_count": 0,
+                "write_skipped_count": write_skipped_count,
+            }
+
         psycopg2.extras.execute_values(
             write_cursor,
             UPSERT_CANONICAL_SQL,
@@ -861,5 +1312,5 @@ def upsert_ott_source_entries(
         "inserted_count": inserted_count,
         "updated_count": updated_count,
         "unchanged_count": unchanged_count,
-        "write_skipped_count": 0,
+        "write_skipped_count": write_skipped_count,
     }

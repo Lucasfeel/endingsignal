@@ -125,14 +125,14 @@ def test_browse_v3_novel_completed_respects_genre_groups(monkeypatch, client):
                 source="ridi",
                 status=contents_view.STATUS_COMPLETED,
                 content_type="novel",
-                meta={"attributes": {"genres": ["현판"]}, "common": {"authors": ["a"]}},
+                meta={"attributes": {"genres": ["fantasy"]}, "common": {"authors": ["a"]}},
             ),
             _row(
                 "romance-1",
                 source="ridi",
                 status=contents_view.STATUS_COMPLETED,
                 content_type="novel",
-                meta={"attributes": {"genres": ["로맨스"]}, "common": {"authors": ["b"]}},
+                meta={"attributes": {"genres": ["romance"]}, "common": {"authors": ["b"]}},
             ),
         ]],
     )
@@ -150,6 +150,8 @@ def test_browse_v3_novel_completed_respects_genre_groups(monkeypatch, client):
     assert ids == {"fantasy-1"}
     query, _ = fake_cursor.executed[0]
     assert "novel_genre_groups && %s::text[]" in query
+    card = payload["contents"][0]
+    assert card["display_meta"]["genres"] == ["fantasy"]
     assert fake_cursor.closed is True
 
 

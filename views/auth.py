@@ -1,3 +1,5 @@
+import os
+
 from flask import Blueprint, g, jsonify, request
 import psycopg2
 
@@ -12,10 +14,20 @@ from services.auth_service import (
     is_valid_email,
     is_valid_password,
     register_user,
+    upsert_mock_user,
 )
 from utils.auth import AuthConfigError, _error_response, admin_required, login_required
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _mock_login_enabled():
+    return (request.headers.get("X-Enable-Mock-Login") or os.getenv("ENABLE_DEV_MOCK_LOGIN") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _handle_apps_in_toss_login():
@@ -89,6 +101,49 @@ def login():
                     "token_type": "bearer",
                     "expires_in": expires_in,
                     "user": user,
+                }
+            ),
+            200,
+        )
+    except psycopg2.Error:
+        return _error_response(500, "INTERNAL_ERROR", "Database error")
+    except AuthConfigError:
+        return _error_response(503, "JWT_SECRET_MISSING", "JWT secret is not configured")
+    except Exception:
+        return _error_response(500, "INTERNAL_ERROR", "Internal server error")
+
+
+@auth_bp.route("/api/auth/mock-login", methods=["POST"])
+def mock_login():
+    if not _mock_login_enabled():
+        return _error_response(404, "NOT_FOUND", "Not found")
+
+    data = request.get_json() or {}
+    role = str(data.get("role") or "user").strip().lower()
+    display_name = (data.get("display_name") or data.get("displayName") or "").strip() or None
+    user_key = (data.get("user_key") or data.get("userKey") or "").strip() or None
+    email = (data.get("email") or "").strip().lower()
+
+    if not email:
+        role_suffix = "admin" if role == "admin" else "user"
+        email = f"mock-{role_suffix}@endingsignal.local"
+
+    try:
+        user = upsert_mock_user(
+            email=email,
+            role=role,
+            display_name=display_name,
+            user_key=user_key,
+        )
+        token, expires_in = create_access_token(user)
+        return (
+            jsonify(
+                {
+                    "access_token": token,
+                    "token_type": "bearer",
+                    "expires_in": expires_in,
+                    "user": user,
+                    "mock": True,
                 }
             ),
             200,

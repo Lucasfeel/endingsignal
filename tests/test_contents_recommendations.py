@@ -74,13 +74,13 @@ def client():
     return flask_app.test_client()
 
 
-def _make_row(content_id, source, content_type, updated_rank, *, status=None):
+def _make_row(content_id, source, content_type, updated_rank, *, status=None, meta=None):
     updated_at = datetime(2026, 1, 1, 0, 0, 0) + timedelta(minutes=updated_rank)
     return {
         "content_id": content_id,
         "title": f"title-{content_id}",
         "status": status or contents_view.STATUS_ONGOING,
-        "meta": {"common": {"authors": ["a"]}},
+        "meta": meta or {"common": {"authors": ["a"]}},
         "source": source,
         "content_type": content_type,
         "updated_at": updated_at,
@@ -225,3 +225,34 @@ def test_recommendations_v2_returns_compact_card_payload(monkeypatch, client):
     assert card["final_state_badge"] == contents_view.STATUS_HIATUS
     assert card["display_meta"]["authors"] == ["a"]
     assert card["cursor"] is not None
+
+
+def test_recommendations_v2_keeps_novel_genres_without_ott_normalization(monkeypatch, client):
+    _stub_contents_db(
+        monkeypatch,
+        {
+            "webtoon": [],
+            "novel": [
+                _make_row(
+                    "n-1",
+                    "ridi",
+                    "novel",
+                    5,
+                    meta={
+                        "common": {"authors": ["writer"]},
+                        "attributes": {"genres": ["fantasy", "판타지"]},
+                    },
+                )
+            ],
+            "ott": [],
+        },
+    )
+
+    response = client.get("/api/contents/recommendations_v2?limit=12")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["returned"] == 1
+    card = payload["contents"][0]
+    assert card["content_type"] == "novel"
+    assert card["display_meta"]["genres"] == ["fantasy", "판타지"]

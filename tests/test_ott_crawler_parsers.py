@@ -140,6 +140,47 @@ def test_coupang_parser_only_uses_weekly_tv_row():
     assert item["episode_hint"] == "NEW_EP_WEEKLY"
 
 
+def test_coupang_parser_accepts_normalized_weekly_tv_row_name():
+    crawler = CoupangPlayOttCrawler()
+    payload = {
+        "props": {
+            "pageProps": {
+                "feeds": [
+                    {
+                        "row_name": "TV 프로그램 / 매주 새 에피소드",
+                        "data": [
+                            {
+                                "id": "show-3",
+                                "type": "TITLE",
+                                "sub_type": "TVSHOW",
+                                "title": "쿠플 정규화 시리즈",
+                            }
+                        ],
+                    },
+                    {
+                        "row_name": "TV프로그램",
+                        "data": [
+                            {
+                                "id": "show-4",
+                                "type": "TITLE",
+                                "sub_type": "TVSHOW",
+                                "title": "토큰 부족 작품",
+                            }
+                        ],
+                    },
+                ]
+            }
+        }
+    }
+    html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload, ensure_ascii=False)}</script>'
+
+    parsed = crawler._parse_page(html)
+
+    assert len(parsed) == 1
+    item = next(iter(parsed.values()))
+    assert item["title"] == "쿠플 정규화 시리즈"
+
+
 def test_disney_parser_only_uses_series_sections():
     crawler = DisneyPlusOttCrawler()
     payload = {

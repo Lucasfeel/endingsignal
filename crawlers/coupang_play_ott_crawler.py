@@ -16,10 +16,12 @@ from .ott_parser_utils import parse_flexible_datetime
 
 COUPANG_CATALOG_URL = "https://www.coupangplay.com/catalog"
 COUPANG_WEEKLY_ROW_NAME = "TV프로그램, 매주 새 에피소드"
+COUPANG_WEEKLY_ROW_TOKENS = ("tv프로그램", "매주새에피소드")
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
     re.S,
 )
+_ROW_NAME_NORMALIZE_RE = re.compile(r"[\s,./·:]+")
 
 
 class CoupangPlayOttCrawler(CanonicalOttCrawler):
@@ -33,13 +35,24 @@ class CoupangPlayOttCrawler(CanonicalOttCrawler):
     def _build_content_url(content_id: str) -> str:
         return f"https://www.coupangplay.com/content/{content_id}"
 
+    @staticmethod
+    def _normalize_row_name(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        return _ROW_NAME_NORMALIZE_RE.sub("", text)
+
+    def _is_weekly_tv_row(self, feed: Dict[str, Any]) -> bool:
+        normalized_row_name = self._normalize_row_name(feed.get("row_name"))
+        if not normalized_row_name:
+            return False
+        return all(token in normalized_row_name for token in COUPANG_WEEKLY_ROW_TOKENS)
+
     def _iter_feed_items(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         feeds = payload.get("props", {}).get("pageProps", {}).get("feeds", [])
         results: List[Dict[str, Any]] = []
         for feed in feeds or []:
             if not isinstance(feed, dict):
                 continue
-            if str(feed.get("row_name") or "").strip() != COUPANG_WEEKLY_ROW_NAME:
+            if not self._is_weekly_tv_row(feed):
                 continue
             for item in feed.get("data") or []:
                 if isinstance(item, dict):

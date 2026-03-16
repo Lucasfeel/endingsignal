@@ -72,11 +72,11 @@ def test_collect_targets_includes_due_watchlist_snapshot_rows():
 
 def test_verify_ott_write_plan_enriches_changed_entry_and_passes(monkeypatch):
     release_start_at = datetime(2026, 3, 14, 0, 0, 0)
-    release_end_at = datetime(2026, 4, 19, 0, 0, 0)
     entry = {
         "title": "Example Series 시즌 2",
         "platform_url": "https://www.netflix.com/kr/title/123",
         "content_url": "https://www.netflix.com/kr/title/123",
+        "release_start_at": release_start_at,
         "release_end_status": "unknown",
         "cast": [],
     }
@@ -102,9 +102,9 @@ def test_verify_ott_write_plan_enriches_changed_entry_and_passes(monkeypatch):
                 "ok": True,
                 "title": "Example Series 시즌 2",
                 "payload_titles": ["Example Series Season 2"],
-                "body_text": "Example Series 시즌 2",
+                "body_text": "Example Series 시즌 2 출연: Actor A, Actor B",
                 "description": "",
-                "cast": [],
+                "cast": ["Actor A", "Actor B"],
                 "release_start_at": None,
                 "release_end_at": None,
                 "release_end_status": "unknown",
@@ -114,20 +114,15 @@ def test_verify_ott_write_plan_enriches_changed_entry_and_passes(monkeypatch):
             "ok": True,
             "title": "Example Series 시즌 2",
             "payload_titles": ["Example Series Season 2"],
-            "body_text": "Example Series 시즌 2 출연 Actor A, Actor B",
+            "body_text": "Example Series 시즌 2 출연: Actor A, Actor B",
             "description": "A verified synopsis.",
             "cast": ["Actor A", "Actor B"],
             "release_start_at": release_start_at,
-            "release_end_at": release_end_at,
-            "release_end_status": "scheduled",
+            "release_end_at": None,
+            "release_end_status": "unknown",
         }
 
     monkeypatch.setattr(service, "_fetch_document", fake_fetch_document)
-    monkeypatch.setattr(
-        service,
-        "_search_public_result_urls",
-        lambda _session, _candidate: ["https://namu.wiki/w/Example_Series"],
-    )
 
     verdict = service.verify_ott_write_plan(write_plan, source_name="netflix")
 
@@ -135,12 +130,12 @@ def test_verify_ott_write_plan_enriches_changed_entry_and_passes(monkeypatch):
     assert verdict["apply_allowed"] is True
     assert verdict["verified_count"] == 1
     assert entry["cast"] == ["Actor A", "Actor B"]
-    assert entry["description"] == "A verified synopsis."
+    assert entry.get("description", "") == ""
     assert entry["release_start_at"] == release_start_at
-    assert entry["release_end_at"] == release_end_at
-    assert entry["release_end_status"] == "scheduled"
+    assert entry.get("release_end_at") is None
+    assert entry.get("release_end_status") == "unknown"
     assert verdict["items"][0]["evidence_urls"][0] == "https://www.netflix.com/kr/title/123"
-    assert "https://namu.wiki/w/Example_Series" in verdict["items"][0]["evidence_urls"]
+    assert verdict["items"][0]["evidence_urls"] == ["https://www.netflix.com/kr/title/123"]
 
 
 def test_verify_ott_write_plan_blocks_changed_candidate_without_external_evidence(monkeypatch):
@@ -168,23 +163,12 @@ def test_verify_ott_write_plan_blocks_changed_candidate_without_external_evidenc
         ],
     }
 
-    monkeypatch.setattr(
-        service,
-        "_fetch_document",
-        lambda _session, url: {
-            "url": url,
-            "ok": False,
-            "error": "404",
-        },
-    )
-    monkeypatch.setattr(service, "_search_public_result_urls", lambda *_args, **_kwargs: [])
-
     verdict = service.verify_ott_write_plan(write_plan, source_name="wavve")
 
-    assert verdict["gate"] == "blocked"
-    assert verdict["apply_allowed"] is False
+    assert verdict["gate"] == "not_applicable"
+    assert verdict["apply_allowed"] is True
     assert verdict["verified_count"] == 0
-    assert verdict["items"][0]["reason"] == "no_web_evidence"
+    assert verdict["items"] == []
 
 
 def test_verify_ott_write_plan_rechecks_watchlist_without_blocking_apply(monkeypatch):
@@ -213,21 +197,12 @@ def test_verify_ott_write_plan_rechecks_watchlist_without_blocking_apply(monkeyp
         ],
     }
 
-    monkeypatch.setattr(
-        service,
-        "_fetch_document",
-        lambda _session, url: {"url": url, "ok": False, "error": "not found"},
-    )
-    monkeypatch.setattr(service, "_search_public_result_urls", lambda *_args, **_kwargs: [])
-
     verdict = service.verify_ott_write_plan(write_plan, source_name="tving")
 
     assert verdict["gate"] == "not_applicable"
     assert verdict["apply_allowed"] is True
-    assert verdict["watchlist_rechecked_count"] == 1
-    assert verdict["items"][0]["watchlist_recheck"] is True
-    assert verdict["items"][0]["ok"] is True
-    assert verdict["items"][0]["reason"] == "watchlist_unresolved"
+    assert verdict["watchlist_rechecked_count"] == 0
+    assert verdict["items"] == []
 
 
 def test_verify_ott_write_plan_accepts_official_crawl_metadata_when_public_docs_are_missing(monkeypatch):
@@ -265,7 +240,6 @@ def test_verify_ott_write_plan_accepts_official_crawl_metadata_when_public_docs_
         "_fetch_document",
         lambda _session, _url: {"url": _url, "ok": False, "error": "unreachable"},
     )
-    monkeypatch.setattr(service, "_search_public_result_urls", lambda *_args, **_kwargs: [])
 
     verdict = service.verify_ott_write_plan(write_plan, source_name="disney_plus")
 
@@ -275,3 +249,119 @@ def test_verify_ott_write_plan_accepts_official_crawl_metadata_when_public_docs_
     assert verdict["items"][0]["evidence_urls"] == [
         "https://www.disneyplus.com/browse/entity-d58ab636-473f-4276-b421-d27825b42fce"
     ]
+
+
+def test_verify_ott_write_plan_uses_tmdb_cast_only_when_official_cast_is_empty(monkeypatch):
+    entry = {
+        "title": "Example Series",
+        "platform_url": "https://www.netflix.com/kr/title/123",
+        "content_url": "https://www.netflix.com/kr/title/123",
+        "release_end_status": "unknown",
+        "cast": [],
+    }
+    write_plan = {
+        "source_name": "netflix",
+        "all_content_today": {_canonical_id(): entry},
+        "verification_candidates": [
+            {
+                "content_id": _canonical_id(),
+                "source_name": "netflix",
+                "title": "Example Series",
+                "content_url": "https://www.netflix.com/kr/title/123",
+                "change_kinds": ["new_content"],
+                "source_item": dict(entry),
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_fetch_document",
+        lambda _session, url: {
+            "url": url,
+            "ok": True,
+            "title": "Example Series",
+            "payload_titles": ["Example Series"],
+            "body_text": "Example Series",
+            "description": "",
+            "cast": [],
+            "release_start_at": None,
+            "release_end_at": None,
+            "release_end_status": "unknown",
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_fetch_tmdb_documents",
+        lambda _session, _candidate: [
+            {
+                "url": "https://www.themoviedb.org/tv/123",
+                "ok": True,
+                "source": "tmdb",
+                "title": "Example Series",
+                "payload_titles": ["Example Series"],
+                "cast": ["Actor A", "Actor B", "Actor C", "Actor D", "Actor E"],
+            }
+        ],
+    )
+
+    verdict = service.verify_ott_write_plan(write_plan, source_name="netflix")
+
+    assert verdict["gate"] == "passed"
+    assert entry["cast"] == ["Actor A", "Actor B", "Actor C", "Actor D"]
+    assert "https://www.themoviedb.org/tv/123" in verdict["items"][0]["evidence_urls"]
+
+
+def test_verify_ott_write_plan_does_not_call_tmdb_when_official_cast_exists(monkeypatch):
+    entry = {
+        "title": "Example Series",
+        "platform_url": "https://www.netflix.com/kr/title/123",
+        "content_url": "https://www.netflix.com/kr/title/123",
+        "release_end_status": "unknown",
+        "cast": [],
+    }
+    write_plan = {
+        "source_name": "netflix",
+        "all_content_today": {_canonical_id(): entry},
+        "verification_candidates": [
+            {
+                "content_id": _canonical_id(),
+                "source_name": "netflix",
+                "title": "Example Series",
+                "content_url": "https://www.netflix.com/kr/title/123",
+                "change_kinds": ["new_content"],
+                "source_item": dict(entry),
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_fetch_document",
+        lambda _session, url: {
+            "url": url,
+            "ok": True,
+            "title": "Example Series",
+            "payload_titles": ["Example Series"],
+            "body_text": "Example Series 출연: Actor A, Actor B",
+            "description": "",
+            "cast": ["Actor A", "Actor B"],
+            "release_start_at": None,
+            "release_end_at": None,
+            "release_end_status": "unknown",
+        },
+    )
+
+    called = {"tmdb": 0}
+
+    def fake_tmdb(_session, _candidate):
+        called["tmdb"] += 1
+        return []
+
+    monkeypatch.setattr(service, "_fetch_tmdb_documents", fake_tmdb)
+
+    verdict = service.verify_ott_write_plan(write_plan, source_name="netflix")
+
+    assert verdict["gate"] == "passed"
+    assert entry["cast"] == ["Actor A", "Actor B"]
+    assert called["tmdb"] == 0

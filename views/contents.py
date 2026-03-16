@@ -383,13 +383,13 @@ def _resolve_row_for_display(row, *, requested_sources=None):
     return coerced
 
 
-def _extract_display_meta(meta):
+def _extract_display_meta(meta, *, content_type=None):
     safe_meta = normalize_meta(meta)
     attrs = safe_get_dict(safe_meta.get("attributes"))
     common = safe_get_dict(safe_meta.get("common"))
     ott_meta = safe_get_dict(safe_meta.get("ott"))
     content_url = (common.get("content_url") or common.get("url") or "") if isinstance(common, dict) else ""
-    genres = normalize_ott_genres(
+    raw_genres = (
         attrs.get("genres")
         or attrs.get("genre")
         or common.get("genres")
@@ -398,11 +398,18 @@ def _extract_display_meta(meta):
         or safe_meta.get("genre")
         or ott_meta.get("genres")
         or ott_meta.get("genre")
-        or ott_meta.get("description")
-        or ott_meta.get("raw_schedule_note")
-        or ott_meta.get("episode_hint"),
-        platform_source=ott_meta.get("display_source") or common.get("primary_source"),
     )
+    normalized_content_type = str(content_type or "").strip().lower()
+    if normalized_content_type == "ott":
+        genres = normalize_ott_genres(
+            raw_genres
+            or ott_meta.get("description")
+            or ott_meta.get("raw_schedule_note")
+            or ott_meta.get("episode_hint"),
+            platform_source=ott_meta.get("display_source") or common.get("primary_source"),
+        )
+    else:
+        genres = _normalize_string_list(raw_genres)
     authors = _limit_display_people(common.get("authors") or ott_meta.get("cast"))
     return {
         "authors": authors,
@@ -425,7 +432,10 @@ def _extract_display_meta(meta):
 
 def _serialize_card_payload(row, *, row_is_resolved=False):
     coerced = row if row_is_resolved else _resolve_row_for_display(row)
-    display_meta = _extract_display_meta(coerced.get("meta"))
+    display_meta = _extract_display_meta(
+        coerced.get("meta"),
+        content_type=coerced.get("content_type"),
+    )
     status = coerced.get("status")
     return {
         "content_id": coerced.get("content_id"),
