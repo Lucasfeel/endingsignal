@@ -41,7 +41,8 @@ def should_run_db_init():
 
 def build_db_init_env():
     env = os.environ.copy()
-    if "DB_INIT_ENABLE_BACKFILL" in env:
+    explicit_backfill = env.get("DB_INIT_ENABLE_BACKFILL")
+    if explicit_backfill is not None and str(explicit_backfill).strip():
         return env
 
     env["DB_INIT_ENABLE_BACKFILL"] = "1" if is_truthy(env.get("RUN_DB_INIT_WITH_BACKFILL")) else "0"

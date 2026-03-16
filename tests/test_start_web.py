@@ -63,6 +63,15 @@ def test_build_db_init_env_preserves_explicit_backfill_setting(monkeypatch):
     assert env["DB_INIT_ENABLE_BACKFILL"] == "1"
 
 
+def test_build_db_init_env_normalizes_blank_backfill_setting(monkeypatch):
+    monkeypatch.setenv("DB_INIT_ENABLE_BACKFILL", "")
+    monkeypatch.delenv("RUN_DB_INIT_WITH_BACKFILL", raising=False)
+
+    env = start_web.build_db_init_env()
+
+    assert env["DB_INIT_ENABLE_BACKFILL"] == "0"
+
+
 def test_build_gunicorn_command_uses_port_default(monkeypatch):
     monkeypatch.delenv("PORT", raising=False)
     monkeypatch.delenv("GUNICORN_BIND", raising=False)

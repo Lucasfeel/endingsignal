@@ -88,7 +88,7 @@ def main():
             os.environ.get("DB_INIT_STRICT_MAINTENANCE", "false").strip() or "false"
         )
         enable_backfill = (
-            os.environ.get("DB_INIT_ENABLE_BACKFILL", "true").strip() or "true"
+            os.environ.get("DB_INIT_ENABLE_BACKFILL", "false").strip() or "false"
         )
         print(
             "[INFO] DB init settings: "

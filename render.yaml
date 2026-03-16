@@ -1,56 +1,44 @@
-# Render Blueprint for Apps-in-Toss QA against the existing Render project DB.
-# This blueprint creates Toss-specific services and reuses the existing
-# "endingsignal db" Postgres instance in the same Render workspace/project.
-# If Render asks you to rename either service because the name is already taken,
-# update the matching onrender.com URL in CORS_ALLOW_ORIGINS and VITE_API_BASE_URL.
+# Render Blueprint for the main endingsignal web service.
+# This matches the current deployment shape: one Docker-based Flask service
+# that serves the public web shell and API from the same app.
+#
+# Note:
+# - This blueprint does not provision a new database. Keep using the existing
+#   Render Postgres instance and provide DATABASE_URL from the Dashboard.
+# - If your live Render service already uses a different name, change `name`
+#   below before applying the Blueprint to avoid creating a duplicate service.
 
 services:
   - type: web
-    name: lucas-endingsignal-toss-api
+    name: endingsignal-web
     runtime: docker
-    branch: main
-    region: oregon
     plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /healthz
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: endingsignal db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: DB_APPLICATION_NAME
-        value: lucas-endingsignal-toss-api
-      - key: AIT_LOGIN_MOCK_ENABLED
-        value: "1"
-      - key: AIT_MESSAGE_MOCK_ENABLED
-        value: "1"
+        value: endingsignal-web
       - key: DB_POOL_ENABLED
         value: "1"
       - key: DB_POOL_MINCONN
         value: "1"
       - key: DB_POOL_MAXCONN
         value: "4"
-      - key: CORS_ALLOW_ORIGINS
-        value: '["http://localhost:5173","https://lucas-endingsignal-toss-miniapp.onrender.com"]'
-
-  - type: web
-    name: lucas-endingsignal-toss-miniapp
-    runtime: static
-    branch: main
-    rootDir: miniapp
-    buildCommand: npm ci && npm run web:build
-    staticPublishPath: dist
-    envVars:
-      - key: VITE_API_BASE_URL
-        value: https://lucas-endingsignal-toss-api.onrender.com
-      - key: VITE_ENABLE_MOCK_LOGIN
-        value: "true"
-      - key: VITE_MOCK_USER_KEY
-        value: "443731104"
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+      - key: DB_INIT_ENABLE_BACKFILL
+        value: "0"
+      - key: DB_INIT_STRICT_MAINTENANCE
+        value: "false"
+      - key: SENTRY_API_DSN
+        sync: false
+      - key: SENTRY_FRONTEND_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
