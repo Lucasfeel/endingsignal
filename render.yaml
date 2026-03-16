@@ -1,18 +1,18 @@
-# Render Blueprint for the main endingsignal web service.
+# Render Blueprint reference for the main endingsignal production service.
 # This matches the current deployment shape: one Docker-based Flask service
 # that serves the public web shell and API from the same app.
 #
 # Note:
 # - This blueprint does not provision a new database. Keep using the existing
 #   Render Postgres instance and provide DATABASE_URL from the Dashboard.
-# - If your live Render service already uses a different name, change `name`
-#   below before applying the Blueprint to avoid creating a duplicate service.
+# - The live service currently uses the Render service name `endingsignal`.
+# - Dashboard-only settings can still drift if they are edited outside this file.
 
 services:
   - type: web
-    name: endingsignal-web
+    name: endingsignal
     runtime: docker
-    plan: free
+    plan: starter
     region: oregon
     branch: main
     autoDeploy: true
@@ -32,6 +32,8 @@ services:
         value: "1"
       - key: DB_POOL_MAXCONN
         value: "4"
+      - key: SKIP_DB_INIT
+        value: "1"
       - key: DB_INIT_ENABLE_BACKFILL
         value: "0"
       - key: DB_INIT_STRICT_MAINTENANCE
