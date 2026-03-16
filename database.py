@@ -35,6 +35,7 @@ DEFAULT_DB_INIT_BACKFILL_MAX_BATCHES = 0
 DEFAULT_DB_INIT_BACKFILL_MAX_SECONDS = 0.0
 DEFAULT_DB_INIT_BACKFILL_PROGRESS_EVERY = 25
 DEFAULT_DB_INIT_STRICT_MAINTENANCE = False
+DEFAULT_DB_INIT_ENABLE_BACKFILL = True
 PG_TIMEOUT_LITERAL_PATTERN = re.compile(r"^\d+(?:ms|s|min|h|d)?$", re.IGNORECASE)
 DEFAULT_DB_POOL_ENABLED = True
 DEFAULT_DB_POOL_MINCONN = 1
@@ -438,6 +439,10 @@ def _read_db_init_settings():
             "DB_INIT_BACKFILL_PROGRESS_EVERY",
             DEFAULT_DB_INIT_BACKFILL_PROGRESS_EVERY,
             minimum=0,
+        ),
+        "enable_backfill": _read_bool_env(
+            "DB_INIT_ENABLE_BACKFILL",
+            DEFAULT_DB_INIT_ENABLE_BACKFILL,
         ),
         "strict_maintenance": _read_bool_env(
             "DB_INIT_STRICT_MAINTENANCE",
@@ -2530,62 +2535,68 @@ def setup_database_standalone():
         conn.commit()
         print("LOG: [DB Setup] Remaining schema phase committed.")
 
-        current_step = "contents backfill and hardening"
-        print("LOG: [DB Setup] Starting contents backfill/hardening phase...")
-        run_contents_backfill_in_batches(conn, cursor, settings=settings)
-        _backfill_novel_genre_columns_in_batches(conn, cursor, settings=settings)
-        cursor.execute(
-            """
-            UPDATE contents
-            SET novel_genre_groups = '{}'::text[]
-            WHERE novel_genre_groups IS NULL
-            """
-        )
-        conn.commit()
-        ensure_column_default_with_retry(
-            conn,
-            cursor,
-            "contents",
-            "novel_genre_groups",
-            "'{}'::text[]",
-            settings=settings,
-            relation="contents",
-        )
-        for column_name in ("is_deleted", "created_at", "updated_at"):
-            try:
-                ensure_column_not_null_with_retry(
-                    conn,
-                    cursor,
-                    "contents",
-                    column_name,
-                    settings=settings,
-                    relation="contents",
-                )
-            except psycopg2.Error as exc:
-                if is_lock_timeout_error(exc) or is_statement_timeout_error(exc):
-                    if settings["strict_maintenance"]:
-                        raise
-                    print(
-                        "WARN: [DB Setup] Could not harden NOT NULL for "
-                        f"contents.{column_name}: {exc}. "
-                        "Continuing because DB_INIT_STRICT_MAINTENANCE=false.",
-                        file=sys.stderr,
+        if settings["enable_backfill"]:
+            current_step = "contents backfill and hardening"
+            print("LOG: [DB Setup] Starting contents backfill/hardening phase...")
+            run_contents_backfill_in_batches(conn, cursor, settings=settings)
+            _backfill_novel_genre_columns_in_batches(conn, cursor, settings=settings)
+            cursor.execute(
+                """
+                UPDATE contents
+                SET novel_genre_groups = '{}'::text[]
+                WHERE novel_genre_groups IS NULL
+                """
+            )
+            conn.commit()
+            ensure_column_default_with_retry(
+                conn,
+                cursor,
+                "contents",
+                "novel_genre_groups",
+                "'{}'::text[]",
+                settings=settings,
+                relation="contents",
+            )
+            for column_name in ("is_deleted", "created_at", "updated_at"):
+                try:
+                    ensure_column_not_null_with_retry(
+                        conn,
+                        cursor,
+                        "contents",
+                        column_name,
+                        settings=settings,
+                        relation="contents",
                     )
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    continue
-                raise
-        ensure_column_not_null_with_retry(
-            conn,
-            cursor,
-            "contents",
-            "novel_genre_groups",
-            settings=settings,
-            relation="contents",
-        )
-        print("LOG: [DB Setup] Contents backfill/hardening phase complete.")
+                except psycopg2.Error as exc:
+                    if is_lock_timeout_error(exc) or is_statement_timeout_error(exc):
+                        if settings["strict_maintenance"]:
+                            raise
+                        print(
+                            "WARN: [DB Setup] Could not harden NOT NULL for "
+                            f"contents.{column_name}: {exc}. "
+                            "Continuing because DB_INIT_STRICT_MAINTENANCE=false.",
+                            file=sys.stderr,
+                        )
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        continue
+                    raise
+            ensure_column_not_null_with_retry(
+                conn,
+                cursor,
+                "contents",
+                "novel_genre_groups",
+                settings=settings,
+                relation="contents",
+            )
+            print("LOG: [DB Setup] Contents backfill/hardening phase complete.")
+        else:
+            print(
+                "LOG: [DB Setup] Skipping contents backfill/hardening phase "
+                "(DB_INIT_ENABLE_BACKFILL=false)."
+            )
 
         current_step = "maintenance"
         try:

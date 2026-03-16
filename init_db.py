@@ -87,6 +87,9 @@ def main():
         strict_maintenance = (
             os.environ.get("DB_INIT_STRICT_MAINTENANCE", "false").strip() or "false"
         )
+        enable_backfill = (
+            os.environ.get("DB_INIT_ENABLE_BACKFILL", "true").strip() or "true"
+        )
         print(
             "[INFO] DB init settings: "
             f"DB_INIT_LOCK_TIMEOUT={lock_timeout}, "
@@ -98,6 +101,7 @@ def main():
             f"DB_INIT_STALE_DDL_CLEANUP_ACTION={stale_ddl_cleanup_action}, "
             f"DB_INIT_BACKFILL_BATCH_SIZE={backfill_batch_size}, "
             f"DB_INIT_SEARCH_DOCUMENT_BACKFILL_BATCH_SIZE={search_document_backfill_batch_size}, "
+            f"DB_INIT_ENABLE_BACKFILL={enable_backfill}, "
             f"DB_INIT_STRICT_MAINTENANCE={strict_maintenance}"
         )
 

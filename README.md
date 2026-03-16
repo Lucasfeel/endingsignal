@@ -53,14 +53,15 @@
   docker compose --profile with-db up --build
   ```
 
-- Startup behavior:
-  - `scripts/start_web.py` runs `init_db.py` only when DB config exists (`DATABASE_URL` or all `DB_*` vars).
-  - Set `SKIP_DB_INIT=1` to force skip.
-  - Set `RUN_DB_INIT=1` to force run.
-  - Session safety env vars (applied to all DB connections created via `database._create_connection()`: web app, crawlers, scripts, init):
-    - `DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT` (recommended: `60s` to `300s`): PostgreSQL kills sessions that stay `idle in transaction`, preventing stale crawler transactions from blocking DDL.
-    - `DB_STATEMENT_TIMEOUT` (optional, recommended for production): global query timeout per session.
-    - `DB_APPLICATION_NAME` (optional): sets PostgreSQL `application_name` for easier lock diagnostics.
+  - Startup behavior:
+    - `scripts/start_web.py` runs `init_db.py` only when DB config exists (`DATABASE_URL` or all `DB_*` vars).
+    - Set `SKIP_DB_INIT=1` to force skip.
+    - Set `RUN_DB_INIT=1` to force run.
+    - `scripts/start_web.py` disables the heavy contents backfill/hardening phase by default during app startup. Set `RUN_DB_INIT_WITH_BACKFILL=1` or `DB_INIT_ENABLE_BACKFILL=1` only when you intentionally want startup to include that work.
+    - Session safety env vars (applied to all DB connections created via `database._create_connection()`: web app, crawlers, scripts, init):
+      - `DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT` (recommended: `60s` to `300s`): PostgreSQL kills sessions that stay `idle in transaction`, preventing stale crawler transactions from blocking DDL.
+      - `DB_STATEMENT_TIMEOUT` (optional, recommended for production): global query timeout per session.
+      - `DB_APPLICATION_NAME` (optional): sets PostgreSQL `application_name` for easier lock diagnostics.
   - DB init lock-safety env vars:
     - `DB_INIT_LOCK_TIMEOUT` (default: `5s`): session `lock_timeout` used by `init_db.py`/`database.setup_database_standalone()`.
     - `DB_INIT_STATEMENT_TIMEOUT` (default: unset): optional session `statement_timeout` for DB init only.
@@ -70,6 +71,7 @@
     - `DB_INIT_STALE_DDL_MAX_AGE_SECONDS` (default: `300`): stale DDL waiter age threshold for cleanup.
     - `DB_INIT_STALE_DDL_CLEANUP_ACTION` (default: `cancel`): stale waiter cleanup mode (`cancel` or `terminate`).
     - `DB_INIT_BACKFILL_BATCH_SIZE` (default: `20000`): batch size for `contents` null-fill backfills.
+    - `DB_INIT_ENABLE_BACKFILL` (default: `true` for direct `init_db.py` runs, `false` for `scripts/start_web.py`): enables the contents backfill/hardening phase.
     - `DB_INIT_STRICT_MAINTENANCE` (default: `false`): if `false`, lock/statement timeout during maintenance/backfill logs WARN and continues.
   - Web bind target is `0.0.0.0:${PORT}` (`PORT` default: `5000`).
   - Health check endpoint: `GET /healthz`.

@@ -39,9 +39,22 @@ def should_run_db_init():
     return has_database_config()
 
 
+def build_db_init_env():
+    env = os.environ.copy()
+    if "DB_INIT_ENABLE_BACKFILL" in env:
+        return env
+
+    env["DB_INIT_ENABLE_BACKFILL"] = "1" if is_truthy(env.get("RUN_DB_INIT_WITH_BACKFILL")) else "0"
+    return env
+
+
 def run_db_init():
-    print("[startup] Running database init: python init_db.py")
-    subprocess.run([sys.executable, "init_db.py"], check=True)
+    init_env = build_db_init_env()
+    print(
+        "[startup] Running database init: python init_db.py "
+        f"(DB_INIT_ENABLE_BACKFILL={init_env.get('DB_INIT_ENABLE_BACKFILL', '')})"
+    )
+    subprocess.run([sys.executable, "init_db.py"], check=True, env=init_env)
 
 
 def resolve_bind():

@@ -36,6 +36,33 @@ def test_should_run_db_init_respects_skip_flag(monkeypatch):
     assert start_web.should_run_db_init() is False
 
 
+def test_build_db_init_env_defaults_backfill_off(monkeypatch):
+    monkeypatch.delenv("DB_INIT_ENABLE_BACKFILL", raising=False)
+    monkeypatch.delenv("RUN_DB_INIT_WITH_BACKFILL", raising=False)
+
+    env = start_web.build_db_init_env()
+
+    assert env["DB_INIT_ENABLE_BACKFILL"] == "0"
+
+
+def test_build_db_init_env_allows_backfill_opt_in(monkeypatch):
+    monkeypatch.delenv("DB_INIT_ENABLE_BACKFILL", raising=False)
+    monkeypatch.setenv("RUN_DB_INIT_WITH_BACKFILL", "1")
+
+    env = start_web.build_db_init_env()
+
+    assert env["DB_INIT_ENABLE_BACKFILL"] == "1"
+
+
+def test_build_db_init_env_preserves_explicit_backfill_setting(monkeypatch):
+    monkeypatch.setenv("DB_INIT_ENABLE_BACKFILL", "1")
+    monkeypatch.delenv("RUN_DB_INIT_WITH_BACKFILL", raising=False)
+
+    env = start_web.build_db_init_env()
+
+    assert env["DB_INIT_ENABLE_BACKFILL"] == "1"
+
+
 def test_build_gunicorn_command_uses_port_default(monkeypatch):
     monkeypatch.delenv("PORT", raising=False)
     monkeypatch.delenv("GUNICORN_BIND", raising=False)
