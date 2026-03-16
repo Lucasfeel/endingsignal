@@ -4,6 +4,7 @@ from flask import Flask, render_template
 from flask_compress import Compress
 from flask_cors import CORS
 from dotenv import load_dotenv
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -25,6 +26,7 @@ from views.subscriptions import subscriptions_bp
 init_sentry("endingsignal-api", "SENTRY_API_DSN", "SENTRY_DSN")
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1, x_proto=1)  # type: ignore[assignment]
 Compress(app)
 if config.CORS_ALLOW_ORIGINS:
     CORS(
