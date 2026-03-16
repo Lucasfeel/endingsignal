@@ -18,19 +18,24 @@ This keeps the initial rollout focused on a small custom event set.
 
 Common context added to every tracked public event:
 
-- `active_tab`
-- `active_filter`
+- `entry_tab`
+- `entry_filter`
 - `route_kind`
 - `is_authenticated`
 - `auth_provider`
 - `user_role`
-- `selected_sources`
-- `selected_source_count`
+- `entry_sources`
+- `entry_source_count`
 - `search_input_length`
 - `webtoon_filter`
 - `novel_filter`
 - `ott_filter`
 - `my_view_mode`
+
+Naming note:
+
+- `route_kind` describes the current UI surface, such as `search`, `browse`, or `content`.
+- `entry_*` describes the browse context the user came from, which is often more useful than calling that state `active_*` when the current route is an overlay or detail page.
 
 | PostHog event | Source UI event | Properties |
 | --- | --- | --- |

@@ -71,9 +71,11 @@ describe("public posthog telemetry", () => {
     });
 
     expect(properties).toEqual({
-      active_filter: "anime",
-      active_tab: "ott",
       auth_provider: "",
+      entry_filter: "anime",
+      entry_source_count: 2,
+      entry_sources: ["netflix", "laftel"],
+      entry_tab: "ott",
       authors_count: 4,
       content_status: "ongoing",
       content_source: "netflix",
@@ -92,8 +94,6 @@ describe("public posthog telemetry", () => {
       release_end_status: "",
       route_kind: "browse",
       search_input_length: 0,
-      selected_source_count: 2,
-      selected_sources: ["netflix", "laftel"],
       surface: "public_web",
       trigger: "content_card",
       ui_event_name: "content_opened",
@@ -174,7 +174,10 @@ describe("public posthog telemetry", () => {
     expect(captureMock).toHaveBeenCalledWith(
       "public_search_submitted",
       expect.objectContaining({
-        active_tab: "webtoon",
+        entry_filter: "all",
+        entry_source_count: 0,
+        entry_sources: [],
+        entry_tab: "webtoon",
         from_tab: "webtoon",
         path: "/search",
         query_length: 6,

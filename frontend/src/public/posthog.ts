@@ -40,9 +40,11 @@ function asStringArray(value: unknown) {
 
 function buildCommonPublicProperties(event: UiTelemetryEvent) {
   return {
-    active_filter: asString(event.payload?.activeFilter),
-    active_tab: asString(event.payload?.activeTab),
     auth_provider: asString(event.payload?.authProvider),
+    entry_filter: asString(event.payload?.activeFilter),
+    entry_source_count: asNumber(event.payload?.selectedSourceCount),
+    entry_sources: asStringArray(event.payload?.selectedSources),
+    entry_tab: asString(event.payload?.activeTab),
     is_authenticated: asBoolean(event.payload?.isAuthenticated),
     my_view_mode: asString(event.payload?.myViewMode),
     novel_filter: asString(event.payload?.novelFilter),
@@ -50,8 +52,6 @@ function buildCommonPublicProperties(event: UiTelemetryEvent) {
     path: event.path,
     route_kind: asString(event.payload?.routeKind),
     search_input_length: asNumber(event.payload?.searchInputLength),
-    selected_source_count: asNumber(event.payload?.selectedSourceCount),
-    selected_sources: asStringArray(event.payload?.selectedSources),
     surface: "public_web",
     ui_event_name: event.name,
     user_role: asString(event.payload?.userRole),
